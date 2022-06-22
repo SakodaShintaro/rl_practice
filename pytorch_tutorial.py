@@ -17,7 +17,6 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 
 env = gym.make("CartPole-v0").unwrapped
-plt.ion()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -98,7 +97,6 @@ plt.figure()
 screen = get_screen().cpu().squeeze(0).permute((1, 2, 0)).numpy()
 plt.imshow(screen, interpolation="none")
 plt.title("Example extracted screen")
-# plt.show()
 
 BATCH_SIZE = 128
 GAMMA = 0.999
@@ -153,7 +151,7 @@ def plot_durations():
         means = torch.cat((torch.zeros(99), means))
         plt.plot(means.numpy())
 
-    plt.pause(0.001)
+    plt.savefig(f"images/durations.png", bbox_inches="tight", pad_inches=0.05)
 
 
 def optimize_model():
@@ -214,7 +212,4 @@ for i_episode in range(num_episodes):
         target_net.load_state_dict(policy_net.state_dict())
 
 print("Complete")
-env.render()
 env.close()
-plt.ioff()
-plt.show()
