@@ -16,7 +16,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-env = gym.make("CartPole-v0").unwrapped
+env = gym.make("CartPole-v1")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -89,14 +89,15 @@ def get_screen():
     screen = np.ascontiguousarray(screen, dtype=np.float32) / 255
     screen = torch.from_numpy(screen)
     screen = resize(screen).unsqueeze(0)
+    plot_screen = screen.cpu().squeeze(0).permute((1, 2, 0)).numpy()
+    plt.imshow(plot_screen, interpolation="none")
+    plt.title("Example extracted screen")
+    plt.savefig(f"images/screen.png", bbox_inches="tight", pad_inches=0.05)
+    plt.cla()
     return screen
 
 
 env.reset()
-plt.figure()
-screen = get_screen().cpu().squeeze(0).permute((1, 2, 0)).numpy()
-plt.imshow(screen, interpolation="none")
-plt.title("Example extracted screen")
 
 BATCH_SIZE = 128
 GAMMA = 0.999
@@ -152,6 +153,7 @@ def plot_durations():
         plt.plot(means.numpy())
 
     plt.savefig(f"images/durations.png", bbox_inches="tight", pad_inches=0.05)
+    plt.cla()
 
 
 def optimize_model():
