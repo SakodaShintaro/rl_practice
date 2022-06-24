@@ -9,9 +9,9 @@ from itertools import count
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from observer import Observer
 from tqdm import tqdm
+from model import DQN
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,32 +33,6 @@ class ReplayMemory(object):
         return len(self.memory)
 
 
-class DQN(nn.Module):
-    def __init__(self, h, w, outputs):
-        super(DQN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2)
-        self.bn2 = nn.BatchNorm2d(32)
-        self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2)
-        self.bn3 = nn.BatchNorm2d(32)
-
-        def conv2d_size_out(size, kernel_size=5, stride=2):
-            return (size - (kernel_size - 1) - 1) // stride + 1
-
-        convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(w)))
-        convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(h)))
-        linear_input_size = convh * convw * 32
-        self.head = nn.Linear(linear_input_size, outputs)
-
-    def forward(self, x):
-        x = x.to(device)
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
-        return self.head(x.view(x.size(0), -1))
-
-
 BATCH_SIZE = 128
 GAMMA = 0.999
 EPS_START = 0.9
@@ -68,7 +42,7 @@ TARGET_UPDATE = 10
 
 observer = Observer()
 
-init_screen = observer.get_screen()
+init_screen = observer.get_curr_screen()
 _, _, screen_height, screen_width = init_screen.shape
 
 n_actions = observer.get_n_actions()
@@ -149,23 +123,19 @@ def optimize_model():
 num_episodes = 1000
 for i_episode in tqdm(range(num_episodes)):
     observer.env.reset()
-    last_screen = observer.get_screen()
-    current_screen = observer.get_screen()
-    state = current_screen - last_screen
+    curr_state = observer.get_state()
     for t in count():
-        action = select_action(state)
-        _, reward, done, _ = observer.env.step(action.item())
+        action = select_action(curr_state)
+        _, reward, done, _ = observer.step(action.item())
         reward = torch.tensor([reward], device=device)
-        last_screen = current_screen
-        current_screen = observer.get_screen()
         if not done:
-            next_state = current_screen - last_screen
+            next_state = observer.get_state()
         else:
             next_state = None
 
-        memory.push(state, action, next_state, reward)
+        memory.push(curr_state, action, next_state, reward)
 
-        state = next_state
+        curr_state = next_state
 
         optimize_model()
         if done:
