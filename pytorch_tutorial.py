@@ -1,22 +1,18 @@
 # Sutra copying https://pytorch.org/docs/stable/generated/torch.gather.html
 
-import gym
 import math
 import random
-import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
 from collections import namedtuple, deque
 from itertools import count
-from PIL import Image
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchvision.transforms as T
+from observer import Observer
+from tqdm import tqdm
 
-env = gym.make("CartPole-v1")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -63,42 +59,6 @@ class DQN(nn.Module):
         return self.head(x.view(x.size(0), -1))
 
 
-resize = T.Compose([T.ToPILImage(),
-                    T.Resize(40, interpolation=Image.CUBIC),
-                    T.ToTensor()])
-
-
-def get_cart_location(screen_width):
-    world_width = env.x_threshold * 2
-    scale = screen_width / world_width
-    return int(env.state[0] * scale + screen_width / 2.0)
-
-
-def get_screen():
-    screen = env.render(mode="rgb_array").transpose((2, 0, 1))
-    _, screen_height, screen_width = screen.shape
-    view_width = int(screen_width * 0.6)
-    cart_location = get_cart_location(screen_width)
-    if cart_location < view_width // 2:
-        slice_range = slice(view_width)
-    elif cart_location > (screen_width - view_width // 2):
-        slice_range = slice(-view_width, None)
-    else:
-        slice_range = slice(cart_location - view_width // 2, cart_location + view_width // 2)
-    screen = screen[:, :, slice_range]
-    screen = np.ascontiguousarray(screen, dtype=np.float32) / 255
-    screen = torch.from_numpy(screen)
-    screen = resize(screen).unsqueeze(0)
-    plot_screen = screen.cpu().squeeze(0).permute((1, 2, 0)).numpy()
-    plt.imshow(plot_screen, interpolation="none")
-    plt.title("Example extracted screen")
-    plt.savefig(f"images/screen.png", bbox_inches="tight", pad_inches=0.05)
-    plt.cla()
-    return screen
-
-
-env.reset()
-
 BATCH_SIZE = 128
 GAMMA = 0.999
 EPS_START = 0.9
@@ -106,10 +66,12 @@ EPS_END = 0.05
 EPS_DECAY = 200
 TARGET_UPDATE = 10
 
-init_screen = get_screen()
+observer = Observer()
+
+init_screen = observer.get_screen()
 _, _, screen_height, screen_width = init_screen.shape
 
-n_actions = env.action_space.n
+n_actions = observer.get_n_actions()
 
 policy_net = DQN(screen_height, screen_width, n_actions).to(device)
 target_net = DQN(screen_height, screen_width, n_actions).to(device)
@@ -185,17 +147,17 @@ def optimize_model():
 
 
 num_episodes = 1000
-for i_episode in range(num_episodes):
-    env.reset()
-    last_screen = get_screen()
-    current_screen = get_screen()
+for i_episode in tqdm(range(num_episodes)):
+    observer.env.reset()
+    last_screen = observer.get_screen()
+    current_screen = observer.get_screen()
     state = current_screen - last_screen
     for t in count():
         action = select_action(state)
-        _, reward, done, _ = env.step(action.item())
+        _, reward, done, _ = observer.env.step(action.item())
         reward = torch.tensor([reward], device=device)
         last_screen = current_screen
-        current_screen = get_screen()
+        current_screen = observer.get_screen()
         if not done:
             next_state = current_screen - last_screen
         else:
@@ -214,4 +176,4 @@ for i_episode in range(num_episodes):
         target_net.load_state_dict(policy_net.state_dict())
 
 print("Complete")
-env.close()
+observer.env.close()
