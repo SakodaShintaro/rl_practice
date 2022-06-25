@@ -13,9 +13,10 @@ RUN apt-get install -y vim
 RUN apt-get install -y python3
 RUN apt-get install -y python3-pip
 RUN apt-get install -y git
+RUN apt-get install -y ffmpeg
 
 RUN pip3 install gym
-RUN pip3 install gym[classic_control]
+RUN pip3 install gym[atari,accept-rom-license]
 RUN pip3 install matplotlib
 RUN pip3 install torch
 RUN pip3 install torchvision
@@ -24,3 +25,6 @@ RUN pip3 install tqdm
 # dotfileの導入
 WORKDIR /root
 RUN git clone https://github.com/SakodaShintaro/dotfiles && ./dotfiles/setup.sh
+
+# リポジトリクローン
+RUN git clone https://github.com/SakodaShintaro/rl_practice

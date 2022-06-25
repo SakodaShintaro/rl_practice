@@ -6,36 +6,43 @@ import torchvision.transforms as T
 from PIL import Image
 import matplotlib.pyplot as plt
 
+IMAGE_HEIGHT = 80
+IMAGE_WIDTH = 80
+
 
 class Observer:
     def __init__(self):
         self.env = gym.make("Breakout-v4")
-        self.env.reset()
+        observation = self.env.reset()
+        print(observation.shape)
 
         self.resize = T.Compose([T.ToPILImage(),
-                                 T.Resize(40, interpolation=Image.CUBIC),
+                                 T.Resize((IMAGE_HEIGHT, IMAGE_WIDTH), interpolation=Image.CUBIC),
                                  T.ToTensor()])
 
         self.state_len = 5
-        self.state = deque([self.get_curr_screen() for _ in range(self.state_len)])
-
-    def get_curr_screen(self):
-        screen = self.env.render(mode="rgb_array").transpose((2, 0, 1))
-        screen = np.ascontiguousarray(screen, dtype=np.float32) / 255
-        screen = torch.from_numpy(screen)
-        screen = self.resize(screen).unsqueeze(0)
-        return screen
+        self.state = deque([self.transform_observation(observation) for _ in range(self.state_len)])
     
+    def transform_observation(self, observation):
+        x = observation
+        x = torch.from_numpy(x)
+        x = x.permute([2, 0, 1])
+        x = self.resize(x)
+        x = x.unsqueeze(0)
+        return x
+
     def get_state(self):
         return torch.cat(tuple(self.state), dim=0).unsqueeze(0)
 
     def step(self, action):
         result = self.env.step(action)
+        observation, reward, done, info = result
         self.state.popleft()
-        self.state.append(self.get_curr_screen())
-        # screen = self.get_curr_screen()
-        # plot_screen = screen.cpu().squeeze(0).permute((1, 2, 0)).numpy()
-        # plt.imshow(plot_screen, interpolation="none")
+        self.state.append(self.transform_observation(observation))
+
+        # screen = self.transform_observation(observation)
+        # screen = screen.cpu().squeeze(0).permute((1, 2, 0)).numpy()
+        # plt.imshow(screen, interpolation="none")
         # plt.title("Example extracted screen")
         # plt.savefig(f"images/screen.png", bbox_inches="tight", pad_inches=0.05)
         # plt.cla()

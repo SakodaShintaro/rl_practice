@@ -12,6 +12,7 @@ import torch.optim as optim
 from observer import Observer
 from tqdm import tqdm
 from model import DQN
+from observer import IMAGE_HEIGHT, IMAGE_WIDTH
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -42,13 +43,10 @@ TARGET_UPDATE = 10
 
 observer = Observer()
 
-init_screen = observer.get_curr_screen()
-_, _, screen_height, screen_width = init_screen.shape
-
 n_actions = observer.get_n_actions()
 
-policy_net = DQN(screen_height, screen_width, n_actions).to(device)
-target_net = DQN(screen_height, screen_width, n_actions).to(device)
+policy_net = DQN(IMAGE_HEIGHT, IMAGE_WIDTH, n_actions).to(device)
+target_net = DQN(IMAGE_HEIGHT, IMAGE_WIDTH, n_actions).to(device)
 
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
