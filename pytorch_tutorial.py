@@ -124,15 +124,13 @@ def optimize_model():
 num_episodes = 100
 for i_episode in tqdm(range(num_episodes)):
     observer.reset()
-    curr_state = observer.get_state()
-    for t in count():
+    curr_state = observer.get_states()
+    for t in tqdm(count()):
         action = select_action(curr_state)
         _, reward, done, _ = observer.step(action.item())
         reward = torch.tensor([reward], device=device)
-        if not done:
-            next_state = observer.get_state()
-        else:
-            next_state = None
+
+        next_state = (None if done else observer.get_states())
 
         memory.push(curr_state, action, next_state, reward)
 
