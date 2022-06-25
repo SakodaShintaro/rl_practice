@@ -13,15 +13,14 @@ IMAGE_WIDTH = 80
 class Observer:
     def __init__(self):
         self.env = gym.make("Breakout-v4")
-        observation = self.env.reset()
-
         self.resize = T.Compose([T.ToPILImage(),
                                  T.Resize((IMAGE_HEIGHT, IMAGE_WIDTH), interpolation=Image.CUBIC),
                                  T.ToTensor()])
 
         self.state_len = 5
-        self.state = deque([self.transform_observation(observation) for _ in range(self.state_len)])
-    
+        self.state = deque([torch.zeros((1, 3, IMAGE_HEIGHT, IMAGE_WIDTH)) for _ in range(self.state_len)])
+        self.reset()
+
     def transform_observation(self, observation):
         x = observation
         x = torch.from_numpy(x)
@@ -49,3 +48,13 @@ class Observer:
 
     def get_n_actions(self):
         return self.env.action_space.n
+
+    def reset(self):
+        # resetを示す黒画面を一回挿入
+        self.state.popleft()
+        self.state.append(torch.zeros((1, 3, IMAGE_HEIGHT, IMAGE_WIDTH)))
+
+        # reset後の状態を取得
+        observation = self.env.reset()
+        self.state.popleft()
+        self.state.append(self.transform_observation(observation))

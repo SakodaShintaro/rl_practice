@@ -123,7 +123,7 @@ def optimize_model():
 
 num_episodes = 100
 for i_episode in tqdm(range(num_episodes)):
-    observer.env.reset()
+    observer.reset()
     curr_state = observer.get_state()
     for t in count():
         action = select_action(curr_state)
