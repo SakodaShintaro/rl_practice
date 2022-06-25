@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 class Observer:
     def __init__(self):
-        self.env = gym.make("CartPole-v1")
+        self.env = gym.make("Breakout-v4")
         self.env.reset()
 
         self.resize = T.Compose([T.ToPILImage(),
