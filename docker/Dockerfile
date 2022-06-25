@@ -1,5 +1,9 @@
 FROM nvidia/cuda:11.3.1-cudnn8-devel-ubuntu20.04
 
+# タイムゾーンの設定
+ENV TZ=Asia/Tokyo
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # 更新
 RUN apt-get update
 
@@ -18,8 +22,7 @@ RUN apt-get install -y ffmpeg
 RUN pip3 install gym
 RUN pip3 install gym[atari,accept-rom-license]
 RUN pip3 install matplotlib
-RUN pip3 install torch
-RUN pip3 install torchvision
+RUN pip3 install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu113
 RUN pip3 install tqdm
 
 # dotfileの導入
