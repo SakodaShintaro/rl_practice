@@ -16,6 +16,10 @@ RUN apt-get install -y git
 
 RUN pip3 install gym
 RUN pip3 install gym[classic_control]
+RUN pip3 install matplotlib
+RUN pip3 install torch
+RUN pip3 install torchvision
+RUN pip3 install tqdm
 
 # dotfileの導入
 WORKDIR /root
