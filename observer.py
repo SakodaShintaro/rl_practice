@@ -30,6 +30,14 @@ class Observer:
         return x
 
     def get_state(self):
+        # for i in range(self.state_len):
+        #     ax = plt.subplot(1, self.state_len, i + 1)
+        #     screen = self.state[i]
+        #     screen = screen.cpu().squeeze(0).permute((1, 2, 0)).numpy()
+        #     ax.imshow(screen, interpolation="none")
+        # plt.savefig(f"images/screen.png", bbox_inches="tight", pad_inches=0.05)
+        # plt.cla()
+
         return torch.cat(tuple(self.state), dim=0).unsqueeze(0)
 
     def step(self, action):
@@ -37,13 +45,6 @@ class Observer:
         observation, reward, done, info = result
         self.state.popleft()
         self.state.append(self.transform_observation(observation))
-
-        # screen = self.transform_observation(observation)
-        # screen = screen.cpu().squeeze(0).permute((1, 2, 0)).numpy()
-        # plt.imshow(screen, interpolation="none")
-        # plt.title("Example extracted screen")
-        # plt.savefig(f"images/screen.png", bbox_inches="tight", pad_inches=0.05)
-        # plt.cla()
         return result
 
     def get_n_actions(self):
