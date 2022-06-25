@@ -14,7 +14,6 @@ class Observer:
     def __init__(self):
         self.env = gym.make("Breakout-v4")
         observation = self.env.reset()
-        print(observation.shape)
 
         self.resize = T.Compose([T.ToPILImage(),
                                  T.Resize((IMAGE_HEIGHT, IMAGE_WIDTH), interpolation=Image.CUBIC),

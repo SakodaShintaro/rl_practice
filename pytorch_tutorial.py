@@ -13,6 +13,7 @@ from observer import Observer
 from tqdm import tqdm
 from model import DQN
 from observer import IMAGE_HEIGHT, IMAGE_WIDTH
+import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -86,7 +87,9 @@ def plot_durations():
         means = torch.cat((torch.zeros(99), means))
         plt.plot(means.numpy())
 
-    plt.savefig(f"images/durations.png", bbox_inches="tight", pad_inches=0.05)
+    save_path = "images/durations.png"
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, bbox_inches="tight", pad_inches=0.05)
     plt.cla()
 
 
@@ -118,7 +121,7 @@ def optimize_model():
     optimizer.step()
 
 
-num_episodes = 1000
+num_episodes = 100
 for i_episode in tqdm(range(num_episodes)):
     observer.env.reset()
     curr_state = observer.get_state()
