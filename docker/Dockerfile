@@ -24,6 +24,8 @@ RUN pip3 install gym[atari,accept-rom-license]
 RUN pip3 install matplotlib
 RUN pip3 install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu113
 RUN pip3 install tqdm
+RUN pip3 install tensorboard
+RUN pip3 install stable-baselines3[extra]
 
 # dotfileの導入
 WORKDIR /root
