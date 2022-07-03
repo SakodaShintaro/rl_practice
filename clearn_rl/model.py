@@ -1,5 +1,29 @@
 import torch
 import torch.nn as nn
+import math
+
+
+class PositionalEncoding(nn.Module):
+
+    def __init__(self, d_model: int, dropout: float = 0.0, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+        """
+        x = x + self.pe[:x.size(0)]
+        return self.dropout(x)
+
 
 class QNetwork(nn.Module):
     def __init__(self, env):
@@ -17,7 +41,7 @@ class QNetwork(nn.Module):
             nn.ReLU(),
         )
 
-        self.pe = nn.Parameter(torch.zeros([1, 4, hidden_ch]), requires_grad=True)
+        self.pe = PositionalEncoding(hidden_ch)
         layer = nn.TransformerEncoderLayer(hidden_ch, 8, hidden_ch * 4, batch_first=True)
         self.trans = nn.TransformerEncoder(layer, 2)
         self.head = nn.Linear(hidden_ch, env.single_action_space.n)
@@ -31,7 +55,7 @@ class QNetwork(nn.Module):
             curr_x = curr_x.unsqueeze(1)
             x_list.append(curr_x)
         x = torch.cat(x_list, dim=1)
-        x = x + self.pe
+        x = self.pe(x)
         x = self.trans(x)
         x = x[:, -1, :]
         x = self.head(x)
