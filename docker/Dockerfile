@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.3.1-cudnn8-devel-ubuntu20.04
+FROM nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
 
 # タイムゾーンの設定
 ENV TZ=Asia/Tokyo
@@ -27,9 +27,4 @@ RUN pip3 install tqdm
 RUN pip3 install tensorboard
 RUN pip3 install stable-baselines3[extra]
 
-# dotfileの導入
 WORKDIR /root
-RUN git clone https://github.com/SakodaShintaro/dotfiles && ./dotfiles/setup.sh
-
-# リポジトリクローン
-RUN git clone https://github.com/SakodaShintaro/rl_practice
