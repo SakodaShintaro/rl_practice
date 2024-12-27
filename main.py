@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from shutil import rmtree
 
 import cv2
 import gymnasium as gym
@@ -15,10 +16,14 @@ if __name__ == "__main__":
     args = parse_args()
     save_dir = args.save_dir
 
+    rmtree(save_dir, ignore_errors=True)
     save_dir.mkdir(exist_ok=True, parents=True)
 
     # Initialise the environment
-    env = gym.make("LunarLander-v3", render_mode="rgb_array")
+    env = gym.make("Pendulum-v1", render_mode="rgb_array")
+
+    print(f"{env.observation_space=}")
+    print(f"{env.action_space=}")
 
     # Reset the environment to generate the first observation
     observation, info = env.reset(seed=42)
