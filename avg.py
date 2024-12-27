@@ -20,19 +20,6 @@ def orthogonal_weight_init(m: nn.Module) -> None:
         m.bias.data.fill_(0.0)
 
 
-def human_format_numbers(num: float, use_float: bool = False) -> str:
-    # Make human readable short-forms for large numbers
-    magnitude = 0
-    while abs(num) >= 1000:
-        magnitude += 1
-        num /= 1000.0
-    # add more suffixes if you need them
-    suffix = ["", "K", "M", "G", "T", "P"][magnitude]
-    if use_float:
-        return f"{num:.2f}{suffix}"
-    return f"{num}{suffix}"
-
-
 def set_one_thread() -> None:
     """N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
 
@@ -201,10 +188,7 @@ class AVG:
 
 def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
     tic = time.time()
-    run_id = (
-        datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-        + f"-{args.algo}-{args.env}_seed-{args.seed}"
-    )
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + f"-{args.algo}-{args.env}_seed-{args.seed}"
 
     # Env
     env = gym.make(args.env)
@@ -230,7 +214,6 @@ def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
     ret, step = 0, 0
     terminated, truncated = False, False
     obs, _ = env.reset()
-    ep_tic = time.time()
     try:
         for t in range(args.N):
             # N.B: Action is a torch.Tensor
@@ -248,17 +231,16 @@ def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
             if t % args.checkpoint == 0 and args.save_model:
                 agent.save(
                     model_dir=args.results_dir,
-                    unique_str=f"{run_id}_model_{human_format_numbers(t)}",
+                    unique_str=f"{run_id}_model_{t:010d}",
                 )
 
             # Termination
             if terminated or truncated:
                 rets.append(ret)
                 ep_steps.append(step)
-                duration = time.time() - ep_tic
-                print(f"E: {len(rets)}| D: {duration:.3f}| S: {step}| R: {ret:.2f}| T: {t}")
+                duration = time.time() - tic
+                print(f"E: {len(rets)}| D: {duration:.3f} sec| S: {step}| R: {ret:.2f}| T: {t}")
 
-                ep_tic = time.time()
                 obs, _ = env.reset()
                 ret, step = 0, 0
     except Exception as e:
