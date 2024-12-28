@@ -318,16 +318,16 @@ if __name__ == "__main__":
                     duration_min = duration_min % 60
                     duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
                     logger.info(
-                        f"Episode: {ep_id}\t"
-                        f"D: {duration_str}\t"
-                        f"S: {ep_step}\t"
-                        f"R: {ret:.2f}\t"
-                        f"T: {total_step}",
+                        f"{duration_str}\t"
+                        f"Episode: {ep_id:,}\t"
+                        f"Step: {ep_step}\t"
+                        f"Return: {ret:.2f}\t"
+                        f"TotalStep: {total_step:,}",
                     )
                     data_list.append(
                         {
-                            "episode_id": ep_id,
                             "duration_sec": duration_sec,
+                            "episode_id": ep_id,
                             "steps": ep_step,
                             "return": ret,
                         },
