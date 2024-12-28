@@ -217,13 +217,12 @@ if __name__ == "__main__":
     save_dir.mkdir(exist_ok=True, parents=True)
 
     # Start experiment
-    """N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
-
-    Set number of threads for pytorch to 1 to avoid this issue. This is a temporary workaround.
-    """
+    # N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
+    # Set number of threads for pytorch to 1 to avoid this issue. This is a temporary workaround.
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     torch.set_num_threads(1)
+
     tic = time.time()
     with (save_dir / "info.txt").open("w") as f:
         f.write(f"AVG-{args.env}_seed-{args.seed}\n")
