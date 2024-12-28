@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import time
 import traceback
@@ -224,8 +225,18 @@ if __name__ == "__main__":
     torch.set_num_threads(1)
 
     tic = time.time()
-    with (save_dir / "info.txt").open("w") as f:
-        f.write(f"AVG-{args.env}_seed-{args.seed}\n")
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(f"{save_dir}/log.txt"),
+        ],
+    )
+    logger = logging.getLogger(__name__)
+    logger.info(f"AVG-{args.env}_seed-{args.seed}")
 
     # Env
     env = gym.make(args.env, render_mode="rgb_array")
@@ -244,9 +255,16 @@ if __name__ == "__main__":
     # Learner
     args.obs_dim = env.observation_space.shape[0]
     args.action_dim = env.action_space.shape[0]
+    logger.info(f"{env.observation_space=}")
+    logger.info(f"{env.action_space=}")
+
     agent = AVG(args)
 
     action_coeff = (env.action_space.high - env.action_space.low) / 2
+
+    # なぜか0.4で割らないと上手く行かない
+    action_coeff /= 0.4
+    logger.info(f"{action_coeff=}")
 
     # Interaction
     rets, ep_steps = [], []
@@ -286,27 +304,36 @@ if __name__ == "__main__":
             if terminated or truncated:
                 rets.append(ret)
                 ep_steps.append(ep_step)
-                duration = time.time() - tic
-                print(
-                    f"Episode: {ep_id}| "
-                    f"D: {duration:.3f} sec| "
-                    f"S: {ep_step}| "
-                    f"R: {ret:.2f}| "
-                    f"T: {total_step}",
-                )
 
-                data_list.append(
-                    {"episode_id": ep_id, "duration": duration, "steps": ep_step, "return": ret},
-                )
-
-                df = pd.DataFrame(data_list)
-                df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
+                if ep_id % 100 == 0:
+                    duration_sec = int(time.time() - tic)
+                    duration_min = duration_sec // 60
+                    duration_hor = duration_min // 60
+                    duration_sec = duration_sec % 60
+                    duration_min = duration_min % 60
+                    duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
+                    logger.info(
+                        f"Episode: {ep_id}\t"
+                        f"D: {duration_str}\t"
+                        f"S: {ep_step}\t"
+                        f"R: {ret:.2f}\t"
+                        f"T: {total_step}",
+                    )
+                    data_list.append(
+                        {
+                            "episode_id": ep_id,
+                            "duration_sec": duration_sec,
+                            "steps": ep_step,
+                            "return": ret,
+                        },
+                    )
+                    df = pd.DataFrame(data_list)
+                    df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
 
                 obs, _ = env.reset()
                 ret, ep_step = 0, 0
     except Exception as e:
-        print(e)
-        print("Exiting this run, storing partial logs in the database for future debugging...")
+        logger.info(e)
         traceback.print_exc()
 
     if not (terminated or truncated):
