@@ -211,8 +211,6 @@ if __name__ == "__main__":
     else:
         args.device = torch.device("cpu")
 
-    args.algo = "AVG"
-
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     save_dir = args.save_dir / datetime_str
@@ -228,7 +226,7 @@ if __name__ == "__main__":
     torch.set_num_threads(1)
     tic = time.time()
     with (save_dir / "info.txt").open("w") as f:
-        f.write(f"-{args.algo}-{args.env}_seed-{args.seed}\n")
+        f.write(f"AVG-{args.env}_seed-{args.seed}\n")
 
     # Env
     env = gym.make(args.env, render_mode="rgb_array")
