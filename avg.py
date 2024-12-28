@@ -1,3 +1,8 @@
+"""Based on https://github.com/gauthamvasan/avg/blob/main/avg.py.
+
+Copyright (c) [2024] [Gautham Vasan] - MIT License.
+"""
+
 import argparse
 import logging
 import os
