@@ -182,7 +182,7 @@ class AVG:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="Humanoid-v4", type=str)
+    parser.add_argument("--env", default="Humanoid-v5", type=str)
     parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
     parser.add_argument("--N", default=2000000, type=int, help="# total timesteps for the run")
     # SAVG params
@@ -265,7 +265,7 @@ if __name__ == "__main__":
 
             # Receive reward and next state
             next_obs, reward, terminated, truncated, _ = env.step(sim_action)
-            if ep_id % 100 == 0:
+            if ep_id % 2000 == 0:
                 save_image_dir = save_dir / f"images/{ep_id:06d}"
                 save_image_dir.mkdir(exist_ok=True, parents=True)
                 image = env.render()
