@@ -101,7 +101,7 @@ class Q(nn.Module):
 
 
 class AVG:
-    """Learner class."""
+    """AVG Agent."""
 
     def __init__(self, cfg: argparse.Namespace) -> None:
         self.cfg = cfg
