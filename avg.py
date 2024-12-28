@@ -3,9 +3,11 @@ import os
 import time
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from gymnasium.wrappers import NormalizeObservation
@@ -186,9 +188,50 @@ class AVG:
         torch.save(model, f"{model_dir}/{unique_str}.pt")
 
 
-def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default="Pendulum-v1", type=str)
+    parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
+    parser.add_argument("--N", default=2000000, type=int, help="# total timesteps for the run")
+    # SAVG params
+    parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
+    parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
+    parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
+    parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
+    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
+    parser.add_argument("--l2_actor", default=0, type=float, help="L2 Regularization")
+    parser.add_argument("--l2_critic", default=0, type=float, help="L2 Regularization")
+    parser.add_argument("--nhid_actor", default=256, type=int)
+    parser.add_argument("--nhid_critic", default=256, type=int)
+    # Miscellaneous
+    parser.add_argument("--checkpoint", default=50000, type=int, help="Checkpoint interval")
+    parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
+    parser.add_argument("--device", default="cpu", type=str)
+    parser.add_argument("--save_model", action="store_true", default=False)
+    parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
+    args = parser.parse_args()
+
+    # Adam
+    args.betas = [args.beta1, 0.999]
+
+    # CPU/GPU use for the run
+    if torch.cuda.is_available() and "cuda" in args.device:
+        args.device = torch.device(args.device)
+    else:
+        args.device = torch.device("cpu")
+
+    args.algo = "AVG"
+
+    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    save_dir = args.save_dir / datetime_str
+    save_dir.mkdir(exist_ok=True, parents=True)
+
+    # Start experiment
+    set_one_thread()
     tic = time.time()
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + f"-{args.algo}-{args.env}_seed-{args.seed}"
+    with (save_dir / "info.txt").open("w") as f:
+        f.write(f"-{args.algo}-{args.env}_seed-{args.seed}\n")
 
     # Env
     env = gym.make(args.env)
@@ -214,8 +257,9 @@ def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
     ret, step = 0, 0
     terminated, truncated = False, False
     obs, _ = env.reset()
+    data_list = []
     try:
-        for t in range(args.N):
+        for total_step in range(args.N):
             # N.B: Action is a torch.Tensor
             action, action_info = agent.compute_action(obs)
             sim_action = action.detach().cpu().view(-1).numpy()
@@ -228,10 +272,10 @@ def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
 
             obs = next_obs
 
-            if t % args.checkpoint == 0 and args.save_model:
+            if total_step % args.checkpoint == 0 and args.save_model:
                 agent.save(
-                    model_dir=args.results_dir,
-                    unique_str=f"{run_id}_model_{t:010d}",
+                    model_dir=save_dir,
+                    unique_str=f"model_{total_step:010d}",
                 )
 
             # Termination
@@ -239,7 +283,20 @@ def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
                 rets.append(ret)
                 ep_steps.append(step)
                 duration = time.time() - tic
-                print(f"E: {len(rets)}| D: {duration:.3f} sec| S: {step}| R: {ret:.2f}| T: {t}")
+                print(
+                    f"Episode: {len(rets)}| "
+                    f"D: {duration:.3f} sec| "
+                    f"S: {step}| "
+                    f"R: {ret:.2f}| "
+                    f"T: {total_step}",
+                )
+
+                data_list.append(
+                    {"episode": len(rets), "duration": duration, "steps": step, "return": ret},
+                )
+
+                df = pd.DataFrame(data_list)
+                df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
 
                 obs, _ = env.reset()
                 ret, step = 0, 0
@@ -251,53 +308,9 @@ def main(args: argparse.Namespace) -> tuple[list[int], list[float]]:
     if not (terminated or truncated):
         # N.B: We're adding a partial episode just to make plotting easier.
         # But this data point shouldn't be used.
-        print(f"Appending partial episode #{len(rets)}, length: {step}, Total Steps: {t + 1}")
         rets.append(ret)
         ep_steps.append(step)
 
     # Save returns and args before exiting run
     if args.save_model:
-        agent.save(model_dir=args.results_dir, unique_str=f"{run_id}_model")
-
-    print(f"Run with id: {run_id} took {time.time() - tic:.3f}s!")
-
-    return ep_steps, rets
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="Pendulum-v1", type=str)
-    parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
-    parser.add_argument("--N", default=10001000, type=int, help="# timesteps for the run")
-    # SAVG params
-    parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
-    parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
-    parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
-    parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
-    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
-    parser.add_argument("--l2_actor", default=0, type=float, help="L2 Regularization")
-    parser.add_argument("--l2_critic", default=0, type=float, help="L2 Regularization")
-    parser.add_argument("--nhid_actor", default=256, type=int)
-    parser.add_argument("--nhid_critic", default=256, type=int)
-    # Miscellaneous
-    parser.add_argument("--checkpoint", default=50000, type=int, help="Checkpoint interval")
-    parser.add_argument("--results_dir", default="./results", type=str, help="Location to store")
-    parser.add_argument("--device", default="cpu", type=str)
-    parser.add_argument("--save_model", action="store_true", default=False)
-    parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
-    args = parser.parse_args()
-
-    # Adam
-    args.betas = [args.beta1, 0.999]
-
-    # CPU/GPU use for the run
-    if torch.cuda.is_available() and "cuda" in args.device:
-        args.device = torch.device(args.device)
-    else:
-        args.device = torch.device("cpu")
-
-    args.algo = "AVG"
-
-    # Start experiment
-    set_one_thread()
-    main(args)
+        agent.save(model_dir=save_dir, unique_str="last_model")
