@@ -7,6 +7,7 @@ from pathlib import Path
 
 import cv2
 import gymnasium as gym
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -195,10 +196,9 @@ if __name__ == "__main__":
     parser.add_argument("--nhid_actor", default=256, type=int)
     parser.add_argument("--nhid_critic", default=256, type=int)
     # Miscellaneous
-    parser.add_argument("--checkpoint", default=50000, type=int, help="Checkpoint interval")
+    parser.add_argument("--checkpoint", default=500000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
     parser.add_argument("--device", default="cpu", type=str)
-    parser.add_argument("--save_model", action="store_true", default=False)
     parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
     args = parser.parse_args()
 
@@ -246,6 +246,8 @@ if __name__ == "__main__":
     args.action_dim = env.action_space.shape[0]
     agent = AVG(args)
 
+    action_coeff = (env.action_space.high - env.action_space.low) / 2
+
     # Interaction
     rets, ep_steps = [], []
     ret, ep_step = 0, 0
@@ -259,11 +261,12 @@ if __name__ == "__main__":
             # N.B: Action is a torch.Tensor
             action, action_info = agent.compute_action(obs)
             sim_action = action.detach().cpu().view(-1).numpy()
+            sim_action *= action_coeff
 
             # Receive reward and next state
             next_obs, reward, terminated, truncated, _ = env.step(sim_action)
             if ep_id % 100 == 0:
-                save_image_dir = save_dir / f"images_{ep_id:06d}"
+                save_image_dir = save_dir / f"images/{ep_id:06d}"
                 save_image_dir.mkdir(exist_ok=True, parents=True)
                 image = env.render()
                 cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
@@ -273,7 +276,7 @@ if __name__ == "__main__":
 
             obs = next_obs
 
-            if total_step % args.checkpoint == 0 and args.save_model:
+            if total_step % args.checkpoint == 0:
                 agent.save(
                     model_dir=save_dir,
                     unique_str=f"model_{total_step:010d}",
@@ -313,5 +316,11 @@ if __name__ == "__main__":
         ep_steps.append(ep_step)
 
     # Save returns and args before exiting run
-    if args.save_model:
-        agent.save(model_dir=save_dir, unique_str="last_model")
+    agent.save(model_dir=save_dir, unique_str="last_model")
+
+    df = pd.DataFrame(data_list)
+    df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
+    plt.plot(df["episode_id"], df["return"])
+    plt.xlabel("Episode")
+    plt.ylabel("Return")
+    plt.savefig(f"{save_dir}/returns.png", bbox_inches="tight", pad_inches=0.05)
