@@ -8,7 +8,7 @@
 
 ```bash
 sudo apt update
-sudo apt install -y swig
+sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils
 ```
 
 ```bash

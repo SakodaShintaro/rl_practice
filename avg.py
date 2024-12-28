@@ -182,7 +182,7 @@ class AVG:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="Pendulum-v1", type=str)
+    parser.add_argument("--env", default="Humanoid-v4", type=str)
     parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
     parser.add_argument("--N", default=2000000, type=int, help="# total timesteps for the run")
     # SAVG params
