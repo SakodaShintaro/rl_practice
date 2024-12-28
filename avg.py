@@ -5,6 +5,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 import numpy as np
 import pandas as pd
@@ -230,7 +231,7 @@ if __name__ == "__main__":
         f.write(f"-{args.algo}-{args.env}_seed-{args.seed}\n")
 
     # Env
-    env = gym.make(args.env)
+    env = gym.make(args.env, render_mode="rgb_array")
     env = gym.wrappers.FlattenObservation(env)
     env = NormalizeObservation(env)
 
@@ -256,12 +257,19 @@ if __name__ == "__main__":
     data_list = []
     try:
         for total_step in range(1, args.N + 1):
+            ep_id = len(rets)
+
             # N.B: Action is a torch.Tensor
             action, action_info = agent.compute_action(obs)
             sim_action = action.detach().cpu().view(-1).numpy()
 
             # Receive reward and next state
             next_obs, reward, terminated, truncated, _ = env.step(sim_action)
+            if ep_id % 100 == 0:
+                save_image_dir = save_dir / f"images_{ep_id:06d}"
+                save_image_dir.mkdir(exist_ok=True, parents=True)
+                image = env.render()
+                cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
             agent.update(obs, action, next_obs, reward, terminated, **action_info)
             ret += reward
             ep_step += 1
@@ -280,7 +288,7 @@ if __name__ == "__main__":
                 ep_steps.append(ep_step)
                 duration = time.time() - tic
                 print(
-                    f"Episode: {len(rets)}| "
+                    f"Episode: {ep_id}| "
                     f"D: {duration:.3f} sec| "
                     f"S: {ep_step}| "
                     f"R: {ret:.2f}| "
@@ -288,7 +296,7 @@ if __name__ == "__main__":
                 )
 
                 data_list.append(
-                    {"episode": len(rets), "duration": duration, "steps": ep_step, "return": ret},
+                    {"episode_id": ep_id, "duration": duration, "steps": ep_step, "return": ret},
                 )
 
                 df = pd.DataFrame(data_list)
