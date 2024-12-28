@@ -22,16 +22,6 @@ def orthogonal_weight_init(m: nn.Module) -> None:
         m.bias.data.fill_(0.0)
 
 
-def set_one_thread() -> None:
-    """N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
-
-    Set number of threads for pytorch to 1 to avoid this issue. This is a temporary workaround.
-    """
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    torch.set_num_threads(1)
-
-
 class Actor(nn.Module):
     """Continous MLP Actor for Soft Actor-Critic."""
 
@@ -228,7 +218,13 @@ if __name__ == "__main__":
     save_dir.mkdir(exist_ok=True, parents=True)
 
     # Start experiment
-    set_one_thread()
+    """N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
+
+    Set number of threads for pytorch to 1 to avoid this issue. This is a temporary workaround.
+    """
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    torch.set_num_threads(1)
     tic = time.time()
     with (save_dir / "info.txt").open("w") as f:
         f.write(f"-{args.algo}-{args.env}_seed-{args.seed}\n")
@@ -254,12 +250,12 @@ if __name__ == "__main__":
 
     # Interaction
     rets, ep_steps = [], []
-    ret, step = 0, 0
+    ret, ep_step = 0, 0
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
     try:
-        for total_step in range(args.N):
+        for total_step in range(1, args.N + 1):
             # N.B: Action is a torch.Tensor
             action, action_info = agent.compute_action(obs)
             sim_action = action.detach().cpu().view(-1).numpy()
@@ -268,7 +264,7 @@ if __name__ == "__main__":
             next_obs, reward, terminated, truncated, _ = env.step(sim_action)
             agent.update(obs, action, next_obs, reward, terminated, **action_info)
             ret += reward
-            step += 1
+            ep_step += 1
 
             obs = next_obs
 
@@ -281,25 +277,25 @@ if __name__ == "__main__":
             # Termination
             if terminated or truncated:
                 rets.append(ret)
-                ep_steps.append(step)
+                ep_steps.append(ep_step)
                 duration = time.time() - tic
                 print(
                     f"Episode: {len(rets)}| "
                     f"D: {duration:.3f} sec| "
-                    f"S: {step}| "
+                    f"S: {ep_step}| "
                     f"R: {ret:.2f}| "
                     f"T: {total_step}",
                 )
 
                 data_list.append(
-                    {"episode": len(rets), "duration": duration, "steps": step, "return": ret},
+                    {"episode": len(rets), "duration": duration, "steps": ep_step, "return": ret},
                 )
 
                 df = pd.DataFrame(data_list)
                 df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
 
                 obs, _ = env.reset()
-                ret, step = 0, 0
+                ret, ep_step = 0, 0
     except Exception as e:
         print(e)
         print("Exiting this run, storing partial logs in the database for future debugging...")
@@ -309,7 +305,7 @@ if __name__ == "__main__":
         # N.B: We're adding a partial episode just to make plotting easier.
         # But this data point shouldn't be used.
         rets.append(ret)
-        ep_steps.append(step)
+        ep_steps.append(ep_step)
 
     # Save returns and args before exiting run
     if args.save_model:
