@@ -129,7 +129,7 @@ class AVG:
         self.popt = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr, betas=cfg.betas)
         self.qopt = torch.optim.Adam(self.Q.parameters(), lr=cfg.critic_lr, betas=cfg.betas)
 
-        self.alpha, self.gamma, self.device = cfg.alpha_lr, cfg.gamma, cfg.device
+        self.alpha_lr, self.gamma, self.device = cfg.alpha_lr, cfg.gamma, cfg.device
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -161,7 +161,7 @@ class AVG:
             next_action, action_info = self.actor(next_obs)
             next_lprob = action_info["lprob"]
             q2 = self.Q(next_obs, next_action)
-            target_V = q2 - self.alpha * next_lprob
+            target_V = q2 - self.alpha_lr * next_lprob
 
         reward = self.symlog(reward)
         delta = reward + (1 - done) * self.gamma * target_V - q
@@ -169,7 +169,7 @@ class AVG:
         ####
 
         # Policy loss
-        ploss = self.alpha * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
+        ploss = self.alpha_lr * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
         self.popt.zero_grad()
         ploss.backward()
         self.popt.step()
