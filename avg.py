@@ -137,6 +137,10 @@ class AVG:
         action, action_info = self.actor(obs)
         return action, action_info
 
+    def symlog(self, x: float) -> float:
+        """Symmetric log."""
+        return np.sign(x) * np.log(1 + np.abs(x))
+
     def update(
         self,
         obs: np.ndarray,
@@ -159,6 +163,7 @@ class AVG:
             q2 = self.Q(next_obs, next_action)
             target_V = q2 - self.alpha * next_lprob
 
+        reward = self.symlog(reward)
         delta = reward + (1 - done) * self.gamma * target_V - q
         qloss = delta**2
         ####
