@@ -7,7 +7,6 @@ import argparse
 import logging
 import os
 import time
-import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -110,7 +109,6 @@ class AVG:
     """AVG Agent."""
 
     def __init__(self, cfg: argparse.Namespace) -> None:
-        self.cfg = cfg
         self.steps = 0
 
         self.actor = Actor(
@@ -126,10 +124,22 @@ class AVG:
             n_hid=cfg.nhid_critic,
         )
 
+        self.actor_lr = cfg.actor_lr
+        self.critic_lr = cfg.critic_lr
+
         self.popt = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr, betas=cfg.betas)
         self.qopt = torch.optim.Adam(self.Q.parameters(), lr=cfg.critic_lr, betas=cfg.betas)
 
         self.alpha_lr, self.gamma, self.device = cfg.alpha_lr, cfg.gamma, cfg.device
+
+        self.use_eligibility_trace = cfg.use_eligibility_trace
+
+        if self.use_eligibility_trace:
+            self.et_lambda = 0.95
+            with torch.no_grad():
+                self.eligibility_traces_q = [
+                    torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
+                ]
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -175,8 +185,15 @@ class AVG:
         self.popt.step()
 
         self.qopt.zero_grad()
-        qloss.backward()
-        self.qopt.step()
+        if self.use_eligibility_trace:
+            q.backward()
+            with torch.no_grad():
+                for p, et in zip(self.Q.parameters(), self.eligibility_traces_q):
+                    et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
+                    p.data -= self.critic_lr * delta * et
+        else:
+            qloss.backward()
+            self.qopt.step()
 
         self.steps += 1
 
@@ -195,7 +212,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default="Humanoid-v5", type=str)
     parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
-    parser.add_argument("--N", default=2000000, type=int, help="# total timesteps for the run")
+    parser.add_argument("--N", default=5_000_000, type=int, help="# total timesteps for the run")
     # SAVG params
     parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
     parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
@@ -206,6 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--l2_critic", default=0, type=float, help="L2 Regularization")
     parser.add_argument("--nhid_actor", default=256, type=int)
     parser.add_argument("--nhid_critic", default=256, type=int)
+    parser.add_argument("--use_eligibility_trace", action="store_true")
     # Miscellaneous
     parser.add_argument("--checkpoint", default=500000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
@@ -282,69 +300,65 @@ if __name__ == "__main__":
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
-    try:
-        for total_step in range(1, args.N + 1):
-            ep_id = len(rets)
+    for total_step in range(1, args.N + 1):
+        ep_id = len(rets)
 
-            # N.B: Action is a torch.Tensor
-            action, action_info = agent.compute_action(obs)
-            sim_action = action.detach().cpu().view(-1).numpy()
-            sim_action *= action_coeff
+        # N.B: Action is a torch.Tensor
+        action, action_info = agent.compute_action(obs)
+        sim_action = action.detach().cpu().view(-1).numpy()
+        sim_action *= action_coeff
 
-            # Receive reward and next state
-            next_obs, reward, terminated, truncated, _ = env.step(sim_action)
-            if ep_id % 2000 == 0:
-                save_image_dir = save_dir / f"images/{ep_id:06d}"
-                save_image_dir.mkdir(exist_ok=True, parents=True)
-                image = env.render()
-                cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
-            agent.update(obs, action, next_obs, reward, terminated, **action_info)
-            ret += reward
-            ep_step += 1
+        # Receive reward and next state
+        next_obs, reward, terminated, truncated, _ = env.step(sim_action)
+        if ep_id % 2000 == 0:
+            save_image_dir = save_dir / f"images/{ep_id:06d}"
+            save_image_dir.mkdir(exist_ok=True, parents=True)
+            image = env.render()
+            cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
+        agent.update(obs, action, next_obs, reward, terminated, **action_info)
+        ret += reward
+        ep_step += 1
 
-            obs = next_obs
+        obs = next_obs
 
-            if total_step % args.checkpoint == 0:
-                agent.save(
-                    model_dir=save_dir,
-                    unique_str=f"model_{total_step:010d}",
+        if total_step % args.checkpoint == 0:
+            agent.save(
+                model_dir=save_dir,
+                unique_str=f"model_{total_step:010d}",
+            )
+
+        # Termination
+        if terminated or truncated:
+            rets.append(ret)
+            ep_steps.append(ep_step)
+
+            if ep_id % 100 == 0:
+                duration_sec = int(time.time() - tic)
+                duration_min = duration_sec // 60
+                duration_hor = duration_min // 60
+                duration_sec = duration_sec % 60
+                duration_min = duration_min % 60
+                duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
+                logger.info(
+                    f"{duration_str}\t"
+                    f"Episode: {ep_id:,}\t"
+                    f"Step: {ep_step}\t"
+                    f"Return: {ret:.2f}\t"
+                    f"TotalStep: {total_step:,}",
                 )
+                data_list.append(
+                    {
+                        "duration_sec": duration_sec,
+                        "episode_id": ep_id,
+                        "steps": ep_step,
+                        "return": ret,
+                    },
+                )
+                df = pd.DataFrame(data_list)
+                df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
 
-            # Termination
-            if terminated or truncated:
-                rets.append(ret)
-                ep_steps.append(ep_step)
-
-                if ep_id % 100 == 0:
-                    duration_sec = int(time.time() - tic)
-                    duration_min = duration_sec // 60
-                    duration_hor = duration_min // 60
-                    duration_sec = duration_sec % 60
-                    duration_min = duration_min % 60
-                    duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
-                    logger.info(
-                        f"{duration_str}\t"
-                        f"Episode: {ep_id:,}\t"
-                        f"Step: {ep_step}\t"
-                        f"Return: {ret:.2f}\t"
-                        f"TotalStep: {total_step:,}",
-                    )
-                    data_list.append(
-                        {
-                            "duration_sec": duration_sec,
-                            "episode_id": ep_id,
-                            "steps": ep_step,
-                            "return": ret,
-                        },
-                    )
-                    df = pd.DataFrame(data_list)
-                    df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
-
-                obs, _ = env.reset()
-                ret, ep_step = 0, 0
-    except Exception as e:
-        logger.info(e)
-        traceback.print_exc()
+            obs, _ = env.reset()
+            ret, ep_step = 0, 0
 
     if not (terminated or truncated):
         # N.B: We're adding a partial episode just to make plotting easier.
