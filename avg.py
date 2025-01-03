@@ -212,7 +212,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default="Humanoid-v5", type=str)
     parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
-    parser.add_argument("--N", default=5_000_000, type=int, help="# total timesteps for the run")
+    parser.add_argument("--N", default=2_000_000, type=int, help="# total timesteps for the run")
     # SAVG params
     parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
     parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
