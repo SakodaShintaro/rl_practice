@@ -135,7 +135,7 @@ class AVG:
         self.use_eligibility_trace = cfg.use_eligibility_trace
 
         if self.use_eligibility_trace:
-            self.et_lambda = 0.95
+            self.et_lambda = 0.0
             with torch.no_grad():
                 self.eligibility_traces_q = [
                     torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
@@ -190,7 +190,7 @@ class AVG:
             with torch.no_grad():
                 for p, et in zip(self.Q.parameters(), self.eligibility_traces_q):
                     et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
-                    p.data -= self.critic_lr * delta * et
+                    p.data -= 2.0 * self.critic_lr * delta * et
         else:
             qloss.backward()
             self.qopt.step()
