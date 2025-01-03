@@ -190,7 +190,7 @@ class AVG:
             with torch.no_grad():
                 for p, et in zip(self.Q.parameters(), self.eligibility_traces_q):
                     et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
-                    p.data -= 2.0 * self.critic_lr * delta * et
+                    p.data += 2.0 * self.critic_lr * delta * et
         else:
             qloss.backward()
             self.qopt.step()
