@@ -135,7 +135,7 @@ class AVG:
         self.use_eligibility_trace = cfg.use_eligibility_trace
 
         if self.use_eligibility_trace:
-            self.et_lambda = 0.0
+            self.et_lambda = cfg.et_lambda
             with torch.no_grad():
                 self.eligibility_traces_q = [
                     torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
@@ -224,6 +224,7 @@ if __name__ == "__main__":
     parser.add_argument("--nhid_actor", default=256, type=int)
     parser.add_argument("--nhid_critic", default=256, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
+    parser.add_argument("--et_lambda", default=0.0, type=float)
     # Miscellaneous
     parser.add_argument("--checkpoint", default=500000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
