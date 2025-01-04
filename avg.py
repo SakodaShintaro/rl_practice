@@ -301,8 +301,11 @@ if __name__ == "__main__":
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
+
+    PRINT_INTERVAL = 100
+
     for total_step in range(1, args.N + 1):
-        ep_id = len(rets)
+        epsode_id = len(rets) + 1
 
         # N.B: Action is a torch.Tensor
         action, action_info = agent.compute_action(obs)
@@ -311,8 +314,8 @@ if __name__ == "__main__":
 
         # Receive reward and next state
         next_obs, reward, terminated, truncated, _ = env.step(sim_action)
-        if ep_id % 2000 == 0:
-            save_image_dir = save_dir / f"images/{ep_id:06d}"
+        if epsode_id % 2000 == 0:
+            save_image_dir = save_dir / f"images/{epsode_id:06d}"
             save_image_dir.mkdir(exist_ok=True, parents=True)
             image = env.render()
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
@@ -333,7 +336,9 @@ if __name__ == "__main__":
             rets.append(ret)
             ep_steps.append(ep_step)
 
-            if ep_id % 100 == 0:
+            if epsode_id % PRINT_INTERVAL == 0:
+                ave_return = np.mean(rets[-PRINT_INTERVAL:])
+                ave_steps = np.mean(ep_steps[-PRINT_INTERVAL:])
                 duration_sec = int(time.time() - tic)
                 duration_min = duration_sec // 60
                 duration_hor = duration_min // 60
@@ -342,17 +347,17 @@ if __name__ == "__main__":
                 duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
                 logger.info(
                     f"{duration_str}\t"
-                    f"Episode: {ep_id:,}\t"
-                    f"Step: {ep_step}\t"
-                    f"Return: {ret:.2f}\t"
+                    f"Episode: {epsode_id:,}\t"
+                    f"Step: {ave_steps}\t"
+                    f"Return: {ave_return:.2f}\t"
                     f"TotalStep: {total_step:,}",
                 )
                 data_list.append(
                     {
                         "duration_sec": duration_sec,
-                        "episode_id": ep_id,
-                        "steps": ep_step,
-                        "return": ret,
+                        "episode_id": epsode_id,
+                        "steps": ave_steps,
+                        "return": ave_return,
                     },
                 )
                 df = pd.DataFrame(data_list)
