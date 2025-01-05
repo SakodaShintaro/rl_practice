@@ -15,16 +15,18 @@ if __name__ == "__main__":
     args = parse_args()
     target_dir_list = args.target_dir_list
 
-    x_key = "episode_id"
     y_key = "return"
 
     for target_dir in target_dir_list:
         tsv_path = target_dir / "result.tsv"
         df = pd.read_csv(tsv_path, delimiter="\t")
 
-        plt.plot(df[x_key], df[y_key], label=str(target_dir.name))
+        df["steps"] *= 100
+        df["cumulative_steps"] = df["steps"].cumsum()
 
-    plt.xlabel(x_key)
+        plt.plot(df["cumulative_steps"], df[y_key], label=str(target_dir.name))
+
+    plt.xlabel("step")
     plt.ylabel(y_key)
     plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
     plt.grid()
