@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     plt.xlabel("Episode")
     plt.ylabel("steps")
-    plt.legend()
+    plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
     plt.grid()
     plt.savefig("result.png", bbox_inches="tight", pad_inches=0.05)
     print("Saved result.png")
