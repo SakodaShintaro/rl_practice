@@ -339,10 +339,10 @@ if __name__ == "__main__":
             if epsode_id % PRINT_INTERVAL == 0:
                 ave_return = np.mean(rets[-PRINT_INTERVAL:])
                 ave_steps = np.mean(ep_steps[-PRINT_INTERVAL:])
-                duration_sec = int(time.time() - tic)
-                duration_min = duration_sec // 60
+                duration_total_sec = int(time.time() - tic)
+                duration_min = duration_total_sec // 60
                 duration_hor = duration_min // 60
-                duration_sec = duration_sec % 60
+                duration_sec = duration_total_sec % 60
                 duration_min = duration_min % 60
                 duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
                 logger.info(
@@ -354,7 +354,7 @@ if __name__ == "__main__":
                 )
                 data_list.append(
                     {
-                        "duration_sec": duration_sec,
+                        "duration_sec": duration_total_sec,
                         "episode_id": epsode_id,
                         "steps": ave_steps,
                         "return": ave_return,
