@@ -134,12 +134,11 @@ class AVG:
 
         self.use_eligibility_trace = cfg.use_eligibility_trace
 
-        if self.use_eligibility_trace:
-            self.et_lambda = cfg.et_lambda
-            with torch.no_grad():
-                self.eligibility_traces_q = [
-                    torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
-                ]
+        self.et_lambda = cfg.et_lambda
+        with torch.no_grad():
+            self.eligibility_traces_q = [
+                torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
+            ]
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -206,6 +205,11 @@ class AVG:
             "critic_opt": self.qopt.state_dict(),
         }
         torch.save(model, f"{model_dir}/{unique_str}.pt")
+
+    def reset_eligibility_traces(self) -> None:
+        """Reset eligibility traces."""
+        for et in self.eligibility_traces_q:
+            et.zero_()
 
 
 if __name__ == "__main__":
@@ -364,6 +368,7 @@ if __name__ == "__main__":
                 df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
 
             obs, _ = env.reset()
+            agent.reset_eligibility_traces()
             ret, ep_step = 0, 0
 
     if not (terminated or truncated):
