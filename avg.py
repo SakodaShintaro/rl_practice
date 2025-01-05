@@ -348,7 +348,7 @@ if __name__ == "__main__":
                 logger.info(
                     f"{duration_str}\t"
                     f"Episode: {epsode_id:,}\t"
-                    f"Step: {ave_steps}\t"
+                    f"Step: {ave_steps:7.2f}\t"
                     f"Return: {ave_return:.2f}\t"
                     f"TotalStep: {total_step:,}",
                 )
