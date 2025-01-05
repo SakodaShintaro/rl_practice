@@ -271,6 +271,10 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     logger.info(f"AVG-{args.env}_seed-{args.seed}")
 
+    logger.info("Command line arguments:")
+    for arg, value in vars(args).items():
+        logger.info(f"  {arg}: {value}")
+
     # Env
     env = gym.make(args.env, render_mode="rgb_array")
     env = gym.wrappers.FlattenObservation(env)
