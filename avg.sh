@@ -3,7 +3,7 @@ set -eux
 
 trap "kill 0" EXIT
 
-PARALLEL_JOBS=3
+PARALLEL_JOBS=6
 
 SEED=45
 
