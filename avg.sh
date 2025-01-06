@@ -9,12 +9,12 @@ SEED=45
 
 # コマンドを配列に格納
 commands=(
-    "python3 avg.py --seed=${SEED}"
-    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.0"
-    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.1"
-    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.2"
-    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.4"
-    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.8"
+    "python3 avg.py --seed=${SEED} --save_suffix=baseline"
+    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.0 --save_suffix=et_lambda_0.0"
+    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.1 --save_suffix=et_lambda_0.1"
+    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.2 --save_suffix=et_lambda_0.2"
+    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.4 --save_suffix=et_lambda_0.4"
+    "python3 avg.py --seed=${SEED} --use_eligibility_trace --et_lambda=0.8 --save_suffix=et_lambda_0.8"
 )
 
 # 並列実行を管理

@@ -184,7 +184,6 @@ class AVG:
 
         reward = self.symlog(reward)
         delta = reward + (1 - done) * self.gamma * target_V - q
-        qloss = delta**2
         ####
 
         # Policy loss
@@ -201,6 +200,7 @@ class AVG:
                     et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
                     p.grad.data = -2.0 * delta * et
         else:
+            qloss = delta**2
             qloss.backward()
         self.qopt.step()
 
@@ -242,6 +242,7 @@ if __name__ == "__main__":
     # Miscellaneous
     parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
+    parser.add_argument("--save_suffix", default="avg", type=str)
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
     args = parser.parse_args()
@@ -257,7 +258,7 @@ if __name__ == "__main__":
 
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    save_dir = args.save_dir / datetime_str
+    save_dir = args.save_dir / f"{datetime_str}_{args.save_suffix}"
     save_dir.mkdir(exist_ok=True, parents=True)
 
     # Start experiment
