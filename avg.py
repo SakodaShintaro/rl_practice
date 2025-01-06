@@ -240,7 +240,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     # Miscellaneous
-    parser.add_argument("--checkpoint", default=500000, type=int, help="Checkpoint interval")
+    parser.add_argument("--checkpoint", default=1_00_000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
