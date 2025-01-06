@@ -36,7 +36,7 @@ class Actor(nn.Module):
         super().__init__()
         self.device = device
         self.LOG_STD_MAX = 2
-        self.LOG_STD_MIN = -20
+        self.LOG_STD_MIN = -5
 
         # Two hidden layers
         self.phi = nn.Sequential(
