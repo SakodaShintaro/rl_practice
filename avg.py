@@ -127,8 +127,18 @@ class AVG:
         self.actor_lr = cfg.actor_lr
         self.critic_lr = cfg.critic_lr
 
-        self.popt = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr, betas=cfg.betas)
-        self.qopt = torch.optim.Adam(self.Q.parameters(), lr=cfg.critic_lr, betas=cfg.betas)
+        self.popt = torch.optim.AdamW(
+            self.actor.parameters(),
+            lr=cfg.actor_lr,
+            betas=cfg.betas,
+            weight_decay=cfg.l2_actor,
+        )
+        self.qopt = torch.optim.AdamW(
+            self.Q.parameters(),
+            lr=cfg.critic_lr,
+            betas=cfg.betas,
+            weight_decay=cfg.l2_critic,
+        )
 
         self.alpha_lr, self.gamma, self.device = cfg.alpha_lr, cfg.gamma, cfg.device
 
@@ -223,8 +233,8 @@ if __name__ == "__main__":
     parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
     parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
     parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
-    parser.add_argument("--l2_actor", default=0, type=float, help="L2 Regularization")
-    parser.add_argument("--l2_critic", default=0, type=float, help="L2 Regularization")
+    parser.add_argument("--l2_actor", default=0.0, type=float, help="L2 Regularization")
+    parser.add_argument("--l2_critic", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--nhid_actor", default=256, type=int)
     parser.add_argument("--nhid_critic", default=256, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
