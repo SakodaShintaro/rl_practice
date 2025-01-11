@@ -206,6 +206,11 @@ class AVG:
 
         self.steps += 1
 
+        return {
+            "delta": delta.item(),
+            "q": q.item(),
+        }
+
     def save(self, model_dir: str, unique_str: str) -> None:
         """Save the model parameters to a file."""
         model = {
@@ -315,8 +320,15 @@ if __name__ == "__main__":
     logger.info(f"{action_coeff=}")
 
     # Interaction
-    rets, ep_steps = [], []
-    ret, ep_step = 0, 0
+    episode_stats = {
+        "episode_id": [],
+        "steps": [],
+        "return": [],
+        "ave_delta": [],
+        "ave_q": [],
+    }
+    sum_reward, ep_step = 0, 0
+    sum_delta, sum_q = 0, 0
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
@@ -324,7 +336,7 @@ if __name__ == "__main__":
     PRINT_INTERVAL = 100
 
     for total_step in range(1, args.N + 1):
-        epsode_id = len(rets) + 1
+        epsode_id = len(episode_stats["episode_id"]) + 1
 
         # N.B: Action is a torch.Tensor
         action, action_info = agent.compute_action(obs)
@@ -338,8 +350,10 @@ if __name__ == "__main__":
             save_image_dir.mkdir(exist_ok=True, parents=True)
             image = env.render()
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
-        agent.update(obs, action, next_obs, reward, terminated, **action_info)
-        ret += reward
+        stats = agent.update(obs, action, next_obs, reward, terminated, **action_info)
+        sum_delta += stats["delta"]
+        sum_q += stats["q"]
+        sum_reward += reward
         ep_step += 1
 
         obs = next_obs
@@ -352,12 +366,20 @@ if __name__ == "__main__":
 
         # Termination
         if terminated or truncated:
-            rets.append(ret)
-            ep_steps.append(ep_step)
+            curr_ave_delta = sum_delta / ep_step
+            curr_ave_q = sum_q / ep_step
+
+            episode_stats["episode_id"].append(epsode_id)
+            episode_stats["steps"].append(ep_step)
+            episode_stats["return"].append(sum_reward)
+            episode_stats["ave_delta"].append(curr_ave_delta)
+            episode_stats["ave_q"].append(curr_ave_q)
 
             if epsode_id % PRINT_INTERVAL == 0:
-                ave_return = np.mean(rets[-PRINT_INTERVAL:])
-                ave_steps = np.mean(ep_steps[-PRINT_INTERVAL:])
+                ave_return = np.mean(episode_stats["return"][-PRINT_INTERVAL:])
+                ave_steps = np.mean(episode_stats["steps"][-PRINT_INTERVAL:])
+                ave_delta = np.mean(episode_stats["ave_delta"][-PRINT_INTERVAL:])
+                ave_q = np.mean(episode_stats["ave_q"][-PRINT_INTERVAL:])
                 duration_total_sec = int(time.time() - tic)
                 duration_min = duration_total_sec // 60
                 duration_hor = duration_min // 60
@@ -369,6 +391,8 @@ if __name__ == "__main__":
                     f"Episode: {epsode_id:,}\t"
                     f"Step: {ave_steps:7.2f}\t"
                     f"Return: {ave_return:.2f}\t"
+                    f"Delta: {ave_delta:.2f}\t"
+                    f"Q: {ave_q:.2f}\t"
                     f"TotalStep: {total_step:,}",
                 )
                 data_list.append(
@@ -377,6 +401,8 @@ if __name__ == "__main__":
                         "episode_id": epsode_id,
                         "steps": ave_steps,
                         "return": ave_return,
+                        "ave_delta": ave_delta,
+                        "ave_q": ave_q,
                     },
                 )
                 df = pd.DataFrame(data_list)
@@ -384,13 +410,8 @@ if __name__ == "__main__":
 
             obs, _ = env.reset()
             agent.reset_eligibility_traces()
-            ret, ep_step = 0, 0
-
-    if not (terminated or truncated):
-        # N.B: We're adding a partial episode just to make plotting easier.
-        # But this data point shouldn't be used.
-        rets.append(ret)
-        ep_steps.append(ep_step)
+            sum_reward, ep_step = 0, 0
+            sum_delta, sum_q = 0, 0
 
     # Save returns and args before exiting run
     agent.save(model_dir=save_dir, unique_str="last_model")
