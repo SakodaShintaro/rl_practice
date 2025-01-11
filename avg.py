@@ -325,10 +325,10 @@ if __name__ == "__main__":
         "steps": [],
         "return": [],
         "ave_delta": [],
-        "ave_q": [],
+        "ave_lprob": [],
     }
     sum_reward, ep_step = 0, 0
-    sum_delta, sum_q = 0, 0
+    sum_delta, sum_lprob = 0, 0
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
@@ -352,7 +352,7 @@ if __name__ == "__main__":
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
         stats = agent.update(obs, action, next_obs, reward, terminated, **action_info)
         sum_delta += stats["delta"]
-        sum_q += stats["q"]
+        sum_lprob += action_info["lprob"].item()
         sum_reward += reward
         ep_step += 1
 
@@ -367,19 +367,19 @@ if __name__ == "__main__":
         # Termination
         if terminated or truncated:
             curr_ave_delta = sum_delta / ep_step
-            curr_ave_q = sum_q / ep_step
+            curr_ave_lprob = sum_lprob / ep_step
 
             episode_stats["episode_id"].append(epsode_id)
             episode_stats["steps"].append(ep_step)
             episode_stats["return"].append(sum_reward)
             episode_stats["ave_delta"].append(curr_ave_delta)
-            episode_stats["ave_q"].append(curr_ave_q)
+            episode_stats["ave_lprob"].append(curr_ave_lprob)
 
             if epsode_id % PRINT_INTERVAL == 0:
                 ave_return = np.mean(episode_stats["return"][-PRINT_INTERVAL:])
                 ave_steps = np.mean(episode_stats["steps"][-PRINT_INTERVAL:])
                 ave_delta = np.mean(episode_stats["ave_delta"][-PRINT_INTERVAL:])
-                ave_q = np.mean(episode_stats["ave_q"][-PRINT_INTERVAL:])
+                ave_lprob = np.mean(episode_stats["ave_lprob"][-PRINT_INTERVAL:])
                 duration_total_sec = int(time.time() - tic)
                 duration_min = duration_total_sec // 60
                 duration_hor = duration_min // 60
@@ -392,7 +392,7 @@ if __name__ == "__main__":
                     f"Step: {ave_steps:7.2f}\t"
                     f"Return: {ave_return:.2f}\t"
                     f"Delta: {ave_delta:.2f}\t"
-                    f"Q: {ave_q:.2f}\t"
+                    f"lprob: {ave_lprob:.2f}\t"
                     f"TotalStep: {total_step:,}",
                 )
                 data_list.append(
@@ -402,7 +402,7 @@ if __name__ == "__main__":
                         "steps": ave_steps,
                         "return": ave_return,
                         "ave_delta": ave_delta,
-                        "ave_q": ave_q,
+                        "ave_lprob": ave_lprob,
                     },
                 )
                 df = pd.DataFrame(data_list)
