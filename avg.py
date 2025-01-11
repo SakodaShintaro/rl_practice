@@ -7,6 +7,7 @@ import argparse
 import logging
 import os
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -237,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
     parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
     parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
-    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
+    parser.add_argument("--alpha_lr", default=0.035, type=float, help="Entropy Coefficient for AVG")
     parser.add_argument("--l2_actor", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--l2_critic", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--nhid_actor", default=256, type=int)
@@ -320,13 +321,8 @@ if __name__ == "__main__":
     logger.info(f"{action_coeff=}")
 
     # Interaction
-    episode_stats = {
-        "episode_id": [],
-        "steps": [],
-        "return": [],
-        "ave_delta": [],
-        "ave_lprob": [],
-    }
+    episode_stats = defaultdict(list)
+    episode_id = 1
     sum_reward, ep_step = 0, 0
     sum_delta, sum_lprob = 0, 0
     terminated, truncated = False, False
@@ -336,8 +332,6 @@ if __name__ == "__main__":
     PRINT_INTERVAL = 100
 
     for total_step in range(1, args.N + 1):
-        epsode_id = len(episode_stats["episode_id"]) + 1
-
         # N.B: Action is a torch.Tensor
         action, action_info = agent.compute_action(obs)
         sim_action = action.detach().cpu().view(-1).numpy()
@@ -345,8 +339,8 @@ if __name__ == "__main__":
 
         # Receive reward and next state
         next_obs, reward, terminated, truncated, _ = env.step(sim_action)
-        if epsode_id % 2000 == 0:
-            save_image_dir = save_dir / f"images/{epsode_id:06d}"
+        if episode_id % 2000 == 0:
+            save_image_dir = save_dir / f"images/{episode_id:06d}"
             save_image_dir.mkdir(exist_ok=True, parents=True)
             image = env.render()
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
@@ -369,17 +363,18 @@ if __name__ == "__main__":
             curr_ave_delta = sum_delta / ep_step
             curr_ave_lprob = sum_lprob / ep_step
 
-            episode_stats["episode_id"].append(epsode_id)
+            episode_stats["episode_id"].append(episode_id)
             episode_stats["steps"].append(ep_step)
             episode_stats["return"].append(sum_reward)
             episode_stats["ave_delta"].append(curr_ave_delta)
             episode_stats["ave_lprob"].append(curr_ave_lprob)
 
-            if epsode_id % PRINT_INTERVAL == 0:
-                ave_return = np.mean(episode_stats["return"][-PRINT_INTERVAL:])
-                ave_steps = np.mean(episode_stats["steps"][-PRINT_INTERVAL:])
-                ave_delta = np.mean(episode_stats["ave_delta"][-PRINT_INTERVAL:])
-                ave_lprob = np.mean(episode_stats["ave_lprob"][-PRINT_INTERVAL:])
+            if episode_id % PRINT_INTERVAL == 0:
+                ave_return = np.mean(episode_stats["return"])
+                ave_steps = np.mean(episode_stats["steps"])
+                ave_delta = np.mean(episode_stats["ave_delta"])
+                ave_lprob = np.mean(episode_stats["ave_lprob"])
+                episode_stats = defaultdict(list)
                 duration_total_sec = int(time.time() - tic)
                 duration_min = duration_total_sec // 60
                 duration_hor = duration_min // 60
@@ -388,7 +383,7 @@ if __name__ == "__main__":
                 duration_str = f"{duration_hor:03d}h:{duration_min:02d}m:{duration_sec:02d}s"
                 logger.info(
                     f"{duration_str}\t"
-                    f"Episode: {epsode_id:,}\t"
+                    f"Episode: {episode_id:,}\t"
                     f"Step: {ave_steps:7.2f}\t"
                     f"Return: {ave_return:.2f}\t"
                     f"Delta: {ave_delta:.2f}\t"
@@ -398,7 +393,7 @@ if __name__ == "__main__":
                 data_list.append(
                     {
                         "duration_sec": duration_total_sec,
-                        "episode_id": epsode_id,
+                        "episode_id": episode_id,
                         "steps": ave_steps,
                         "return": ave_return,
                         "ave_delta": ave_delta,
@@ -412,6 +407,7 @@ if __name__ == "__main__":
             agent.reset_eligibility_traces()
             sum_reward, ep_step = 0, 0
             sum_delta, sum_q = 0, 0
+            episode_id += 1
 
     # Save returns and args before exiting run
     agent.save(model_dir=save_dir, unique_str="last_model")
