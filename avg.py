@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
     parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
     parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
-    parser.add_argument("--alpha_lr", default=0.035, type=float, help="Entropy Coefficient for AVG")
+    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
     parser.add_argument("--l2_actor", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--l2_critic", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--nhid_actor", default=256, type=int)
