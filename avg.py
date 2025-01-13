@@ -398,6 +398,7 @@ if __name__ == "__main__":
                         "return": ave_return,
                         "ave_delta": ave_delta,
                         "ave_lprob": ave_lprob,
+                        "total_step": total_step,
                     },
                 )
                 df = pd.DataFrame(data_list)
