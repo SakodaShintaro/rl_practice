@@ -15,6 +15,5 @@ docker run -it \
     --ipc=host \
     --env="DISPLAY" \
     --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
-    --volume=$HOME/work/rl_practice:$HOME/work/rl_practice \
-    --name rl_practice_container \
+    --volume=$HOME/work:$HOME/work \
     ${IMAGE_NAME} bash
