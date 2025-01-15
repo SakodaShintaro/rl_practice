@@ -1,11 +1,13 @@
 #!/bin/bash
 set -eux
 
+IMAGE_NAME=rl_practice:latest
+
 docker build \
     --build-arg USER_NAME=$(whoami) \
     --build-arg USER_UID=$(id -u) \
     --build-arg USER_GID=$(id -g) \
-    -t rl_practice:latest .
+    -t ${IMAGE_NAME} .
 
 docker run -it \
     --user $(id -u):$(id -g) \
@@ -15,4 +17,4 @@ docker run -it \
     --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
     --volume=$HOME/work/rl_practice:$HOME/work/rl_practice \
     --name rl_practice_container \
-    rl_practice:latest bash
+    ${IMAGE_NAME} bash
