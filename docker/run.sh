@@ -8,6 +8,7 @@ docker build \
     -t rl_practice:latest .
 
 docker run -it \
+    --user $(id -u):$(id -g) \
     --gpus all \
     --ipc=host \
     --env="DISPLAY" \
