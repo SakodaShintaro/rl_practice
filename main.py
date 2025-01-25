@@ -8,19 +8,21 @@ import gymnasium as gym
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--env_name", default="Pendulum-v1", type=str)
     parser.add_argument("--save_dir", type=Path, default="result")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    save_dir = args.save_dir
+    env_name = args.env_name
+    save_dir = args.save_dir / env_name
 
     rmtree(save_dir, ignore_errors=True)
     save_dir.mkdir(exist_ok=True, parents=True)
 
     # Initialise the environment
-    env = gym.make("Pendulum-v1", render_mode="rgb_array")
+    env = gym.make(env_name, render_mode="rgb_array")
 
     print(f"{env.observation_space=}")
     print(f"{env.action_space=}")
