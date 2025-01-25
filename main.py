@@ -33,10 +33,10 @@ def check_sample(env_name: str) -> None:
         # step (transition) through the environment with the action
         # receiving the next observation, reward and if the episode has terminated or truncated
         observation, reward, terminated, truncated, info = env.step(action)
+        r = env.render()
 
-        print(f"{i=:08d}\t{reward=}", end="\r")
+        print(f"{i=:08d}\t{r.shape}\t{reward=}", end="\r")
 
-        r = env.render()  # (400, 600, 3)
         r = cv2.cvtColor(r, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(save_dir / f"{i:08d}.png"), r)
 
