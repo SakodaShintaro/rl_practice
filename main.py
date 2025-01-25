@@ -8,15 +8,11 @@ import gymnasium as gym
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_name", default="Pendulum-v1", type=str)
-    parser.add_argument("--save_dir", type=Path, default="result")
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    env_name = args.env_name
-    save_dir = args.save_dir / env_name
+def check_sample(env_name: str) -> None:
+    save_dir = Path("./result") / env_name
 
     rmtree(save_dir, ignore_errors=True)
     save_dir.mkdir(exist_ok=True, parents=True)
@@ -47,3 +43,18 @@ if __name__ == "__main__":
             observation, info = env.reset()
 
     env.close()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    env_name_list = [
+        "Acrobot-v1",
+        "CartPole-v1",
+        "MountainCarContinuous-v0",
+        "MountainCar-v0",
+        "Pendulum-v1",
+    ]
+
+    for env_name in env_name_list:
+        check_sample(env_name)
