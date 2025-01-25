@@ -253,6 +253,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_suffix", default="avg", type=str)
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
+    parser.add_argument("--print_interval_episode", default=100, type=int)
+    parser.add_argument("--record_interval_episode", default=2000, type=int)
     args = parser.parse_args()
 
     # init wandb
@@ -334,8 +336,6 @@ if __name__ == "__main__":
     obs, _ = env.reset()
     data_list = []
 
-    PRINT_INTERVAL = 100
-
     for total_step in range(1, args.N + 1):
         # N.B: Action is a torch.Tensor
         action, action_info = agent.compute_action(obs)
@@ -344,7 +344,7 @@ if __name__ == "__main__":
 
         # Receive reward and next state
         next_obs, reward, terminated, truncated, _ = env.step(sim_action)
-        if episode_id % 2000 == 0:
+        if episode_id % args.record_interval_episode == 0:
             save_image_dir = save_dir / f"images/{episode_id:06d}"
             save_image_dir.mkdir(exist_ok=True, parents=True)
             image = env.render()
@@ -374,7 +374,7 @@ if __name__ == "__main__":
             episode_stats["ave_delta"].append(curr_ave_delta)
             episode_stats["ave_lprob"].append(curr_ave_lprob)
 
-            if episode_id % PRINT_INTERVAL == 0:
+            if episode_id % args.print_interval_episode == 0:
                 ave_return = np.mean(episode_stats["return"])
                 ave_steps = np.mean(episode_stats["steps"])
                 ave_delta = np.mean(episode_stats["ave_delta"])
