@@ -27,7 +27,7 @@ for cmd in "${commands[@]}"; do
 
     # バックグラウンドでコマンドを実行
     eval "$cmd" &
-    sleep 1
+    sleep 2
 done
 
 # 残りのすべてのジョブが完了するのを待つ
