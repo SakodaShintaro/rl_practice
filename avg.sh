@@ -7,6 +7,10 @@ PARALLEL_JOBS=6
 
 SEED=45
 
+datatime=$(date "+%Y%m%d_%H%M%S")
+
+export WANDB_RUN_GROUP=${datatime}
+
 # コマンドを配列に格納
 commands=(
     "python3 avg.py --seed=${SEED} --save_suffix=baseline"

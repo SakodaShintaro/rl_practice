@@ -18,10 +18,11 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import wandb
 from gymnasium.wrappers import NormalizeObservation
 from torch import nn
 from torch.distributions import MultivariateNormal
+
+import wandb
 
 
 def orthogonal_weight_init(m: nn.Module) -> None:
@@ -255,7 +256,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # init wandb
-    wandb.init(project="avg", config=args)
+    wandb.init(project="avg", name=args.save_suffix, config=args)
 
     # Adam
     args.betas = [args.beta1, 0.999]
@@ -394,30 +395,19 @@ if __name__ == "__main__":
                     f"lprob: {ave_lprob:.2f}\t"
                     f"TotalStep: {total_step:,}",
                 )
-                data_list.append(
-                    {
-                        "duration_sec": duration_total_sec,
-                        "episode_id": episode_id,
-                        "steps": ave_steps,
-                        "return": ave_return,
-                        "ave_delta": ave_delta,
-                        "ave_lprob": ave_lprob,
-                        "total_step": total_step,
-                    },
-                )
+                data_dict = {
+                    "duration_sec": duration_total_sec,
+                    "episode_id": episode_id,
+                    "steps": ave_steps,
+                    "return": ave_return,
+                    "ave_delta": ave_delta,
+                    "ave_lprob": ave_lprob,
+                    "total_step": total_step,
+                }
+                data_list.append(data_dict)
                 df = pd.DataFrame(data_list)
                 df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
-                wandb.log(
-                    {
-                        "duration_sec": duration_total_sec,
-                        "episode_id": episode_id,
-                        "steps": ave_steps,
-                        "return": ave_return,
-                        "ave_delta": ave_delta,
-                        "ave_lprob": ave_lprob,
-                        "total_step": total_step,
-                    },
-                )
+                wandb.log(data_dict)
 
             obs, _ = env.reset()
             agent.reset_eligibility_traces()
