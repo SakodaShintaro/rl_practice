@@ -20,12 +20,13 @@ def check_sample(env_name: str) -> None:
     # Initialise the environment
     env = gym.make(env_name, render_mode="rgb_array")
 
+    print(f"{env_name=}")
     print(f"{env.observation_space=}")
     print(f"{env.action_space=}")
 
     # Reset the environment to generate the first observation
     observation, info = env.reset(seed=42)
-    for i in range(1000):
+    for i in range(100):
         # this is where you would insert your policy
         action = env.action_space.sample()
 
@@ -33,7 +34,7 @@ def check_sample(env_name: str) -> None:
         # receiving the next observation, reward and if the episode has terminated or truncated
         observation, reward, terminated, truncated, info = env.step(action)
 
-        print(f"{i=:08d}\t{reward=}")
+        print(f"{i=:08d}\t{reward=}", end="\r")
 
         r = env.render()  # (400, 600, 3)
         cv2.imwrite(str(save_dir / f"{i:08d}.png"), r)
@@ -41,8 +42,10 @@ def check_sample(env_name: str) -> None:
         # If the episode has ended then we can reset to start a new episode
         if terminated or truncated:
             observation, info = env.reset()
+    print()
 
     env.close()
+    print()
 
 
 if __name__ == "__main__":
