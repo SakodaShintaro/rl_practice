@@ -241,9 +241,15 @@ class RewardNormalizer:
         """Normalize the reward."""
         if self.type == "symlog":
             return self.symlog(reward)
-        else:  # noqa: RET505
-            self.return_rms.update(float(reward))
+        elif self.type == "scaling":
+            self.return_rms.update(np.array([reward]))
             return reward / np.sqrt(self.return_rms.var + self.epsilon)
+        elif self.type == "centering":
+            self.return_rms.update(np.array([reward]))
+            return (reward - self.return_rms.mean) / np.sqrt(self.return_rms.var + self.epsilon)
+        else:
+            msg = "Invalid normalizer type"
+            raise ValueError(msg)
 
 
 if __name__ == "__main__":
@@ -263,7 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("--nhid_critic", default=256, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
-    parser.add_argument("--normalizer_type", default="symlog", type=str)
+    parser.add_argument("--normalizer_type", default="scaling", type=str)
     # Miscellaneous
     parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
