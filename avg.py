@@ -159,10 +159,6 @@ class AVG:
         action, action_info = self.actor(obs)
         return action, action_info
 
-    def symlog(self, x: float) -> float:
-        """Symmetric log."""
-        return np.sign(x) * np.log(1 + np.abs(x))
-
     def update(
         self,
         obs: np.ndarray,
@@ -185,7 +181,6 @@ class AVG:
             q2 = self.Q(next_obs, next_action)
             target_V = q2 - self.alpha_lr * next_lprob
 
-        reward = self.symlog(reward)
         delta = reward + (1 - done) * self.gamma * target_V - q
         ####
 
@@ -230,6 +225,27 @@ class AVG:
             et.zero_()
 
 
+class RewardNormalizer:
+    """Reward Normalizer."""
+
+    def __init__(self, normalizer_type: str) -> None:
+        self.return_rms = gym.wrappers.utils.RunningMeanStd(shape=())
+        self.epsilon = 1e-8
+        self.type = normalizer_type
+
+    def symlog(self, x: float) -> float:
+        """Symmetric log."""
+        return np.sign(x) * np.log(1 + np.abs(x))
+
+    def normalize(self, reward: float) -> float:
+        """Normalize the reward."""
+        if self.type == "symlog":
+            return self.symlog(reward)
+        else:  # noqa: RET505
+            self.return_rms.update(float(reward))
+            return reward / np.sqrt(self.return_rms.var + self.epsilon)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default="Humanoid-v5", type=str)
@@ -247,6 +263,7 @@ if __name__ == "__main__":
     parser.add_argument("--nhid_critic", default=256, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
+    parser.add_argument("--normalizer_type", default="symlog", type=str)
     # Miscellaneous
     parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
@@ -328,10 +345,12 @@ if __name__ == "__main__":
     logger.info(f"{action_coeff=}")
 
     # Interaction
+    reward_normalizer = RewardNormalizer(args.normalizer_type)
     episode_stats = defaultdict(list)
     episode_id = 1
     sum_reward, ep_step = 0, 0
     sum_delta, sum_lprob = 0, 0
+    sum_reward_normed = 0
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
@@ -344,15 +363,17 @@ if __name__ == "__main__":
 
         # Receive reward and next state
         next_obs, reward, terminated, truncated, _ = env.step(sim_action)
+        reward_normed = reward_normalizer.normalize(reward)
         if episode_id % args.record_interval_episode == 0:
             save_image_dir = save_dir / f"images/{episode_id:06d}"
             save_image_dir.mkdir(exist_ok=True, parents=True)
             image = env.render()
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
-        stats = agent.update(obs, action, next_obs, reward, terminated, **action_info)
+        stats = agent.update(obs, action, next_obs, reward_normed, terminated, **action_info)
         sum_delta += stats["delta"]
         sum_lprob += action_info["lprob"].item()
         sum_reward += reward
+        sum_reward_normed += reward_normed
         ep_step += 1
 
         obs = next_obs
@@ -371,11 +392,13 @@ if __name__ == "__main__":
             episode_stats["episode_id"].append(episode_id)
             episode_stats["steps"].append(ep_step)
             episode_stats["return"].append(sum_reward)
+            episode_stats["return_normed"].append(sum_reward_normed)
             episode_stats["ave_delta"].append(curr_ave_delta)
             episode_stats["ave_lprob"].append(curr_ave_lprob)
 
             if episode_id % args.print_interval_episode == 0:
                 ave_return = np.mean(episode_stats["return"])
+                ave_return_normed = np.mean(episode_stats["return_normed"])
                 ave_steps = np.mean(episode_stats["steps"])
                 ave_delta = np.mean(episode_stats["ave_delta"])
                 ave_lprob = np.mean(episode_stats["ave_lprob"])
@@ -391,6 +414,7 @@ if __name__ == "__main__":
                     f"Episode: {episode_id:,}\t"
                     f"Step: {ave_steps:7.2f}\t"
                     f"Return: {ave_return:.2f}\t"
+                    f"ReturnNormed: {ave_return_normed:.2f}\t"
                     f"Delta: {ave_delta:.2f}\t"
                     f"lprob: {ave_lprob:.2f}\t"
                     f"TotalStep: {total_step:,}",
@@ -400,6 +424,7 @@ if __name__ == "__main__":
                     "episode_id": episode_id,
                     "steps": ave_steps,
                     "return": ave_return,
+                    "return_normed": ave_return_normed,
                     "ave_delta": ave_delta,
                     "ave_lprob": ave_lprob,
                     "total_step": total_step,
@@ -413,6 +438,7 @@ if __name__ == "__main__":
             agent.reset_eligibility_traces()
             sum_reward, ep_step = 0, 0
             sum_delta, sum_q = 0, 0
+            sum_reward_normed = 0
             episode_id += 1
 
     # Save returns and args before exiting run
