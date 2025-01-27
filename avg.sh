@@ -5,7 +5,7 @@ trap "kill 0" EXIT
 
 PARALLEL_JOBS=6
 
-SEED=45
+SEED=0
 
 datatime=$(date "+%Y%m%d_%H%M%S")
 
@@ -15,11 +15,11 @@ save_dir="results/${datatime}"
 
 # コマンドを配列に格納
 commands=(
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --save_suffix=Humanoid-v5 --env=Humanoid-v5"
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --save_suffix=Ant-v5 --env=Ant-v5"
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --save_suffix=MountainCarContinuous-v0 --env=MountainCarContinuous-v0"
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --save_suffix=Pendulum-v1 --env=Pendulum-v1"
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --save_suffix=BipedalWalker-v3 --env=BipedalWalker-v3"
+    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=none --save_suffix=none"
+    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=const --save_suffix=const"
+    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=symlog --save_suffix=symlog"
+    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=scaling --save_suffix=scaling"
+    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=centering --save_suffix=centering"
 )
 
 # 並列実行を管理
