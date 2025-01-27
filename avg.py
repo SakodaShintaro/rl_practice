@@ -274,6 +274,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--normalizer_type", default="scaling", type=str)
+    parser.add_argument("--additional_coeff", default=2.5, type=float)
     # Miscellaneous
     parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
@@ -350,9 +351,10 @@ if __name__ == "__main__":
 
     action_coeff = (env.action_space.high - env.action_space.low) / 2
 
-    # なぜか0.4で割らないと上手く行かない
-    action_coeff /= 0.4
-    logger.info(f"{action_coeff=}")
+    # なぜか追加の係数がないとHumanoid-v5で学習が進まない
+    logger.info(f"Before {action_coeff=}")
+    action_coeff *= args.additional_coeff
+    logger.info(f"After  {action_coeff=}")
 
     # Interaction
     reward_normalizer = RewardNormalizer(args.normalizer_type)
