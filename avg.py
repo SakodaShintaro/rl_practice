@@ -239,7 +239,11 @@ class RewardNormalizer:
 
     def normalize(self, reward: float) -> float:
         """Normalize the reward."""
-        if self.type == "symlog":
+        if self.type == "none":
+            return reward
+        elif self.type == "const":
+            return reward / 500.0
+        elif self.type == "symlog":
             return self.symlog(reward)
         elif self.type == "scaling":
             self.return_rms.update(np.array([reward]))
