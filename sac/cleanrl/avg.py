@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from gymnasium.wrappers import NormalizeObservation
 
 import wandb
 from network import Actor, SoftQNetwork
@@ -177,7 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("--nhid_critic", default=256, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
-    parser.add_argument("--normalizer_type", default="scaling", type=str)
+    parser.add_argument("--normalizer_type", default="none", type=str)
     parser.add_argument("--additional_coeff", default=2.5, type=float)
     # Miscellaneous
     parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
@@ -234,7 +233,7 @@ if __name__ == "__main__":
     # Env
     env = gym.make(args.env, render_mode="rgb_array")
     env = gym.wrappers.FlattenObservation(env)
-    env = NormalizeObservation(env)
+    env = gym.wrappers.NormalizeObservation(env)
 
     #### Reproducibility
     env.reset(seed=args.seed)
@@ -304,6 +303,23 @@ if __name__ == "__main__":
         if terminated or truncated:
             curr_ave_delta = sum_delta / ep_step
             curr_ave_lprob = sum_lprob / ep_step
+            duration_total_sec = int(time.time() - tic)
+
+            data_dict = {
+                "charts/elapse_time_sec": duration_total_sec,
+                "episode_id": episode_id,
+                "episodic_length": ep_step,
+                "episodic_return": sum_reward,
+                "episodic_return_normed": sum_reward_normed,
+                "losses/qf1_loss": curr_ave_delta,
+                "losses/log_pi": curr_ave_lprob,
+                "global_step": total_step,
+            }
+
+            data_list.append(data_dict)
+            df = pd.DataFrame(data_list)
+            df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
+            wandb.log(data_dict)
 
             episode_stats["episode_id"].append(episode_id)
             episode_stats["steps"].append(ep_step)
@@ -319,7 +335,6 @@ if __name__ == "__main__":
                 ave_delta = np.mean(episode_stats["ave_delta"])
                 ave_lprob = np.mean(episode_stats["ave_lprob"])
                 episode_stats = defaultdict(list)
-                duration_total_sec = int(time.time() - tic)
                 duration_min = duration_total_sec // 60
                 duration_hor = duration_min // 60
                 duration_sec = duration_total_sec % 60
@@ -335,20 +350,6 @@ if __name__ == "__main__":
                     f"lprob: {ave_lprob:.2f}\t"
                     f"TotalStep: {total_step:,}",
                 )
-                data_dict = {
-                    "charts/elapse_time_sec": duration_total_sec,
-                    "episode_id": episode_id,
-                    "episodic_length": ave_steps,
-                    "episodic_return": ave_return,
-                    "episodic_return_normed": ave_return_normed,
-                    "losses/qf1_loss": ave_delta,
-                    "losses/log_pi": ave_lprob,
-                    "global_step": total_step,
-                }
-                data_list.append(data_dict)
-                df = pd.DataFrame(data_list)
-                df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
-                wandb.log(data_dict)
 
             obs, _ = env.reset()
             agent.reset_eligibility_traces()
