@@ -17,7 +17,7 @@ save_dir="results/${datatime}"
 
 # コマンドを配列に格納
 commands=(
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=none --save_suffix=none"
+    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=none"
     "python3 sac.py --seed=${SEED}"
 )
 
