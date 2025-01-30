@@ -37,7 +37,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Humanoid-v5"
     """the environment id of the task"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 2_000_000
     """total timesteps of the experiments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
@@ -63,21 +63,6 @@ class Args:
     """automatic tuning of the entropy coefficient"""
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.Autoreset(env)
-        env.action_space.seed(seed)
-        return env
-
-    return thunk
-
-
 if __name__ == "__main__":
     args = tyro.cli(Args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -101,7 +86,15 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    env = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)()
+    if args.capture_video:
+        env = gym.make(args.env_id, render_mode="rgb_array")
+        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+    else:
+        env = gym.make(args.env_id)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.Autoreset(env)
+    env.action_space.seed(args.seed)
+
     assert isinstance(
         env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
