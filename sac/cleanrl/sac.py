@@ -9,12 +9,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import tyro
+from stable_baselines3.common.buffers import ReplayBuffer
 from torch import nn, optim
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import wandb
-from buffers import ReplayBuffer
 
 
 @dataclass
@@ -165,12 +164,6 @@ if __name__ == "__main__":
         monitor_gym=True,
         save_code=True,
     )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -231,8 +224,12 @@ if __name__ == "__main__":
         next_obs, reward, termination, truncation, info = env.step(action)
 
         if termination:
-            writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-            writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            data_dict = {
+                "global_step": global_step,
+                "episodic_return": info["episode"]["r"],
+                "episodic_length": info["episode"]["l"],
+            }
+            wandb.log(data_dict)
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
@@ -303,22 +300,23 @@ if __name__ == "__main__":
                     )
 
             if global_step % 100 == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                writer.add_scalar("losses/alpha", alpha, global_step)
-                writer.add_scalar(
-                    "charts/SPS",
-                    int(global_step / (time.time() - start_time)),
-                    global_step,
-                )
+                elapsed_time = time.time() - start_time
+                data_dict = {
+                    "global_step": global_step,
+                    "losses/qf1_values": qf1_a_values.mean().item(),
+                    "losses/qf2_values": qf2_a_values.mean().item(),
+                    "losses/qf1_loss": qf1_loss.item(),
+                    "losses/qf2_loss": qf2_loss.item(),
+                    "losses/qf_loss": qf_loss.item() / 2.0,
+                    "losses/actor_loss": actor_loss.item(),
+                    "losses/alpha": alpha,
+                    "charts/elapse_time_sec": elapsed_time,
+                    "charts/SPS": int(global_step / elapsed_time),
+                }
                 if args.autotune:
-                    writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+                    data_dict["losses/alpha_loss"] = alpha_loss.item()
+                wandb.log(data_dict)
 
         progress_bar.update(1)
 
     env.close()
-    writer.close()

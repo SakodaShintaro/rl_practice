@@ -286,7 +286,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # init wandb
-    wandb.init(project="avg", name=args.save_suffix, config=args)
+    wandb.init(project="cleanRL", name=args.save_suffix, config=args)
 
     # Adam
     args.betas = [args.beta1, 0.999]
