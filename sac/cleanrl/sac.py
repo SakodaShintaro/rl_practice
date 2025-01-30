@@ -237,6 +237,7 @@ if __name__ == "__main__":
                     "losses/qf_loss": qf_loss.item() / 2.0,
                     "losses/actor_loss": actor_loss.item(),
                     "losses/alpha": alpha,
+                    "losses/log_pi": log_pi.mean().item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": int(global_step / elapsed_time),
                 }

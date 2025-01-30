@@ -185,7 +185,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_suffix", default="avg", type=str)
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
-    parser.add_argument("--print_interval_episode", default=100, type=int)
+    parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=2000, type=int)
     args = parser.parse_args()
 
@@ -336,14 +336,14 @@ if __name__ == "__main__":
                     f"TotalStep: {total_step:,}",
                 )
                 data_dict = {
-                    "duration_sec": duration_total_sec,
+                    "charts/elapse_time_sec": duration_total_sec,
                     "episode_id": episode_id,
-                    "steps": ave_steps,
-                    "return": ave_return,
-                    "return_normed": ave_return_normed,
-                    "ave_delta": ave_delta,
-                    "ave_lprob": ave_lprob,
-                    "total_step": total_step,
+                    "episodic_length": ave_steps,
+                    "episodic_return": ave_return,
+                    "episodic_return_normed": ave_return_normed,
+                    "losses/qf1_loss": ave_delta,
+                    "losses/log_pi": ave_lprob,
+                    "global_step": total_step,
                 }
                 data_list.append(data_dict)
                 df = pd.DataFrame(data_list)
