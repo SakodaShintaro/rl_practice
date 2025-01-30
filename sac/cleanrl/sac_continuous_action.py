@@ -11,7 +11,9 @@ import torch.nn.functional as F
 import tyro
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
+import wandb
 from buffers import ReplayBuffer
 
 
@@ -37,8 +39,6 @@ class Args:
     """the environment id of the task"""
     total_timesteps: int = 1000000
     """total timesteps of the experiments"""
-    num_envs: int = 1
-    """the number of parallel game environments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
     gamma: float = 0.99
@@ -71,6 +71,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.Autoreset(env)
         env.action_space.seed(seed)
         return env
 
@@ -82,8 +83,8 @@ class SoftQNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
         self.fc1 = nn.Linear(
-            np.array(env.single_observation_space.shape).prod()
-            + np.prod(env.single_action_space.shape),
+            np.array(env.observation_space.shape).prod()
+            + np.prod(env.action_space.shape),
             256,
         )
         self.fc2 = nn.Linear(256, 256)
@@ -104,22 +105,22 @@ LOG_STD_MIN = -5
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
+        self.fc_mean = nn.Linear(256, np.prod(env.action_space.shape))
+        self.fc_logstd = nn.Linear(256, np.prod(env.action_space.shape))
         # action rescaling
         self.register_buffer(
             "action_scale",
             torch.tensor(
-                (env.single_action_space.high - env.single_action_space.low) / 2.0,
+                (env.action_space.high - env.action_space.low) / 2.0,
                 dtype=torch.float32,
             ),
         )
         self.register_buffer(
             "action_bias",
             torch.tensor(
-                (env.single_action_space.high + env.single_action_space.low) / 2.0,
+                (env.action_space.high + env.action_space.low) / 2.0,
                 dtype=torch.float32,
             ),
         )
@@ -154,7 +155,6 @@ class Actor(nn.Module):
 if __name__ == "__main__":
     args = tyro.cli(Args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    import wandb
 
     wandb.init(
         project=args.wandb_project_name,
@@ -181,23 +181,16 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [
-            make_env(args.env_id, args.seed + i, i, args.capture_video, run_name)
-            for i in range(args.num_envs)
-        ]
-    )
+    env = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)()
     assert isinstance(
-        envs.single_action_space, gym.spaces.Box
+        env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    max_action = float(envs.single_action_space.high[0])
-
-    actor = Actor(envs).to(device)
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
+    actor = Actor(env).to(device)
+    qf1 = SoftQNetwork(env).to(device)
+    qf2 = SoftQNetwork(env).to(device)
+    qf1_target = SoftQNetwork(env).to(device)
+    qf2_target = SoftQNetwork(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
@@ -205,59 +198,47 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
+        target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         alpha = log_alpha.exp().item()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
     else:
         alpha = args.alpha
 
-    envs.single_observation_space.dtype = np.float32
+    env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
+        env.observation_space,
+        env.action_space,
         device,
-        n_envs=args.num_envs,
+        n_envs=1,
         handle_timeout_termination=False,
     )
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs, _ = envs.reset(seed=args.seed)
-    sum_rewards = 0.0
+    obs, _ = env.reset(seed=args.seed)
+    progress_bar = tqdm(range(args.total_timesteps), dynamic_ncols=True)
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
-            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
+            action = env.action_space.sample()
         else:
-            actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
-            actions = actions.detach().cpu().numpy()
+            action, _, _ = actor.get_action(torch.Tensor(obs).to(device).unsqueeze(0))
+            action = action[0].detach().cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-        sum_rewards += rewards[0]
+        next_obs, reward, termination, truncation, info = env.step(action)
 
-        if terminations[0]:
-            writer.add_scalar("charts/episode_reward", sum_rewards, global_step)
-            sum_rewards = 0.0
-
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if "final_info" in infos:
-            assert False
-            for info in infos["final_info"]:
-                if info is not None:
-                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    break
+        if termination:
+            writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+            writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
-        for idx, trunc in enumerate(truncations):
-            if trunc:
-                real_next_obs[idx] = infos["final_observation"][idx]
-        rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
+        if truncation:
+            real_next_obs = info["final_observation"]
+        rb.add(obs, real_next_obs, action, reward, termination, info)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
@@ -269,9 +250,8 @@ if __name__ == "__main__":
                 next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
                 qf1_next_target = qf1_target(data.next_observations, next_state_actions)
                 qf2_next_target = qf2_target(data.next_observations, next_state_actions)
-                min_qf_next_target = (
-                    torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                )
+                min_q = torch.min(qf1_next_target, qf2_next_target)
+                min_qf_next_target = min_q - alpha * next_state_log_pi
                 next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (
                     min_qf_next_target
                 ).view(-1)
@@ -335,18 +315,10 @@ if __name__ == "__main__":
                     int(global_step / (time.time() - start_time)),
                     global_step,
                 )
-                # print(f"global_step={global_step}\t"
-                #       f"losses/qf1_values={qf1_a_values.mean().item()}\t"
-                #       f"losses/qf2_values={qf2_a_values.mean().item()}\t"
-                #       f"losses/qf1_loss={qf1_loss.item()}\t"
-                #       f"losses/qf2_loss={qf2_loss.item()}\t"
-                #       f"losses/qf_loss={qf_loss.item() / 2.0}\t"
-                #       f"losses/actor_loss={actor_loss.item()}\t"
-                #       f"losses/alpha={alpha}\t"
-                #       f"charts/SPS={int(global_step / (time.time() - start_time))}"
-                # )
                 if args.autotune:
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
-    envs.close()
+        progress_bar.update(1)
+
+    env.close()
     writer.close()
