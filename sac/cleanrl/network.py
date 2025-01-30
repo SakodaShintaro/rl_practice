@@ -4,6 +4,13 @@ import torch.nn.functional as F
 from torch import nn
 
 
+def orthogonal_weight_init(m: nn.Module) -> None:
+    """Orthogonal weight initialization for neural networks."""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        m.bias.data.fill_(0.0)
+
+
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -13,11 +20,13 @@ class SoftQNetwork(nn.Module):
         )
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
+        self.apply(orthogonal_weight_init)
 
     def forward(self, x, a):
         x = torch.cat([x, a], 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
+        x = x / torch.norm(x, dim=1).view((-1, 1))
         x = self.fc3(x)
         return x
 
@@ -48,10 +57,12 @@ class Actor(nn.Module):
                 dtype=torch.float32,
             ),
         )
+        self.apply(orthogonal_weight_init)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
+        x = x / torch.norm(x, dim=1).view((-1, 1))
         mean = self.fc_mean(x)
         log_std = self.fc_logstd(x)
         log_std = torch.tanh(log_std)
