@@ -25,8 +25,6 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
-    """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "cleanRL"
     """the wandb's project name"""
     wandb_entity: str = None
@@ -156,18 +154,17 @@ class Actor(nn.Module):
 if __name__ == "__main__":
     args = tyro.cli(Args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
+    import wandb
 
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
+    wandb.init(
+        project=args.wandb_project_name,
+        entity=args.wandb_entity,
+        sync_tensorboard=True,
+        config=vars(args),
+        name=run_name,
+        monitor_gym=True,
+        save_code=True,
+    )
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
@@ -228,6 +225,7 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset(seed=args.seed)
+    sum_rewards = 0.0
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
@@ -238,9 +236,15 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        sum_rewards += rewards[0]
+
+        if terminations[0]:
+            writer.add_scalar("charts/episode_reward", sum_rewards, global_step)
+            sum_rewards = 0.0
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
+            assert False
             for info in infos["final_info"]:
                 if info is not None:
                     print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
@@ -331,16 +335,16 @@ if __name__ == "__main__":
                     int(global_step / (time.time() - start_time)),
                     global_step,
                 )
-                print(f"global_step={global_step}\t"
-                      f"losses/qf1_values={qf1_a_values.mean().item()}\t"
-                      f"losses/qf2_values={qf2_a_values.mean().item()}\t"
-                      f"losses/qf1_loss={qf1_loss.item()}\t"
-                      f"losses/qf2_loss={qf2_loss.item()}\t"
-                      f"losses/qf_loss={qf_loss.item() / 2.0}\t"
-                      f"losses/actor_loss={actor_loss.item()}\t"
-                      f"losses/alpha={alpha}\t"
-                      f"charts/SPS={int(global_step / (time.time() - start_time))}"
-                )
+                # print(f"global_step={global_step}\t"
+                #       f"losses/qf1_values={qf1_a_values.mean().item()}\t"
+                #       f"losses/qf2_values={qf2_a_values.mean().item()}\t"
+                #       f"losses/qf1_loss={qf1_loss.item()}\t"
+                #       f"losses/qf2_loss={qf2_loss.item()}\t"
+                #       f"losses/qf_loss={qf_loss.item() / 2.0}\t"
+                #       f"losses/actor_loss={actor_loss.item()}\t"
+                #       f"losses/alpha={alpha}\t"
+                #       f"charts/SPS={int(global_step / (time.time() - start_time))}"
+                # )
                 if args.autotune:
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
