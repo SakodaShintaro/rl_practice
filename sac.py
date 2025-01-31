@@ -99,11 +99,11 @@ if __name__ == "__main__":
         env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    actor = Actor(env).to(device)
-    qf1 = SoftQNetwork(env).to(device)
-    qf2 = SoftQNetwork(env).to(device)
-    qf1_target = SoftQNetwork(env).to(device)
-    qf2_target = SoftQNetwork(env).to(device)
+    actor = Actor(env, use_normalize=False).to(device)
+    qf1 = SoftQNetwork(env, use_normalize=False).to(device)
+    qf2 = SoftQNetwork(env, use_normalize=False).to(device)
+    qf1_target = SoftQNetwork(env, use_normalize=False).to(device)
+    qf2_target = SoftQNetwork(env, use_normalize=False).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
