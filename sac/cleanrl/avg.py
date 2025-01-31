@@ -29,9 +29,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--N", default=2_000_000, type=int, help="# total timesteps for the run")
     parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
     parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
+    parser.add_argument("--alpha_lr", default=1e-2, type=float, help="Alpha step size")
     parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
     parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
-    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
     parser.add_argument("--l2_actor", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--l2_critic", default=0.0, type=float, help="L2 Regularization")
     parser.add_argument("--nhid_actor", default=256, type=int)
@@ -74,7 +74,7 @@ class AVG:
             weight_decay=cfg.l2_critic,
         )
 
-        self.alpha_lr, self.gamma, self.device = cfg.alpha_lr, cfg.gamma, cfg.device
+        self.gamma, self.device = cfg.gamma, cfg.device
 
         self.use_eligibility_trace = cfg.use_eligibility_trace
 
@@ -83,6 +83,10 @@ class AVG:
             self.eligibility_traces_q = [
                 torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
             ]
+
+        self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
+        self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
+        self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -107,15 +111,16 @@ class AVG:
         #### Q loss
         q = self.Q(obs, action.detach())  # N.B: Gradient should NOT pass through action here
         with torch.no_grad():
+            alpha = self.log_alpha.exp().item()
             next_action, next_lprob, mean = self.actor.get_action(next_obs)
             q2 = self.Q(next_obs, next_action)
-            target_V = q2 - self.alpha_lr * next_lprob
+            target_V = q2 - alpha * next_lprob
 
         delta = reward + (1 - done) * self.gamma * target_V - q
         ####
 
         # Policy loss
-        ploss = self.alpha_lr * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
+        ploss = alpha * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
         self.popt.zero_grad()
         ploss.backward()
         self.popt.step()
@@ -132,11 +137,19 @@ class AVG:
             qloss.backward()
         self.qopt.step()
 
+        # alpha
+        alpha_loss = (-self.log_alpha.exp() * (lprob.detach() + self.target_entropy)).mean()
+        self.aopt.zero_grad()
+        alpha_loss.backward()
+        self.aopt.step()
+
         self.steps += 1
 
         return {
             "delta": delta.item(),
             "q": q.item(),
+            "alpha_loss": alpha_loss.item(),
+            "alpha": alpha,
         }
 
     def reset_eligibility_traces(self) -> None:
@@ -252,6 +265,15 @@ if __name__ == "__main__":
         ep_step += 1
 
         obs = next_obs
+
+        if total_step % 100 == 0:
+            step_data = {
+                "global_step": total_step,
+                "losses/qf1_values": stats["q"],
+                "losses/alpha": stats["alpha"],
+                "losses/alpha_loss": stats["alpha_loss"],
+            }
+            wandb.log(step_data)
 
         # Termination
         if terminated or truncated:
