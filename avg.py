@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reward_processing_type", default="none", type=str)
     parser.add_argument("--additional_coeff", default=2.5, type=float)
     parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
-    parser.add_argument("--save_suffix", default="avg", type=str)
+    parser.add_argument("--save_suffix", default="AVG", type=str)
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
     parser.add_argument("--print_interval_episode", default=50, type=int)
@@ -148,6 +148,7 @@ class AVG:
         return {
             "delta": delta.item(),
             "q": q.item(),
+            "policy_loss": ploss.item(),
             "alpha_loss": alpha_loss.item(),
             "alpha": alpha,
         }
@@ -269,6 +270,7 @@ if __name__ == "__main__":
         if total_step % 100 == 0:
             step_data = {
                 "global_step": total_step,
+                "losses/policy_loss": stats["policy_loss"],
                 "losses/qf1_values": stats["q"],
                 "losses/alpha": stats["alpha"],
                 "losses/alpha_loss": stats["alpha_loss"],
