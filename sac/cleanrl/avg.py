@@ -13,13 +13,13 @@ from pathlib import Path
 
 import cv2
 import gymnasium as gym
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 
 import wandb
 from network import Actor, SoftQNetwork
+from reward_processor import RewardProcessor
 
 
 class AVG:
@@ -128,37 +128,6 @@ class AVG:
             et.zero_()
 
 
-class RewardNormalizer:
-    """Reward Normalizer."""
-
-    def __init__(self, normalizer_type: str) -> None:
-        self.return_rms = gym.wrappers.utils.RunningMeanStd(shape=())
-        self.epsilon = 1e-8
-        self.type = normalizer_type
-
-    def symlog(self, x: float) -> float:
-        """Symmetric log."""
-        return np.sign(x) * np.log(1 + np.abs(x))
-
-    def normalize(self, reward: float) -> float:
-        """Normalize the reward."""
-        if self.type == "none":
-            return reward
-        elif self.type == "const":
-            return reward / 500.0
-        elif self.type == "symlog":
-            return self.symlog(reward)
-        elif self.type == "scaling":
-            self.return_rms.update(np.array([reward]))
-            return reward / np.sqrt(self.return_rms.var + self.epsilon)
-        elif self.type == "centering":
-            self.return_rms.update(np.array([reward]))
-            return (reward - self.return_rms.mean) / np.sqrt(self.return_rms.var + self.epsilon)
-        else:
-            msg = "Invalid normalizer type"
-            raise ValueError(msg)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default="Humanoid-v5", type=str)
@@ -176,7 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--nhid_critic", default=256, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
-    parser.add_argument("--normalizer_type", default="none", type=str)
+    parser.add_argument("--reward_processing_type", default="none", type=str)
     parser.add_argument("--additional_coeff", default=2.5, type=float)
     # Miscellaneous
     parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
@@ -260,7 +229,7 @@ if __name__ == "__main__":
     logger.info(f"After  {action_coeff=}")
 
     # Interaction
-    reward_normalizer = RewardNormalizer(args.normalizer_type)
+    reward_processor = RewardProcessor(args.reward_processing_type)
     episode_stats = defaultdict(list)
     episode_id = 1
     sum_reward, ep_step = 0, 0
@@ -278,7 +247,7 @@ if __name__ == "__main__":
 
         # Receive reward and next state
         next_obs, reward, terminated, truncated, _ = env.step(sim_action)
-        reward_normed = reward_normalizer.normalize(reward)
+        reward_normed = reward_processor.normalize(reward)
         if episode_id % args.record_interval_episode == 0:
             save_image_dir = save_dir / f"images/{episode_id:06d}"
             save_image_dir.mkdir(exist_ok=True, parents=True)
@@ -363,7 +332,3 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(data_list)
     df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
-    plt.plot(df["episode_id"], df["return"])
-    plt.xlabel("Episode")
-    plt.ylabel("Return")
-    plt.savefig(f"{save_dir}/returns.png", bbox_inches="tight", pad_inches=0.05)
