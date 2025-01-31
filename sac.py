@@ -49,10 +49,6 @@ class Args:
     """the learning rate of the Q network network optimizer"""
     target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
     """the frequency of updates for the target nerworks"""
-    alpha: float = 0.2
-    """Entropy regularization coefficient."""
-    autotune: bool = True
-    """automatic tuning of the entropy coefficient"""
 
 
 if __name__ == "__main__":
@@ -96,13 +92,10 @@ if __name__ == "__main__":
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
     # Automatic entropy tuning
-    if args.autotune:
-        target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
-        log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        alpha = log_alpha.exp().item()
-        a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
-    else:
-        alpha = args.alpha
+    target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
+    log_alpha = torch.zeros(1, requires_grad=True, device=device)
+    alpha = log_alpha.exp().item()
+    a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
 
     env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
@@ -175,15 +168,14 @@ if __name__ == "__main__":
             actor_loss.backward()
             actor_optimizer.step()
 
-            if args.autotune:
-                with torch.no_grad():
-                    _, log_pi, _ = actor.get_action(data.observations)
-                alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
+            with torch.no_grad():
+                _, log_pi, _ = actor.get_action(data.observations)
+            alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
 
-                a_optimizer.zero_grad()
-                alpha_loss.backward()
-                a_optimizer.step()
-                alpha = log_alpha.exp().item()
+            a_optimizer.zero_grad()
+            alpha_loss.backward()
+            a_optimizer.step()
+            alpha = log_alpha.exp().item()
 
             # update the target networks
             if global_step % args.target_network_frequency == 0:
@@ -208,11 +200,10 @@ if __name__ == "__main__":
                     "losses/actor_loss": actor_loss.item(),
                     "losses/alpha": alpha,
                     "losses/log_pi": log_pi.mean().item(),
+                    "losses/alpha_loss": alpha_loss.item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": int(global_step / elapsed_time),
                 }
-                if args.autotune:
-                    data_dict["losses/alpha_loss"] = alpha_loss.item()
                 wandb.log(data_dict)
 
         progress_bar.update(1)
