@@ -27,12 +27,6 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    wandb_project_name: str = "cleanRL"
-    """the wandb's project name"""
-    wandb_entity: str = None
-    """the entity (team) of wandb's project"""
-    capture_video: bool = False
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
     env_id: str = "Humanoid-v5"
@@ -53,8 +47,6 @@ class Args:
     """the learning rate of the policy network optimizer"""
     q_lr: float = 1e-3
     """the learning rate of the Q network network optimizer"""
-    policy_frequency: int = 2
-    """the frequency of training policy (delayed)"""
     target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
     """the frequency of updates for the target nerworks"""
     alpha: float = 0.2
@@ -68,9 +60,7 @@ if __name__ == "__main__":
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
     wandb.init(
-        project=args.wandb_project_name,
-        entity=args.wandb_entity,
-        sync_tensorboard=True,
+        project="cleanRL",
         config=vars(args),
         name=run_name,
         monitor_gym=True,
@@ -86,11 +76,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    if args.capture_video:
-        env = gym.make(args.env_id, render_mode="rgb_array")
-        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-    else:
-        env = gym.make(args.env_id)
+    env = gym.make(args.env_id)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.Autoreset(env)
     env.action_space.seed(args.seed)
@@ -179,29 +165,25 @@ if __name__ == "__main__":
             qf_loss.backward()
             q_optimizer.step()
 
-            if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
-                for _ in range(
-                    args.policy_frequency
-                ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    pi, log_pi, _ = actor.get_action(data.observations)
-                    qf1_pi = qf1(data.observations, pi)
-                    qf2_pi = qf2(data.observations, pi)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
-                    actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+            pi, log_pi, _ = actor.get_action(data.observations)
+            qf1_pi = qf1(data.observations, pi)
+            qf2_pi = qf2(data.observations, pi)
+            min_qf_pi = torch.min(qf1_pi, qf2_pi)
+            actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
-                    actor_optimizer.zero_grad()
-                    actor_loss.backward()
-                    actor_optimizer.step()
+            actor_optimizer.zero_grad()
+            actor_loss.backward()
+            actor_optimizer.step()
 
-                    if args.autotune:
-                        with torch.no_grad():
-                            _, log_pi, _ = actor.get_action(data.observations)
-                        alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
+            if args.autotune:
+                with torch.no_grad():
+                    _, log_pi, _ = actor.get_action(data.observations)
+                alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
 
-                        a_optimizer.zero_grad()
-                        alpha_loss.backward()
-                        a_optimizer.step()
-                        alpha = log_alpha.exp().item()
+                a_optimizer.zero_grad()
+                alpha_loss.backward()
+                a_optimizer.step()
+                alpha = log_alpha.exp().item()
 
             # update the target networks
             if global_step % args.target_network_frequency == 0:
