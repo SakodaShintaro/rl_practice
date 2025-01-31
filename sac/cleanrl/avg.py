@@ -309,5 +309,6 @@ if __name__ == "__main__":
             agent.reset_eligibility_traces()
             sum_reward, ep_step = 0, 0
             sum_delta, sum_q = 0, 0
+            sum_lprob = 0
             sum_reward_normed = 0
             episode_id += 1
