@@ -30,7 +30,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Humanoid-v5"
     """the environment id of the task"""
-    total_timesteps: int = 2_000_000
+    total_timesteps: int = 1_000_000
     """total timesteps of the experiments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
