@@ -22,6 +22,33 @@ from network import Actor, SoftQNetwork
 from reward_processor import RewardProcessor
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default="Humanoid-v5", type=str)
+    parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
+    parser.add_argument("--N", default=2_000_000, type=int, help="# total timesteps for the run")
+    parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
+    parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
+    parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
+    parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
+    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
+    parser.add_argument("--l2_actor", default=0.0, type=float, help="L2 Regularization")
+    parser.add_argument("--l2_critic", default=0.0, type=float, help="L2 Regularization")
+    parser.add_argument("--nhid_actor", default=256, type=int)
+    parser.add_argument("--nhid_critic", default=256, type=int)
+    parser.add_argument("--use_eligibility_trace", action="store_true")
+    parser.add_argument("--et_lambda", default=0.0, type=float)
+    parser.add_argument("--reward_processing_type", default="none", type=str)
+    parser.add_argument("--additional_coeff", default=2.5, type=float)
+    parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
+    parser.add_argument("--save_suffix", default="avg", type=str)
+    parser.add_argument("--device", default="cpu", type=str)
+    parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
+    parser.add_argument("--print_interval_episode", default=50, type=int)
+    parser.add_argument("--record_interval_episode", default=2000, type=int)
+    return parser.parse_args()
+
+
 class AVG:
     """AVG Agent."""
 
@@ -112,16 +139,6 @@ class AVG:
             "q": q.item(),
         }
 
-    def save(self, model_dir: str, unique_str: str) -> None:
-        """Save the model parameters to a file."""
-        model = {
-            "actor": self.actor.state_dict(),
-            "critic": self.Q.state_dict(),
-            "policy_opt": self.popt.state_dict(),
-            "critic_opt": self.qopt.state_dict(),
-        }
-        torch.save(model, f"{model_dir}/{unique_str}.pt")
-
     def reset_eligibility_traces(self) -> None:
         """Reset eligibility traces."""
         for et in self.eligibility_traces_q:
@@ -129,33 +146,7 @@ class AVG:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="Humanoid-v5", type=str)
-    parser.add_argument("--seed", default=42, type=int, help="Seed for random number generator")
-    parser.add_argument("--N", default=2_000_000, type=int, help="# total timesteps for the run")
-    # SAVG params
-    parser.add_argument("--actor_lr", default=0.0063, type=float, help="Actor step size")
-    parser.add_argument("--critic_lr", default=0.0087, type=float, help="Critic step size")
-    parser.add_argument("--beta1", default=0.0, type=float, help="Beta1 parameter of Adam")
-    parser.add_argument("--gamma", default=0.99, type=float, help="Discount factor")
-    parser.add_argument("--alpha_lr", default=0.07, type=float, help="Entropy Coefficient for AVG")
-    parser.add_argument("--l2_actor", default=0.0, type=float, help="L2 Regularization")
-    parser.add_argument("--l2_critic", default=0.0, type=float, help="L2 Regularization")
-    parser.add_argument("--nhid_actor", default=256, type=int)
-    parser.add_argument("--nhid_critic", default=256, type=int)
-    parser.add_argument("--use_eligibility_trace", action="store_true")
-    parser.add_argument("--et_lambda", default=0.0, type=float)
-    parser.add_argument("--reward_processing_type", default="none", type=str)
-    parser.add_argument("--additional_coeff", default=2.5, type=float)
-    # Miscellaneous
-    parser.add_argument("--checkpoint", default=1_000_000, type=int, help="Checkpoint interval")
-    parser.add_argument("--save_dir", default="./results", type=Path, help="Location to store")
-    parser.add_argument("--save_suffix", default="avg", type=str)
-    parser.add_argument("--device", default="cpu", type=str)
-    parser.add_argument("--n_eval", default=0, type=int, help="Number of eval episodes")
-    parser.add_argument("--print_interval_episode", default=50, type=int)
-    parser.add_argument("--record_interval_episode", default=2000, type=int)
-    args = parser.parse_args()
+    args = parse_args()
 
     # init wandb
     wandb.init(project="cleanRL", name=args.save_suffix, config=args)
@@ -262,12 +253,6 @@ if __name__ == "__main__":
 
         obs = next_obs
 
-        if total_step % args.checkpoint == 0:
-            agent.save(
-                model_dir=save_dir,
-                unique_str=f"model_{total_step:010d}",
-            )
-
         # Termination
         if terminated or truncated:
             curr_ave_delta = sum_delta / ep_step
@@ -326,9 +311,3 @@ if __name__ == "__main__":
             sum_delta, sum_q = 0, 0
             sum_reward_normed = 0
             episode_id += 1
-
-    # Save returns and args before exiting run
-    agent.save(model_dir=save_dir, unique_str="last_model")
-
-    df = pd.DataFrame(data_list)
-    df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
