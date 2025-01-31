@@ -26,7 +26,7 @@ class SoftQNetwork(nn.Module):
         x = torch.cat([x, a], 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = x / torch.norm(x, dim=1).view((-1, 1))
+        # x = x / torch.norm(x, dim=1).view((-1, 1))
         x = self.fc3(x)
         return x
 
@@ -62,7 +62,7 @@ class Actor(nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = x / torch.norm(x, dim=1).view((-1, 1))
+        # x = x / torch.norm(x, dim=1).view((-1, 1))
         mean = self.fc_mean(x)
         log_std = self.fc_logstd(x)
         log_std = torch.tanh(log_std)
