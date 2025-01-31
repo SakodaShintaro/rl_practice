@@ -1,5 +1,4 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
-import os
 import random
 import time
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ from network import Actor, SoftQNetwork
 
 @dataclass
 class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    exp_name: str = ""
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -53,7 +52,7 @@ class Args:
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"SAC_{args.env_id}_{args.exp_name}"
 
     wandb.init(
         project="cleanRL",
