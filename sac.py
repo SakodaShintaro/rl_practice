@@ -46,8 +46,6 @@ class Args:
     """the learning rate of the policy network optimizer"""
     q_lr: float = 1e-3
     """the learning rate of the Q network network optimizer"""
-    target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
-    """the frequency of updates for the target nerworks"""
 
 
 if __name__ == "__main__":
@@ -76,9 +74,7 @@ if __name__ == "__main__":
     env = gym.wrappers.Autoreset(env)
     env.action_space.seed(args.seed)
 
-    assert isinstance(
-        env.action_space, gym.spaces.Box
-    ), "only continuous action space is supported"
+    assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     actor = Actor(env, use_normalize=False).to(device)
     qf1 = SoftQNetwork(env, use_normalize=False).to(device)
@@ -177,15 +173,10 @@ if __name__ == "__main__":
             alpha = log_alpha.exp().item()
 
             # update the target networks
-            if global_step % args.target_network_frequency == 0:
-                for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
-                for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
+            for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+            for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
             if global_step % 100 == 0:
                 elapsed_time = time.time() - start_time
