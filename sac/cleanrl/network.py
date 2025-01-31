@@ -12,7 +12,7 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, use_normalize: bool = True):
         super().__init__()
         self.fc1 = nn.Linear(
             np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape),
@@ -20,13 +20,15 @@ class SoftQNetwork(nn.Module):
         )
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
+        self.use_normalize = use_normalize
         self.apply(orthogonal_weight_init)
 
     def forward(self, x, a):
         x = torch.cat([x, a], 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        # x = x / torch.norm(x, dim=1).view((-1, 1))
+        if self.use_normalize:
+            x = x / torch.norm(x, dim=1).view((-1, 1))
         x = self.fc3(x)
         return x
 
@@ -36,7 +38,7 @@ LOG_STD_MIN = -5
 
 
 class Actor(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, use_normalize: bool = True):
         super().__init__()
         self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
@@ -57,12 +59,14 @@ class Actor(nn.Module):
                 dtype=torch.float32,
             ),
         )
+        self.use_normalize = use_normalize
         self.apply(orthogonal_weight_init)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        # x = x / torch.norm(x, dim=1).view((-1, 1))
+        if self.use_normalize:
+            x = x / torch.norm(x, dim=1).view((-1, 1))
         mean = self.fc_mean(x)
         log_std = self.fc_logstd(x)
         log_std = torch.tanh(log_std)
