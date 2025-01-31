@@ -142,23 +142,18 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, reward, termination, truncation, info = env.step(action)
+        rb.add(obs, next_obs, action, reward, termination or truncation, info)
 
-        if termination:
+        if termination or truncation:
             data_dict = {
                 "global_step": global_step,
                 "episodic_return": info["episode"]["r"],
                 "episodic_length": info["episode"]["l"],
             }
             wandb.log(data_dict)
-
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
-        real_next_obs = next_obs.copy()
-        if truncation:
-            real_next_obs = info["final_observation"]
-        rb.add(obs, real_next_obs, action, reward, termination, info)
-
-        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-        obs = next_obs
+            obs, _ = env.reset()
+        else:
+            obs = next_obs
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
