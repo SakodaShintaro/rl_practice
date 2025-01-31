@@ -77,7 +77,7 @@ if __name__ == "__main__":
         save_code=True,
     )
 
-    # TRY NOT TO MODIFY: seeding
+    # seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -129,18 +129,18 @@ if __name__ == "__main__":
     )
     start_time = time.time()
 
-    # TRY NOT TO MODIFY: start the game
+    # start the game
     obs, _ = env.reset(seed=args.seed)
     progress_bar = tqdm(range(args.total_timesteps), dynamic_ncols=True)
     for global_step in range(args.total_timesteps):
-        # ALGO LOGIC: put action logic here
+        # put action logic here
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
             action, _, _ = actor.get_action(torch.Tensor(obs).to(device).unsqueeze(0))
             action = action[0].detach().cpu().numpy()
 
-        # TRY NOT TO MODIFY: execute the game and log data.
+        # execute the game and log data.
         next_obs, reward, termination, truncation, info = env.step(action)
         rb.add(obs, next_obs, action, reward, termination or truncation, info)
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         else:
             obs = next_obs
 
-        # ALGO LOGIC: training.
+        # training.
         if global_step > args.learning_starts:
             data = rb.sample(args.batch_size)
             with torch.no_grad():
