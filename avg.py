@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=2000, type=int)
+    parser.add_argument("--without_entorpy_term", action="store_true")
     return parser.parse_args()
 
 
@@ -81,9 +82,12 @@ class AVG:
                 torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
             ]
 
-        self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
-        self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
-        self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
+        if cfg.without_entorpy_term:
+            self.log_alpha = None
+        else:
+            self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
+            self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
+            self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -108,7 +112,7 @@ class AVG:
         #### Q loss
         q = self.Q(obs, action.detach())  # N.B: Gradient should NOT pass through action here
         with torch.no_grad():
-            alpha = self.log_alpha.exp().item()
+            alpha = self.log_alpha.exp().item() if self.log_alpha is not None else 0.0
             next_action, next_lprob, mean = self.actor.get_action(next_obs)
             q2 = self.Q(next_obs, next_action)
             target_V = q2 - alpha * next_lprob
@@ -135,10 +139,13 @@ class AVG:
         self.qopt.step()
 
         # alpha
-        alpha_loss = (-self.log_alpha.exp() * (lprob.detach() + self.target_entropy)).mean()
-        self.aopt.zero_grad()
-        alpha_loss.backward()
-        self.aopt.step()
+        if self.log_alpha is None:
+            alpha_loss = torch.Tensor([0.0])
+        else:
+            alpha_loss = (-self.log_alpha.exp() * (lprob.detach() + self.target_entropy)).mean()
+            self.aopt.zero_grad()
+            alpha_loss.backward()
+            self.aopt.step()
 
         self.steps += 1
 
