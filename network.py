@@ -163,7 +163,7 @@ class DiffusionActor(nn.Module):
         )
         self.use_normalize = use_normalize
         self.action_dim = np.prod(env.action_space.shape)
-        self.step_num = 10
+        self.step_num = 5
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.apply(orthogonal_weight_init)
 
