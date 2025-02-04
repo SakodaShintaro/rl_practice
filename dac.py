@@ -46,6 +46,8 @@ class Args:
     """the learning rate of the policy network optimizer"""
     q_lr: float = 1e-3
     """the learning rate of the Q network network optimizer"""
+    noise_coeff: float = 0.05
+    """the coefficient of the noise added to the action"""
 
 
 if __name__ == "__main__":
@@ -113,7 +115,7 @@ if __name__ == "__main__":
             action, _, _ = actor.get_action(torch.Tensor(obs).to(device).unsqueeze(0))
             action = action.cpu()
             # add noise
-            action = action + torch.randn_like(action) * action_width * 0.1
+            action = action + torch.randn_like(action) * action_width * args.noise_coeff
             # clip
             action = torch.clamp(action, action_low, action_high)
             action = action[0].detach().cpu().numpy()
