@@ -86,6 +86,8 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
+    action_width = (env.action_space.high - env.action_space.low) / 2.0
+
     env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
@@ -97,6 +99,9 @@ if __name__ == "__main__":
     )
     start_time = time.time()
 
+    action_low = torch.tensor(env.action_space.low, dtype=torch.float32)
+    action_high = torch.tensor(env.action_space.high, dtype=torch.float32)
+
     # start the game
     obs, _ = env.reset(seed=args.seed)
     progress_bar = tqdm(range(args.total_timesteps), dynamic_ncols=True)
@@ -106,6 +111,11 @@ if __name__ == "__main__":
             action = env.action_space.sample()
         else:
             action, _, _ = actor.get_action(torch.Tensor(obs).to(device).unsqueeze(0))
+            action = action.cpu()
+            # add noise
+            action = action + torch.randn_like(action) * action_width * 0.1
+            # clip
+            action = torch.clamp(action, action_low, action_high)
             action = action[0].detach().cpu().numpy()
 
         # execute the game and log data.
