@@ -79,10 +79,6 @@ if __name__ == "__main__":
     actor = Actor(env, use_normalize=False).to(device)
     qf1 = SoftQNetwork(env, use_normalize=False).to(device)
     qf2 = SoftQNetwork(env, use_normalize=False).to(device)
-    qf1_target = SoftQNetwork(env, use_normalize=False).to(device)
-    qf2_target = SoftQNetwork(env, use_normalize=False).to(device)
-    qf1_target.load_state_dict(qf1.state_dict())
-    qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
@@ -134,8 +130,8 @@ if __name__ == "__main__":
             data = rb.sample(args.batch_size)
             with torch.no_grad():
                 next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                qf2_next_target = qf2_target(data.next_observations, next_state_actions)
+                qf1_next_target = qf1(data.next_observations, next_state_actions)
+                qf2_next_target = qf2(data.next_observations, next_state_actions)
                 min_q = torch.min(qf1_next_target, qf2_next_target)
                 min_qf_next_target = min_q - alpha * next_state_log_pi
                 next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (
@@ -171,12 +167,6 @@ if __name__ == "__main__":
             alpha_loss.backward()
             a_optimizer.step()
             alpha = log_alpha.exp().item()
-
-            # update the target networks
-            for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-            for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
             if global_step % 100 == 0:
                 elapsed_time = time.time() - start_time
