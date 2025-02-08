@@ -20,6 +20,7 @@ import torch
 import wandb
 from network import Actor, SoftQNetwork
 from reward_processor import RewardProcessor
+from td_error_scaler import TDErrorScaler
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,6 +74,8 @@ class AVG:
         )
 
         self.gamma, self.device = cfg.gamma, cfg.device
+        self.td_error_scaler = TDErrorScaler()
+        self.G = 0
 
         self.use_eligibility_trace = cfg.use_eligibility_trace
 
@@ -117,8 +120,17 @@ class AVG:
             q2 = self.Q(next_obs, next_action)
             target_V = q2 - alpha * next_lprob
 
+        #### Return scaling
+        r_ent = reward - alpha * lprob.detach().item()
+        self.G += r_ent
+        if done:
+            self.td_error_scaler.update(reward=r_ent, gamma=0, G=self.G)
+            self.G = 0
+        else:
+            self.td_error_scaler.update(reward=r_ent, gamma=self.gamma, G=None)
+
         delta = reward + (1 - done) * self.gamma * target_V - q
-        ####
+        delta /= self.td_error_scaler.sigma
 
         # Policy loss
         ploss = alpha * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
