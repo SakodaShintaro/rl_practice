@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--print_interval_episode", default=50, type=int)
-    parser.add_argument("--record_interval_episode", default=2000, type=int)
+    parser.add_argument("--record_interval_episode", default=1000, type=int)
     parser.add_argument("--without_entorpy_term", action="store_true")
     return parser.parse_args()
 
