@@ -112,13 +112,20 @@ class AVG:
         obs = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
         next_obs = torch.Tensor(next_obs.astype(np.float32)).unsqueeze(0).to(self.device)
 
+        alpha = self.log_alpha.exp().detach().item() if self.log_alpha is not None else 0.0
+
+        # Policy loss
+        ploss = alpha * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
+        self.popt.zero_grad()
+        ploss.backward()
+        self.popt.step()
+
         #### Q loss
         q = self.Q(obs, action.detach())  # N.B: Gradient should NOT pass through action here
-        with torch.no_grad():
-            alpha = self.log_alpha.exp().item() if self.log_alpha is not None else 0.0
-            next_action, next_lprob, mean = self.actor.get_action(next_obs)
-            q2 = self.Q(next_obs, next_action)
-            target_V = q2 - alpha * next_lprob
+
+        next_action, next_lprob, mean = self.actor.get_action(next_obs)
+        q2 = self.Q(next_obs, next_action.detach())
+        target_V = q2.detach() - alpha * next_lprob.detach()
 
         #### Return scaling
         r_ent = reward - alpha * lprob.detach().item()
@@ -131,12 +138,6 @@ class AVG:
 
         delta = reward + (1 - done) * self.gamma * target_V - q
         delta /= self.td_error_scaler.sigma
-
-        # Policy loss
-        ploss = alpha * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
-        self.popt.zero_grad()
-        ploss.backward()
-        self.popt.step()
 
         self.qopt.zero_grad()
         if self.use_eligibility_trace:
@@ -167,6 +168,8 @@ class AVG:
             "policy_loss": ploss.item(),
             "alpha_loss": alpha_loss.item(),
             "alpha": alpha,
+            "next_action": next_action,
+            "next_lprob": next_lprob,
         }
 
     def reset_eligibility_traces(self) -> None:
@@ -261,10 +264,16 @@ if __name__ == "__main__":
     terminated, truncated = False, False
     obs, _ = env.reset()
     data_list = []
+    next_action = None
+    next_lprob = None
 
     for total_step in range(1, args.N + 1):
         # N.B: Action is a torch.Tensor
-        action, lprob, mean = agent.compute_action(obs)
+        if next_action is None:
+            action, lprob, mean = agent.compute_action(obs)
+        else:
+            action = next_action
+            lprob = next_lprob
         sim_action = action.detach().cpu().view(-1).numpy()
         sim_action *= action_coeff
 
@@ -277,6 +286,8 @@ if __name__ == "__main__":
             image = env.render()
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
         stats = agent.update(obs, action, next_obs, reward_normed, terminated, lprob)
+        next_action = stats["next_action"]
+        next_lprob = stats["next_lprob"]
         sum_delta += stats["delta"]
         sum_lprob += lprob.item()
         sum_reward += reward
@@ -353,4 +364,6 @@ if __name__ == "__main__":
             sum_delta, sum_q = 0, 0
             sum_lprob = 0
             sum_reward_normed = 0
+            next_action = None
+            next_lprob = None
             episode_id += 1
