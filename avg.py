@@ -16,8 +16,8 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 import torch
-import wandb
 
+import wandb
 from network import Actor, SoftQNetwork
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
