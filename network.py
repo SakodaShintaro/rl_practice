@@ -16,7 +16,7 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 class SoftQNetwork(nn.Module):
     def __init__(self, env, use_normalize: bool = True):
         super().__init__()
-        hidden_dim = 256
+        hidden_dim = 2048
         self.fc1 = nn.Linear(
             np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape),
             hidden_dim,

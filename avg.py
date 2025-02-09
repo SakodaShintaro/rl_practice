@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--additional_coeff", default=2.5, type=float)
     parser.add_argument("--save_dir", default="./results", type=Path)
     parser.add_argument("--save_suffix", default="AVG", type=str)
-    parser.add_argument("--device", default="cpu", type=str)
+    parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=2000, type=int)
