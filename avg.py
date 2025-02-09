@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save_dir", default="./results", type=Path)
     parser.add_argument("--save_suffix", default="AVG", type=str)
     parser.add_argument("--device", default="cpu", type=str)
+    parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=2000, type=int)
     parser.add_argument("--without_entorpy_term", action="store_true")
@@ -54,8 +55,8 @@ class AVG:
     def __init__(self, cfg: argparse.Namespace, env: gym.Env) -> None:
         self.steps = 0
 
-        self.actor = Actor(env)
-        self.Q = SoftQNetwork(env)
+        self.actor = Actor(env).to(cfg.device)
+        self.Q = SoftQNetwork(env).to(cfg.device)
 
         self.actor_lr = cfg.actor_lr
         self.critic_lr = cfg.critic_lr
@@ -89,7 +90,7 @@ class AVG:
             self.log_alpha = None
         else:
             self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
-            self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
+            self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True, device=cfg.device))
             self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
@@ -201,6 +202,8 @@ if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     torch.set_num_threads(1)
+
+    torch.cuda.set_device(args.gpu_id)
 
     tic = time.time()
 
