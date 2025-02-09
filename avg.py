@@ -111,7 +111,6 @@ class AVG:
         """Update the actor and critic networks based on the observed transition."""
         obs = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
         next_obs = torch.Tensor(next_obs.astype(np.float32)).unsqueeze(0).to(self.device)
-        action, lprob = action.to(self.device), lprob.to(self.device)
 
         #### Q loss
         q = self.Q(obs, action.detach())  # N.B: Gradient should NOT pass through action here
