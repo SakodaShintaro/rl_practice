@@ -76,9 +76,9 @@ if __name__ == "__main__":
 
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    actor = Actor(env, use_normalize=False).to(device)
-    qf1 = SoftQNetwork(env, use_normalize=False).to(device)
-    qf2 = SoftQNetwork(env, use_normalize=False).to(device)
+    actor = Actor(env, hidden_dim=256, use_normalize=False).to(device)
+    qf1 = SoftQNetwork(env, hidden_dim=256, use_normalize=False).to(device)
+    qf2 = SoftQNetwork(env, hidden_dim=256, use_normalize=False).to(device)
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 

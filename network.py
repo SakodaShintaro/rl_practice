@@ -14,9 +14,8 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env, use_normalize: bool = True):
+    def __init__(self, env, hidden_dim, use_normalize: bool = True):
         super().__init__()
-        hidden_dim = 2048
         self.fc1 = nn.Linear(
             np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape),
             hidden_dim,
@@ -41,12 +40,12 @@ LOG_STD_MIN = -5
 
 
 class Actor(nn.Module):
-    def __init__(self, env, use_normalize: bool = True):
+    def __init__(self, env, hidden_dim, use_normalize: bool = True):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, np.prod(env.action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(env.action_space.shape))
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_mean = nn.Linear(hidden_dim, np.prod(env.action_space.shape))
+        self.fc_logstd = nn.Linear(hidden_dim, np.prod(env.action_space.shape))
         # action rescaling
         self.register_buffer(
             "action_scale",

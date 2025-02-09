@@ -35,6 +35,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--l2_actor", default=0.0, type=float)
     parser.add_argument("--l2_critic", default=0.0, type=float)
+    parser.add_argument("--hidden_actor", default=256, type=int)
+    parser.add_argument("--hidden_critic", default=2048, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
@@ -55,8 +57,8 @@ class AVG:
     def __init__(self, cfg: argparse.Namespace, env: gym.Env) -> None:
         self.steps = 0
 
-        self.actor = Actor(env).to(cfg.device)
-        self.Q = SoftQNetwork(env).to(cfg.device)
+        self.actor = Actor(env, cfg.hidden_actor).to(cfg.device)
+        self.Q = SoftQNetwork(env, cfg.hidden_critic).to(cfg.device)
 
         self.actor_lr = cfg.actor_lr
         self.critic_lr = cfg.critic_lr
