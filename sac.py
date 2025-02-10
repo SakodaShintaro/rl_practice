@@ -26,6 +26,8 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
+    gpu_id: int = 0
+    """the gpu id to use"""
 
     # Algorithm specific arguments
     env_id: str = "Humanoid-v5"
@@ -65,6 +67,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
+    torch.cuda.set_device(args.gpu_id)
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
