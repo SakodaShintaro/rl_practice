@@ -52,7 +52,7 @@ class ReplayBuffer:
         action: np.ndarray,
         reward: float,
         done: bool,
-    ):
+    ) -> None:
         self.observations[self.idx] = obs
         self.next_observations[self.idx] = next_obs
         self.actions[self.idx] = action
@@ -62,7 +62,7 @@ class ReplayBuffer:
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
 
-    def sample(self, batch_size: int):
+    def sample(self, batch_size: int) -> ReplayBufferData:
         idx = np.random.randint(0, self.size if self.full else self.idx, size=batch_size)
         return ReplayBufferData(
             torch.Tensor(self.observations[idx]).to(self.device),
