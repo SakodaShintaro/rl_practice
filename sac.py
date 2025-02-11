@@ -8,12 +8,69 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import tyro
-from stable_baselines3.common.buffers import ReplayBuffer
 from torch import optim
 from tqdm import tqdm
 
 import wandb
 from network import Actor, SoftQNetwork
+
+
+@dataclass
+class ReplayBufferData:
+    observations: torch.Tensor
+    next_observations: torch.Tensor
+    actions: torch.Tensor
+    rewards: torch.Tensor
+    dones: torch.Tensor
+
+
+class ReplayBuffer:
+    def __init__(
+        self,
+        size: int,
+        obs_shape: np.ndarray,
+        action_shape: np.ndarray,
+        device: torch.device,
+    ) -> None:
+        self.size = size
+        self.action_shape = action_shape
+        self.device = device
+
+        self.observations = np.zeros((size, *obs_shape), dtype=np.float32)
+        self.next_observations = np.zeros((size, *obs_shape), dtype=np.float32)
+        self.actions = np.zeros((size, *action_shape), dtype=np.float32)
+        self.rewards = np.zeros((size, 1), dtype=np.float32)
+        self.dones = np.zeros((size, 1), dtype=np.float32)
+
+        self.idx = 0
+        self.full = False
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: float,
+        done: bool,
+    ):
+        self.observations[self.idx] = obs
+        self.next_observations[self.idx] = next_obs
+        self.actions[self.idx] = action
+        self.rewards[self.idx] = reward
+        self.dones[self.idx] = done
+
+        self.idx = (self.idx + 1) % self.size
+        self.full = self.full or self.idx == 0
+
+    def sample(self, batch_size: int):
+        idx = np.random.randint(0, self.size if self.full else self.idx, size=batch_size)
+        return ReplayBufferData(
+            torch.Tensor(self.observations[idx]).to(self.device),
+            torch.Tensor(self.next_observations[idx]).to(self.device),
+            torch.Tensor(self.actions[idx]).to(self.device),
+            torch.Tensor(self.rewards[idx]).to(self.device),
+            torch.Tensor(self.dones[idx]).to(self.device),
+        )
 
 
 @dataclass
@@ -91,14 +148,11 @@ if __name__ == "__main__":
     alpha = log_alpha.exp().item()
     a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
 
-    env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
+        env.observation_space.shape,
+        env.action_space.shape,
         device,
-        n_envs=1,
-        handle_timeout_termination=False,
     )
     start_time = time.time()
 
@@ -115,7 +169,7 @@ if __name__ == "__main__":
 
         # execute the game and log data.
         next_obs, reward, termination, truncation, info = env.step(action)
-        rb.add(obs, next_obs, action, reward, termination or truncation, info)
+        rb.add(obs, next_obs, action, reward, termination or truncation)
 
         if termination or truncation:
             data_dict = {
