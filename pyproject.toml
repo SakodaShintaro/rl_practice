@@ -1,10 +1,21 @@
+[project]
+name = "rl_practice"
+version = "0.0.0"
+dependencies = [
+    "gymnasium[box2d]",
+    "gymnasium[mujoco]",
+    "wandb",
+    "tyro",
+    "stable-baselines3",
+]
+
 [tool.ruff]
 line-length = 100
 
 [tool.ruff.lint]
-select=["ALL"]
+select = ["ALL"]
 extend-ignore = ["D"]
-ignore=[
+ignore = [
     "ARG002",
     "COM812",
     "E501",

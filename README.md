@@ -2,15 +2,17 @@
 
 ## 環境構築
 
-(1) `docker/run.sh` を使う
-
-(2) 必要なものをインストール
+### 必要なものをインストール
 
 ```bash
 sudo apt update
 sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils
 ```
 
+## venv利用
+
 ```bash
-pip3 install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip3 install .
 ```
