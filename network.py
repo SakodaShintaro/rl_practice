@@ -1,5 +1,6 @@
 import math
 
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -14,19 +15,17 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env, hidden_dim, use_normalize: bool = True):
+    def __init__(self, env: gym.Env, hidden_dim: int, use_normalize: bool = True) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(
-            np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape),
-            hidden_dim,
-        )
+        input_dim = np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape)
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
         self.use_normalize = use_normalize
         self.apply(orthogonal_weight_init)
 
-    def forward(self, x, a):
-        x = torch.cat([x, a], 1)
+    def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([x, a], dim=1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         if self.use_normalize:
@@ -40,7 +39,7 @@ LOG_STD_MIN = -5
 
 
 class Actor(nn.Module):
-    def __init__(self, env, hidden_dim, use_normalize: bool = True):
+    def __init__(self, env: gym.Env, hidden_dim: int, use_normalize: bool = True) -> None:
         super().__init__()
         self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
@@ -64,7 +63,7 @@ class Actor(nn.Module):
         self.use_normalize = use_normalize
         self.apply(orthogonal_weight_init)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         if self.use_normalize:
@@ -78,7 +77,7 @@ class Actor(nn.Module):
 
         return mean, log_std
 
-    def get_action(self, x):
+    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         mean, log_std = self(x)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
@@ -98,7 +97,7 @@ class TimestepEmbedder(nn.Module):
     Embeds scalar timesteps into vector representations.
     """
 
-    def __init__(self, hidden_size, frequency_embedding_size=256):
+    def __init__(self, hidden_size: int, frequency_embedding_size: int = 256) -> None:
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(frequency_embedding_size, hidden_size, bias=True),
@@ -108,7 +107,7 @@ class TimestepEmbedder(nn.Module):
         self.frequency_embedding_size = frequency_embedding_size
 
     @staticmethod
-    def timestep_embedding(t, dim, max_period=10000) -> torch.Tensor:
+    def timestep_embedding(t: torch.Tensor, dim: int, max_period: int = 10000) -> torch.Tensor:
         """
         Create sinusoidal timestep embeddings.
         :param t: a 1-D Tensor of N indices, one per batch element.
@@ -128,14 +127,14 @@ class TimestepEmbedder(nn.Module):
             embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
         return embedding
 
-    def forward(self, t):
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
         t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
         t_emb = self.mlp(t_freq)
         return t_emb
 
 
 class DiffusionActor(nn.Module):
-    def __init__(self, env, use_normalize: bool = False):
+    def __init__(self, env: gym.Env, use_normalize: bool = False) -> None:
         super().__init__()
         time_embedding_size = 256
         self.fc1 = nn.Linear(
@@ -167,7 +166,7 @@ class DiffusionActor(nn.Module):
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.apply(orthogonal_weight_init)
 
-    def forward(self, a, t, state):
+    def forward(self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         t = self.t_embedder(t)
         a = torch.cat([a, t, state], 1)
         a = F.relu(self.fc1(a))
@@ -177,7 +176,7 @@ class DiffusionActor(nn.Module):
         a = self.fc3(a)
         return a
 
-    def get_action(self, x):
+    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         bs = x.size(0)
         normal = torch.distributions.Normal(
             torch.zeros((bs, self.action_dim), device=x.device),
