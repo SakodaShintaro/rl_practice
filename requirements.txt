@@ -1,5 +1,0 @@
-gymnasium[box2d]
-gymnasium[mujoco]
-wandb
-tyro
-stable-baselines3
