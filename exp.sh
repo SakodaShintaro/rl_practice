@@ -9,16 +9,16 @@ PARALLEL_JOBS=6
 
 SEED=0
 
-datatime=$(date "+%Y%m%d_%H%M%S")
+datetime=$(date "+%Y%m%d_%H%M%S")
 
-export WANDB_RUN_GROUP=${datatime}
+export WANDB_RUN_GROUP=${datetime}
 
-save_dir="results/${datatime}"
+save_dir="results/${datetime}"
 
 # コマンドを配列に格納
 commands=(
-    "python3 avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=none"
-    "python3 sac.py --seed=${SEED}"
+    "python3 train_avg.py --seed=${SEED} --save_dir=${save_dir} --normalizer_type=none"
+    "python3 train_sac.py --seed=${SEED}"
 )
 
 # 並列実行を管理
