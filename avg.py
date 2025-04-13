@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=1000, type=int)
-    parser.add_argument("--without_entorpy_term", action="store_true")
+    parser.add_argument("--without_entropy_term", action="store_true")
     return parser.parse_args()
 
 
@@ -88,7 +88,7 @@ class AVG:
                 torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
             ]
 
-        if cfg.without_entorpy_term:
+        if cfg.without_entropy_term:
             self.log_alpha = None
         else:
             self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
