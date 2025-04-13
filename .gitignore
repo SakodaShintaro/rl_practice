@@ -4,3 +4,4 @@ runs/
 results/
 wandb/
 .venv
+*.egg-info

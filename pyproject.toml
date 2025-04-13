@@ -7,6 +7,8 @@ dependencies = [
     "wandb",
     "tyro",
     "stable-baselines3",
+    "timm",
+    "opencv-python",
 ]
 
 [tool.ruff]
