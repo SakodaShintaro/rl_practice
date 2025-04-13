@@ -21,15 +21,15 @@ class RunningStats:
         print(rs.mean, rs.std)
     """
 
-    def __init__(self, n=0.0, m=None, s=None):
+    def __init__(self, n: float = 0.0, m: float | None = None, s: float | None = None) -> None:
         self.n = n
         self.m = m
         self.s = s
 
-    def clear(self):
+    def clear(self) -> None:
         self.n = 0.0
 
-    def update(self, x):
+    def update(self, x: float) -> None:
         x = make_np(x)
         self.update_params(x)
 
@@ -58,28 +58,24 @@ class RunningStats:
             return self
 
     @property
-    def mean(self):
+    def mean(self) -> float:
         return self.m if self.n else 0.0
 
     @property
-    def variance(self):
+    def variance(self) -> float:
         return self.s / (self.n) if self.n else 0.0
 
     @property
-    def std(self):
+    def std(self) -> float:
         return np.sqrt(self.variance)
 
-    def __repr__(self):
-        return (
-            "<RunningMean(mean={: 2.4f}, std={: 2.4f}, n={: 2f}, m={: 2.4f}, s={: 2.4f})>".format(
-                self.mean, self.std, self.n, self.m, self.s
-            )
-        )
+    def __repr__(self) -> str:
+        return f"<RunningMean(mean={self.mean: 2.4f}, std={self.std: 2.4f}, n={self.n: 2f}, m={self.m: 2.4f}, s={self.s: 2.4f})>"
 
-    def __str__(self):
-        return "mean={: 2.4f}, std={: 2.4f}".format(self.mean, self.std)
+    def __str__(self) -> str:
+        return f"mean={self.mean: 2.4f}, std={self.std: 2.4f}"
 
-    def zscore(self, x):
+    def zscore(self, x: float) -> float:
         return (x - self.mean) / (self.std + 1e-5)
 
 
