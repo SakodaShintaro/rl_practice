@@ -25,7 +25,7 @@ from td_error_scaler import TDErrorScaler
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="Humanoid-v5", type=str)
+    parser.add_argument("--env", default="CarRacing-v3", type=str)
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=1000, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
+    parser.add_argument("--off_wandb", action="store_true")
     return parser.parse_args()
 
 
@@ -180,6 +181,9 @@ class AVG:
 if __name__ == "__main__":
     args = parse_args()
 
+    if args.off_wandb:
+        os.environ["WANDB_MODE"] = "offline"
+
     # init wandb
     wandb.init(project="cleanRL", name=args.save_suffix, config=args)
 
@@ -226,8 +230,6 @@ if __name__ == "__main__":
 
     # Env
     env = gym.make(args.env, render_mode="rgb_array")
-    env = gym.wrappers.FlattenObservation(env)
-    env = gym.wrappers.NormalizeObservation(env)
 
     #### Reproducibility
     env.reset(seed=args.seed)

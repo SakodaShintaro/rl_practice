@@ -2,9 +2,12 @@ import math
 
 import gymnasium as gym
 import numpy as np
+import timm
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+RESNET_DIM = 512
 
 
 def orthogonal_weight_init(m: nn.Module) -> None:
@@ -17,7 +20,8 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 class SoftQNetwork(nn.Module):
     def __init__(self, env: gym.Env, hidden_dim: int, use_normalize: bool = True) -> None:
         super().__init__()
-        input_dim = np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape)
+        input_dim = RESNET_DIM + np.prod(env.action_space.shape)
+        self.resnet = timm.create_model("resnet18", pretrained=False, num_classes=0)
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
@@ -25,6 +29,8 @@ class SoftQNetwork(nn.Module):
         self.apply(orthogonal_weight_init)
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        x = x.permute(0, 3, 1, 2)  # (bs, h, w, c) -> (bs, c, h, w)
+        x = self.resnet(x)
         x = torch.cat([x, a], dim=1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -41,7 +47,8 @@ LOG_STD_MIN = -5
 class Actor(nn.Module):
     def __init__(self, env: gym.Env, hidden_dim: int, use_normalize: bool = True) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), hidden_dim)
+        self.resnet = timm.create_model("resnet18", pretrained=False, num_classes=0)
+        self.fc1 = nn.Linear(RESNET_DIM, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc_mean = nn.Linear(hidden_dim, np.prod(env.action_space.shape))
         self.fc_logstd = nn.Linear(hidden_dim, np.prod(env.action_space.shape))
@@ -64,6 +71,8 @@ class Actor(nn.Module):
         self.apply(orthogonal_weight_init)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = x.permute(0, 3, 1, 2)  # (bs, h, w, c) -> (bs, c, h, w)
+        x = self.resnet(x)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         if self.use_normalize:
