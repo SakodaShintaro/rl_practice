@@ -1,16 +1,3 @@
-[project]
-name = "rl_practice"
-version = "0.0.0"
-dependencies = [
-    "gymnasium[box2d]",
-    "gymnasium[mujoco]",
-    "wandb",
-    "tyro",
-    "stable-baselines3",
-    "timm",
-    "opencv-python",
-]
-
 [tool.ruff]
 line-length = 100
 
