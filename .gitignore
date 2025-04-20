@@ -5,3 +5,4 @@ results/
 wandb/
 .venv
 *.egg-info
+resnet18
