@@ -93,7 +93,9 @@ class AVG:
             self.log_alpha = None
         else:
             self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
-            self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True, device=cfg.device))
+            self.log_alpha = torch.nn.Parameter(
+                torch.zeros(1, requires_grad=True, device=cfg.device)
+            )
             self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
