@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print_interval_episode", default=50, type=int)
     parser.add_argument("--record_interval_episode", default=1000, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
+    parser.add_argument("--off_wandb", action="store_true")
     return parser.parse_args()
 
 
@@ -179,6 +180,9 @@ class AVG:
 
 if __name__ == "__main__":
     args = parse_args()
+
+    if args.off_wandb:
+        os.environ["WANDB_MODE"] = "offline"
 
     # init wandb
     wandb.init(project="cleanRL", name=args.save_suffix, config=args)
