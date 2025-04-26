@@ -15,7 +15,7 @@ class GeneralizedDeltaRtrlLayer(torch.nn.Module):
         self.linear_b = torch.nn.Linear(input_size, output_size, bias=False)
         self.linear_v = torch.nn.Linear(input_size, output_size, bias=False)
         self.linear_k = torch.nn.Linear(input_size, output_size, bias=False)
-        self.linear_q = torch.nn.Linear(input_size, head_size, bias=False)
+        self.linear_q = torch.nn.Linear(input_size, output_size, bias=False)
         self.linear_o = torch.nn.Linear(output_size, input_size, bias=True)
 
     def _apply_linear(self, x, l):
@@ -34,16 +34,21 @@ class GeneralizedDeltaRtrlLayer(torch.nn.Module):
             sensitivity_mats: (head_num, head_size, head_size, head_size)
         """
         x = x.squeeze(0)  # (input_size)
-        w = self._apply_linear(x, self.linear_w)  # (batch_size, head_num, head_size, 1)
-        z = self._apply_linear(x, self.linear_z)  # (batch_size, head_num, head_size, 1)
-        b = self._apply_linear(x, self.linear_b)  # (batch_size, head_num, head_size, 1)
-        v = self._apply_linear(x, self.linear_v)  # (batch_size, head_num, head_size, 1)
-        k = self._apply_linear(x, self.linear_k)  # (batch_size, head_num, head_size, 1)
-        q = self.linear_q(x)  # (batch_size, head_size)
+        w = self._apply_linear(x, self.linear_w)  # (head_num, head_size, 1)
+        z = self._apply_linear(x, self.linear_z)  # (head_num, head_size, 1)
+        b = self._apply_linear(x, self.linear_b)  # (head_num, head_size, 1)
+        v = self._apply_linear(x, self.linear_v)  # (head_num, head_size, 1)
+        k = self._apply_linear(x, self.linear_k)  # (head_num, head_size, 1)
+        q = self._apply_linear(x, self.linear_q)  # (head_num, head_size, 1)
         S, sensitivity_mats = custom_f(S, sensitivity_mats, w, z, b, v, k)
-        y = S @ q  # (batch_size, head_num, head_size, 1)
-        y = y.view(batch_size, self.head_num * self.head_size)
+
+        # S : (head_num, head_size, head_size)
+        q = q.view(self.head_num, self.head_size)
+
+        y = torch.einsum("hij,hj->hi", S, q)
+        y = y.view(self.head_num * self.head_size)
         y = self.linear_o(y)
+        y = torch.unsqueeze(y, 0)  # (1, input_size)
 
         return y, S.clone().detach(), sensitivity_mats
 
