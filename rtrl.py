@@ -59,12 +59,12 @@ class CustomF(torch.autograd.Function):
     @staticmethod
     def forward(ctx, S, sensitivity_mats, w, z, b, v, k):
         S_out, sensitivity_out = f_impl(S, sensitivity_mats, w, z, b, v, k)
-        ctx.save_for_backward(S_out, *sensitivity_out)
+        ctx.save_for_backward(*sensitivity_out)
         return S_out, sensitivity_out
 
     @staticmethod
     def backward(ctx, grad_S, grad_sens):
-        S_out, *sensitivity_mats = ctx.saved_tensors
+        sensitivity_mats = ctx.saved_tensors
         sw, sz, sb, sv, sk = sensitivity_mats
 
         vw = torch.einsum("hij,hpij->hp", grad_S, sw).unsqueeze(-1)
