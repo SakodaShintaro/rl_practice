@@ -41,7 +41,6 @@ class GeneralizedDeltaRtrlLayer(torch.nn.Module):
         k = self._apply_linear(x, self.linear_k)  # (head_num, head_size, 1)
         q = self._apply_linear(x, self.linear_q)  # (head_num, head_size, 1)
         S, sensitivity_mats = custom_f(S, sensitivity_mats, w, z, b, v, k)
-
         # S : (head_num, head_size, head_size)
         q = q.view(self.head_num, self.head_size)
 
@@ -50,7 +49,6 @@ class GeneralizedDeltaRtrlLayer(torch.nn.Module):
         y = self.linear_o(y)
         y = torch.unsqueeze(y, 0)  # (1, input_size)
 
-        S = S.clone().detach()
         sensitivity_mats = [s.clone().detach() for s in sensitivity_mats]
 
         return y, S, sensitivity_mats
@@ -102,6 +100,8 @@ if __name__ == "__main__":
     batch_size = 1
 
     loss_list = []
+    acc = 0.0
+    num = 0
     for i in range(1, STEP_NUM + 1):
         batch_x, batch_y, _ = make_data(batch_size, SEQ_LEN, INPUT_DIM)
         batch_x = batch_x.to(device)
@@ -116,16 +116,19 @@ if __name__ == "__main__":
             y, S, sensitivity_mats = model(x_t, S, sensitivity_mats)
             if j >= SEQ_LEN // 2:
                 curr_loss = F.cross_entropy(y, y_t_ref, reduction="sum")
+                acc += (torch.argmax(y, dim=1) == y_t_ref).float().sum().item()
+                num += 1
                 loss += curr_loss.item()
                 curr_loss /= SEQ_LEN
                 optim.zero_grad()
                 curr_loss.backward()
                 optim.step()
+                S = S.detach().clone()
 
         loss_list.append(loss)
         if i % (STEP_NUM / 10) == 0:
             loss_list_t = torch.tensor(loss_list)
             loss_avg = torch.mean(loss_list_t)
             loss_std = torch.std(loss_list_t)
-            loss_list = []
-            print(f"{i:08d} {loss_avg:.5f} {loss_std:.5f}")
+            acc *= 100 / num
+            print(f"{i:08d} {acc:5.1f} {loss_avg:.5f} {loss_std:.5f}")
