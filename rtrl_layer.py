@@ -50,7 +50,10 @@ class GeneralizedDeltaRtrlLayer(torch.nn.Module):
         y = self.linear_o(y)
         y = torch.unsqueeze(y, 0)  # (1, input_size)
 
-        return y, S.clone().detach(), sensitivity_mats
+        S = S.clone().detach()
+        sensitivity_mats = [s.clone().detach() for s in sensitivity_mats]
+
+        return y, S, sensitivity_mats
 
     def initialize_state(self):
         S = torch.zeros(self.head_num, self.head_size, self.head_size, requires_grad=False)
@@ -110,10 +113,8 @@ if __name__ == "__main__":
         for j in range(SEQ_LEN):
             x_t = batch_x[j]
             y_t_ref = batch_y[j]
-            if j < SEQ_LEN // 2:
-                y, S, sensitivity_mats = model(x_t, S, sensitivity_mats)
-            else:
-                y, S, sensitivity_mats = model(x_t, S, sensitivity_mats)
+            y, S, sensitivity_mats = model(x_t, S, sensitivity_mats)
+            if j >= SEQ_LEN // 2:
                 curr_loss = F.cross_entropy(y, y_t_ref, reduction="sum")
                 loss += curr_loss.item()
                 curr_loss /= SEQ_LEN
