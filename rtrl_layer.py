@@ -82,14 +82,14 @@ if __name__ == "__main__":
     HEAD_NUM = 2
     HEAD_SIZE = 8
     TIMESTEP = 10
-    INPUT_DIM = 20
-    SEQ_LEN = 30
+    INPUT_DIM = 9
+    SEQ_LEN = 10
     STEP_NUM = 1000
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = GeneralizedDeltaRtrlLayer(INPUT_DIM, HEAD_NUM, HEAD_SIZE).to(device)
-    optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optim = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     batch_size = 1
 
@@ -118,7 +118,8 @@ if __name__ == "__main__":
 
         loss_list.append(loss)
         if i % (STEP_NUM / 10) == 0:
-            loss_avg = sum(loss_list) / len(loss_list)
-            loss_std = torch.std(torch.tensor(loss_list))
+            loss_list_t = torch.tensor(loss_list)
+            loss_avg = torch.mean(loss_list_t)
+            loss_std = torch.std(loss_list_t)
             loss_list = []
             print(f"{i:08d} {loss_avg:.5f} {loss_std:.5f}")

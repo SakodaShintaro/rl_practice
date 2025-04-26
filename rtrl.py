@@ -51,20 +51,12 @@ def f_impl(S, sensitivity_mats, w, z, b, v, k):
     sv = recursive(sv) + torch.einsum("pi,hj->hpij", identity, k)
     sk = recursive(sk) + torch.einsum("hi,pj->hpij", v, identity)
 
-    S = S.clone()
-    sw = sw.clone()
-    sz = sz.clone()
-    sb = sb.clone()
-    sv = sv.clone()
-    sk = sk.clone()
-
     sensitivity_mats = (sw, sz, sb, sv, sk)
     return S, sensitivity_mats
 
 
 class CustomF(torch.autograd.Function):
     @staticmethod
-    @torch.no_grad()
     def forward(ctx, S, sensitivity_mats, w, z, b, v, k):
         S_out, sensitivity_out = f_impl(S, sensitivity_mats, w, z, b, v, k)
         ctx.save_for_backward(*sensitivity_out)
