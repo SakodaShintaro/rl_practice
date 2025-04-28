@@ -182,67 +182,69 @@ if __name__ == "__main__":
         else:
             obs = next_obs
 
-        # training.
-        if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
-            with torch.no_grad():
-                next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                qf1_next_target = qf1(data.next_observations, next_state_actions)
-                qf2_next_target = qf2(data.next_observations, next_state_actions)
-                min_q = torch.min(qf1_next_target, qf2_next_target)
-                min_qf_next_target = min_q - alpha * next_state_log_pi
-                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (
-                    min_qf_next_target
-                ).view(-1)
-
-            qf1_a_values = qf1(data.observations, data.actions).view(-1)
-            qf2_a_values = qf2(data.observations, data.actions).view(-1)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            qf_loss = qf1_loss + qf2_loss
-
-            # optimize the model
-            q_optimizer.zero_grad()
-            qf_loss.backward()
-            q_optimizer.step()
-
-            pi, log_pi, _ = actor.get_action(data.observations)
-            qf1_pi = qf1(data.observations, pi)
-            qf2_pi = qf2(data.observations, pi)
-            min_qf_pi = torch.min(qf1_pi, qf2_pi)
-            actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
-
-            actor_optimizer.zero_grad()
-            actor_loss.backward()
-            actor_optimizer.step()
-
-            with torch.no_grad():
-                _, log_pi, _ = actor.get_action(data.observations)
-            alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
-
-            a_optimizer.zero_grad()
-            alpha_loss.backward()
-            a_optimizer.step()
-            alpha = log_alpha.exp().item()
-
-            if global_step % 100 == 0:
-                elapsed_time = time.time() - start_time
-                data_dict = {
-                    "global_step": global_step,
-                    "losses/qf1_values": qf1_a_values.mean().item(),
-                    "losses/qf2_values": qf2_a_values.mean().item(),
-                    "losses/qf1_loss": qf1_loss.item(),
-                    "losses/qf2_loss": qf2_loss.item(),
-                    "losses/qf_loss": qf_loss.item() / 2.0,
-                    "losses/actor_loss": actor_loss.item(),
-                    "losses/alpha": alpha,
-                    "losses/log_pi": log_pi.mean().item(),
-                    "losses/alpha_loss": alpha_loss.item(),
-                    "charts/elapse_time_sec": elapsed_time,
-                    "charts/SPS": int(global_step / elapsed_time),
-                }
-                wandb.log(data_dict)
-
         progress_bar.update(1)
+
+        if global_step <= args.learning_starts:
+            continue
+
+        # training.
+        data = rb.sample(args.batch_size)
+        with torch.no_grad():
+            next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
+            qf1_next_target = qf1(data.next_observations, next_state_actions)
+            qf2_next_target = qf2(data.next_observations, next_state_actions)
+            min_q = torch.min(qf1_next_target, qf2_next_target)
+            min_qf_next_target = min_q - alpha * next_state_log_pi
+            next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (
+                min_qf_next_target
+            ).view(-1)
+
+        qf1_a_values = qf1(data.observations, data.actions).view(-1)
+        qf2_a_values = qf2(data.observations, data.actions).view(-1)
+        qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+        qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+        qf_loss = qf1_loss + qf2_loss
+
+        # optimize the model
+        q_optimizer.zero_grad()
+        qf_loss.backward()
+        q_optimizer.step()
+
+        pi, log_pi, _ = actor.get_action(data.observations)
+        qf1_pi = qf1(data.observations, pi)
+        qf2_pi = qf2(data.observations, pi)
+        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+        actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+
+        actor_optimizer.zero_grad()
+        actor_loss.backward()
+        actor_optimizer.step()
+
+        with torch.no_grad():
+            _, log_pi, _ = actor.get_action(data.observations)
+        alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
+
+        a_optimizer.zero_grad()
+        alpha_loss.backward()
+        a_optimizer.step()
+        alpha = log_alpha.exp().item()
+
+        if global_step % 100 == 0:
+            elapsed_time = time.time() - start_time
+            data_dict = {
+                "global_step": global_step,
+                "losses/qf1_values": qf1_a_values.mean().item(),
+                "losses/qf2_values": qf2_a_values.mean().item(),
+                "losses/qf1_loss": qf1_loss.item(),
+                "losses/qf2_loss": qf2_loss.item(),
+                "losses/qf_loss": qf_loss.item() / 2.0,
+                "losses/actor_loss": actor_loss.item(),
+                "losses/alpha": alpha,
+                "losses/log_pi": log_pi.mean().item(),
+                "losses/alpha_loss": alpha_loss.item(),
+                "charts/elapse_time_sec": elapsed_time,
+                "charts/SPS": int(global_step / elapsed_time),
+            }
+            wandb.log(data_dict)
 
     env.close()
