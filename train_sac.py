@@ -129,7 +129,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    env = gym.make(args.env_id)
+    env = gym.make(args.env_id, render_mode="human")
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.Autoreset(env)
     env.action_space.seed(args.seed)
