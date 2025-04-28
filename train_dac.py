@@ -28,11 +28,11 @@ class Args:
     """if toggled, cuda will be enabled by default"""
 
     # Algorithm specific arguments
-    env_id: str = "Humanoid-v5"
+    env_id: str = "CarRacing-v3"
     """the environment id of the task"""
     total_timesteps: int = 1_000_000
     """total timesteps of the experiments"""
-    buffer_size: int = int(1e6)
+    buffer_size: int = int(1e5)
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
