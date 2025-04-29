@@ -24,42 +24,71 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class Env:
+class ActionRepeatWrapper(gym.Wrapper):
     """
-    Environment wrapper for CarRacing
+    Repeat the same action for multiple steps
     """
 
-    def __init__(self) -> None:
-        self.env = gym.make("CarRacing-v3", render_mode="human")
-        self.env = gym.wrappers.FrameStackObservation(self.env, 4)
-        self.reward_threshold = self.env.spec.reward_threshold
+    def __init__(self, env, repeat=8):
+        super().__init__(env)
+        self.repeat = repeat
 
-    def reset(self) -> np.ndarray:
-        self.recent_reward = []
-
-        self.die = False
-        obs, _ = self.env.reset()
-        return obs
-
-    def step(self, action: np.ndarray) -> tuple:
+    def step(self, action):
         total_reward = 0
-        for _ in range(args.action_repeat):
-            obs, reward, die, _, _ = self.env.step(action)
-            # don't penalize "die state"
-            if die:
-                reward += 100
+        for i in range(self.repeat):
+            obs, reward, terminated, truncated, info = self.env.step(action)
             total_reward += reward
-            # if no reward recently, end the episode
-            self.recent_reward.append(reward)
-            self.recent_reward = self.recent_reward[-100:]
-            ave = np.mean(self.recent_reward)
-            done = ave <= -0.1
-            if done or die:
+            done = terminated or truncated
+            if done:
                 break
-        return obs, total_reward, done, die
+        return obs, total_reward, terminated, truncated, info
 
-    def render(self, *arg) -> None:  # noqa: ANN002
-        self.env.render(*arg)
+
+class AverageRewardEarlyStopWrapper(gym.Wrapper):
+    """
+    End episode early if average reward over last some steps is too low
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.window_size = 50
+        self.threshold = -0.1
+        self.recent_rewards = []
+
+    def reset(self, **kwargs):
+        self.recent_rewards = []
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        self.recent_rewards.append(reward)
+        self.recent_rewards = self.recent_rewards[-self.window_size :]
+
+        if len(self.recent_rewards) >= self.window_size:
+            avg_reward = np.mean(self.recent_rewards)
+            if avg_reward <= self.threshold:
+                terminated = True
+
+        return obs, reward, terminated, truncated, info
+
+
+class DieStateRewardWrapper(gym.Wrapper):
+    """
+    Don't penalize "die state" and add bonus reward if terminated
+    """
+
+    def __init__(self, env, bonus_reward=100):
+        super().__init__(env)
+        self.bonus_reward = bonus_reward
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        if terminated or truncated:
+            reward += self.bonus_reward
+
+        return obs, reward, terminated, truncated, info
 
 
 class Net(nn.Module):
@@ -212,18 +241,22 @@ if __name__ == "__main__":
     )
 
     agent = Agent()
-    env = Env()
+    env = gym.make("CarRacing-v3", render_mode="human")
+    env = gym.wrappers.FrameStackObservation(env, 4)
+    env = ActionRepeatWrapper(env, repeat=args.action_repeat)
+    env = AverageRewardEarlyStopWrapper(env)
+    env = DieStateRewardWrapper(env)
 
     training_records = []
     running_score = 0
-    state = env.reset()
+    state, _ = env.reset()
     for i_ep in range(100000):
         score = 0
-        state = env.reset()
+        state, _ = env.reset()
 
         while True:
             action, a_logp = agent.select_action(state)
-            state_, reward, done, die = env.step(
+            state_, reward, done, die, _ = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
             if args.render:
@@ -247,7 +280,7 @@ if __name__ == "__main__":
             log_episode.append(data_dict)
             log_episode_df = pd.DataFrame(log_episode)
             log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
-        if running_score > env.reward_threshold:
+        if running_score > env.spec.reward_threshold:
             print(
                 f"Solved! Running reward is now {running_score} and the last episode runs to {score}!"
             )
