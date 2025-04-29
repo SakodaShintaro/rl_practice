@@ -100,9 +100,9 @@ class Args:
     """the discount factor gamma"""
     tau: float = 0.005
     """target smoothing coefficient (default: 0.005)"""
-    batch_size: int = 128
+    batch_size: int = 64
     """the batch size of sample from the reply memory"""
-    learning_starts: int = 5e3
+    learning_starts: int = 1e3
     """timestep to start learning"""
     policy_lr: float = 3e-4
     """the learning rate of the policy network optimizer"""
@@ -258,6 +258,7 @@ if __name__ == "__main__":
                 "losses/alpha_loss": alpha_loss.item(),
                 "charts/elapse_time_sec": elapsed_time,
                 "charts/SPS": int(global_step / elapsed_time),
+                "reward": reward,
             }
             wandb.log(data_dict)
 
