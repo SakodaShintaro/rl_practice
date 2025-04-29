@@ -2,9 +2,12 @@
 import random
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 import tyro
@@ -128,6 +131,12 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
+    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_SAC"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    log_step = []
+    log_episode = []
+
     # env setup
     env = gym.make(args.env_id, render_mode="human")
     env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -178,6 +187,11 @@ if __name__ == "__main__":
                 "episodic_length": info["episode"]["l"],
             }
             wandb.log(data_dict)
+
+            log_episode.append(data_dict)
+            log_episode_df = pd.DataFrame(log_episode)
+            log_episode_df.to_csv(result_dir / f"log_episode.tsv", sep="\t", index=False)
+
             obs, _ = env.reset()
         else:
             obs = next_obs
@@ -246,5 +260,12 @@ if __name__ == "__main__":
                 "charts/SPS": int(global_step / elapsed_time),
             }
             wandb.log(data_dict)
+
+            fixed_data = {
+                k.replace("losses/", "").replace("charts/", ""): v for k, v in data_dict.items()
+            }
+            log_step.append(fixed_data)
+            log_step_df = pd.DataFrame(log_step)
+            log_step_df.to_csv(result_dir / f"log_step.tsv", sep="\t", index=False)
 
     env.close()
