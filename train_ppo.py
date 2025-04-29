@@ -39,9 +39,9 @@ class Env:
 
         self.die = False
         img_rgb, _ = self.env.reset()
-        img_gray = self.rgb2gray(img_rgb)
-        self.stack = [img_gray] * args.img_stack  # four frames for decision
-        return np.array(self.stack)
+        img_rgb = img_rgb.transpose(2, 0, 1)  # (3, 96, 96)
+        self.stack = [img_rgb] * args.img_stack  # four frames for decision
+        return np.concatenate(self.stack, axis=0)  # (12, 96, 96)
 
     def step(self, action: np.ndarray) -> tuple:
         total_reward = 0
@@ -58,23 +58,15 @@ class Env:
             done = self.av_r(reward) <= -0.1
             if done or die:
                 break
-        img_gray = self.rgb2gray(img_rgb)
         self.stack.pop(0)
-        self.stack.append(img_gray)
+        img_rgb = img_rgb.transpose(2, 0, 1)  # (3, 96, 96)
+        self.stack.append(img_rgb)
         assert len(self.stack) == args.img_stack
-        return np.array(self.stack), total_reward, done, die
+        obs = np.concatenate(self.stack, axis=0)  # (12, 96, 96)
+        return obs, total_reward, done, die
 
     def render(self, *arg) -> None:  # noqa: ANN002
         self.env.render(*arg)
-
-    @staticmethod
-    def rgb2gray(rgb: np.ndarray, norm: bool = True) -> np.ndarray:
-        # rgb image -> gray [0, 1]
-        gray = np.dot(rgb[..., :], [0.299, 0.587, 0.114])
-        if norm:
-            # normalize
-            gray = gray / 128.0 - 1.0
-        return gray
 
     @staticmethod
     def reward_memory() -> callable:
@@ -99,19 +91,19 @@ class Net(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.cnn_base = nn.Sequential(  # input shape (4, 96, 96)
-            nn.Conv2d(args.img_stack, 8, kernel_size=4, stride=2),
-            nn.ReLU(),  # activation
+        self.cnn_base = nn.Sequential(  # input shape (args.img_stack * 3, 96, 96)
+            nn.Conv2d(args.img_stack * 3, 8, kernel_size=4, stride=2),
+            nn.ReLU(),
             nn.Conv2d(8, 16, kernel_size=3, stride=2),  # (8, 47, 47)
-            nn.ReLU(),  # activation
+            nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, stride=2),  # (16, 23, 23)
-            nn.ReLU(),  # activation
+            nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=2),  # (32, 11, 11)
-            nn.ReLU(),  # activation
+            nn.ReLU(),
             nn.Conv2d(64, 128, kernel_size=3, stride=1),  # (64, 5, 5)
-            nn.ReLU(),  # activation
+            nn.ReLU(),
             nn.Conv2d(128, 256, kernel_size=3, stride=1),  # (128, 3, 3)
-            nn.ReLU(),  # activation
+            nn.ReLU(),
         )  # output shape (256, 1, 1)
         self.v = nn.Sequential(nn.Linear(256, 100), nn.ReLU(), nn.Linear(100, 1))
         self.fc = nn.Sequential(nn.Linear(256, 100), nn.ReLU())
@@ -229,11 +221,11 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float64, (args.img_stack, 96, 96)),
+            ("s", np.float64, (args.img_stack * 3, 96, 96)),
             ("a", np.float64, (3,)),
             ("a_logp", np.float64),
             ("r", np.float64),
-            ("s_", np.float64, (args.img_stack, 96, 96)),
+            ("s_", np.float64, (args.img_stack * 3, 96, 96)),
         ]
     )
 
