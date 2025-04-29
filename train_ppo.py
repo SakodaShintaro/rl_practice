@@ -1,56 +1,27 @@
 # Reference) https://github.com/xtma/pytorch_car_caring
 import argparse
+from datetime import datetime
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
+import pandas as pd
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
+from torch import nn, optim
 from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
-parser = argparse.ArgumentParser(description="Train a PPO agent for the CarRacing-v0")
-parser.add_argument(
-    "--gamma", type=float, default=0.99, metavar="G", help="discount factor (default: 0.99)"
-)
-parser.add_argument(
-    "--action-repeat",
-    type=int,
-    default=8,
-    metavar="N",
-    help="repeat action in N frames (default: 8)",
-)
-parser.add_argument(
-    "--img-stack", type=int, default=4, metavar="N", help="stack N image in a state (default: 4)"
-)
-parser.add_argument("--seed", type=int, default=0, metavar="N", help="random seed (default: 0)")
-parser.add_argument("--render", action="store_true", help="render the environment")
-parser.add_argument("--vis", action="store_true", help="use visdom")
-parser.add_argument(
-    "--log-interval",
-    type=int,
-    default=10,
-    metavar="N",
-    help="interval between training status logs (default: 10)",
-)
-args = parser.parse_args()
 
-use_cuda = torch.cuda.is_available()
-device = torch.device("cuda" if use_cuda else "cpu")
-torch.manual_seed(args.seed)
-if use_cuda:
-    torch.cuda.manual_seed(args.seed)
-
-transition = np.dtype(
-    [
-        ("s", np.float64, (args.img_stack, 96, 96)),
-        ("a", np.float64, (3,)),
-        ("a_logp", np.float64),
-        ("r", np.float64),
-        ("s_", np.float64, (args.img_stack, 96, 96)),
-    ]
-)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--action-repeat", type=int, default=8)
+    parser.add_argument("--img-stack", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--render", action="store_true")
+    parser.add_argument("--log-interval", type=int, default=10)
+    return parser.parse_args()
 
 
 class Env:
@@ -58,11 +29,11 @@ class Env:
     Environment wrapper for CarRacing
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.env = gym.make("CarRacing-v3", render_mode="human")
         self.reward_threshold = self.env.spec.reward_threshold
 
-    def reset(self):
+    def reset(self) -> np.ndarray:
         self.counter = 0
         self.av_r = self.reward_memory()
 
@@ -72,9 +43,9 @@ class Env:
         self.stack = [img_gray] * args.img_stack  # four frames for decision
         return np.array(self.stack)
 
-    def step(self, action):
+    def step(self, action: np.ndarray) -> tuple:
         total_reward = 0
-        for i in range(args.action_repeat):
+        for _ in range(args.action_repeat):
             img_rgb, reward, die, _, _ = self.env.step(action)
             # don't penalize "die state"
             if die:
@@ -84,7 +55,7 @@ class Env:
                 reward -= 0.05
             total_reward += reward
             # if no reward recently, end the episode
-            done = True if self.av_r(reward) <= -0.1 else False
+            done = self.av_r(reward) <= -0.1
             if done or die:
                 break
         img_gray = self.rgb2gray(img_rgb)
@@ -93,11 +64,11 @@ class Env:
         assert len(self.stack) == args.img_stack
         return np.array(self.stack), total_reward, done, die
 
-    def render(self, *arg):
+    def render(self, *arg) -> None:  # noqa: ANN002
         self.env.render(*arg)
 
     @staticmethod
-    def rgb2gray(rgb, norm=True):
+    def rgb2gray(rgb: np.ndarray, norm: bool = True) -> np.ndarray:
         # rgb image -> gray [0, 1]
         gray = np.dot(rgb[..., :], [0.299, 0.587, 0.114])
         if norm:
@@ -106,13 +77,13 @@ class Env:
         return gray
 
     @staticmethod
-    def reward_memory():
+    def reward_memory() -> callable:
         # record reward for last 100 steps
         count = 0
         length = 100
         history = np.zeros(length)
 
-        def memory(reward):
+        def memory(reward: float) -> float:
             nonlocal count
             history[count] = reward
             count = (count + 1) % length
@@ -126,8 +97,8 @@ class Net(nn.Module):
     Actor-Critic Network for PPO
     """
 
-    def __init__(self):
-        super(Net, self).__init__()
+    def __init__(self) -> None:
+        super().__init__()
         self.cnn_base = nn.Sequential(  # input shape (4, 96, 96)
             nn.Conv2d(args.img_stack, 8, kernel_size=4, stride=2),
             nn.ReLU(),  # activation
@@ -149,12 +120,12 @@ class Net(nn.Module):
         self.apply(self._weights_init)
 
     @staticmethod
-    def _weights_init(m):
+    def _weights_init(m: object) -> None:
         if isinstance(m, nn.Conv2d):
             nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("relu"))
             nn.init.constant_(m.bias, 0.1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> tuple:
         x = self.cnn_base(x)
         x = x.view(-1, 256)
         v = self.v(x)
@@ -175,7 +146,7 @@ class Agent:
     ppo_epoch = 10
     buffer_capacity, batch_size = 2000, 128
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.training_step = 0
         self.net = Net().double().to(device)
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
@@ -183,7 +154,7 @@ class Agent:
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
 
-    def select_action(self, state):
+    def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).double().to(device).unsqueeze(0)
         with torch.no_grad():
             alpha, beta = self.net(state)[0]
@@ -195,7 +166,7 @@ class Agent:
         a_logp = a_logp.item()
         return action, a_logp
 
-    def store(self, transition):
+    def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
         self.counter += 1
         if self.counter == self.buffer_capacity:
@@ -204,7 +175,7 @@ class Agent:
         else:
             return False
 
-    def update(self):
+    def update(self) -> None:
         self.training_step += 1
 
         s = torch.tensor(self.buffer["s"], dtype=torch.double).to(device)
@@ -217,11 +188,11 @@ class Agent:
         with torch.no_grad():
             target_v = r + args.gamma * self.net(s_)[1]
             adv = target_v - self.net(s)[1]
-            # adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+            # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
         for _ in range(self.ppo_epoch):
             for index in BatchSampler(
-                SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, False
+                SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, drop_last=False
             ):
                 alpha, beta = self.net(s[index])[0]
                 dist = Beta(alpha, beta)
@@ -238,11 +209,34 @@ class Agent:
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                # nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
 
 if __name__ == "__main__":
+    args = parse_args()
+
+    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    log_episode = []
+
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    torch.manual_seed(args.seed)
+    if use_cuda:
+        torch.cuda.manual_seed(args.seed)
+
+    transition = np.dtype(
+        [
+            ("s", np.float64, (args.img_stack, 96, 96)),
+            ("a", np.float64, (3,)),
+            ("a_logp", np.float64),
+            ("r", np.float64),
+            ("s_", np.float64, (args.img_stack, 96, 96)),
+        ]
+    )
+
     agent = Agent()
     env = Env()
 
@@ -253,7 +247,7 @@ if __name__ == "__main__":
         score = 0
         state = env.reset()
 
-        for t in range(1000):
+        while True:
             action, a_logp = agent.select_action(state)
             state_, reward, done, die = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
@@ -270,15 +264,17 @@ if __name__ == "__main__":
         running_score = running_score * 0.99 + score * 0.01
 
         if i_ep % args.log_interval == 0:
-            print(
-                "Ep {}\tLast score: {:.2f}\tMoving average score: {:.2f}".format(
-                    i_ep, score, running_score
-                )
-            )
+            print(f"Ep {i_ep}\tLast score: {score:.2f}\tMoving average score: {running_score:.2f}")
+            data_dict = {
+                "episode": i_ep,
+                "score": score,
+                "running_score": running_score,
+            }
+            log_episode.append(data_dict)
+            log_episode_df = pd.DataFrame(log_episode)
+            log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
         if running_score > env.reward_threshold:
             print(
-                "Solved! Running reward is now {} and the last episode runs to {}!".format(
-                    running_score, score
-                )
+                f"Solved! Running reward is now {running_score} and the last episode runs to {score}!"
             )
             break
