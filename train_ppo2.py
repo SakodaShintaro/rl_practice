@@ -50,9 +50,6 @@ class Env:
             # don't penalize "die state"
             if die:
                 reward += 100
-            # green penalty
-            if np.mean(img_rgb[:, :, 1]) > 185.0:
-                reward -= 0.05
             total_reward += reward
             # if no reward recently, end the episode
             self.recent_reward.append(reward)
