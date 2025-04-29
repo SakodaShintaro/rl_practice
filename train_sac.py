@@ -190,7 +190,7 @@ if __name__ == "__main__":
 
             log_episode.append(data_dict)
             log_episode_df = pd.DataFrame(log_episode)
-            log_episode_df.to_csv(result_dir / f"log_episode.tsv", sep="\t", index=False)
+            log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
 
             obs, _ = env.reset()
         else:
@@ -267,6 +267,6 @@ if __name__ == "__main__":
             }
             log_step.append(fixed_data)
             log_step_df = pd.DataFrame(log_step)
-            log_step_df.to_csv(result_dir / f"log_step.tsv", sep="\t", index=False)
+            log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
 
     env.close()
