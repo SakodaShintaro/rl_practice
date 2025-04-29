@@ -31,22 +31,20 @@ class Env:
 
     def __init__(self) -> None:
         self.env = gym.make("CarRacing-v3", render_mode="human")
+        self.env = gym.wrappers.FrameStackObservation(self.env, 4)
         self.reward_threshold = self.env.spec.reward_threshold
 
     def reset(self) -> np.ndarray:
-        self.counter = 0
         self.recent_reward = []
 
         self.die = False
-        img_rgb, _ = self.env.reset()
-        img_rgb = img_rgb.transpose(2, 0, 1)  # (3, 96, 96)
-        self.stack = [img_rgb] * args.img_stack  # four frames for decision
-        return np.concatenate(self.stack, axis=0)  # (12, 96, 96)
+        obs, _ = self.env.reset()
+        return obs
 
     def step(self, action: np.ndarray) -> tuple:
         total_reward = 0
         for _ in range(args.action_repeat):
-            img_rgb, reward, die, _, _ = self.env.step(action)
+            obs, reward, die, _, _ = self.env.step(action)
             # don't penalize "die state"
             if die:
                 reward += 100
@@ -58,11 +56,6 @@ class Env:
             done = ave <= -0.1
             if done or die:
                 break
-        self.stack.pop(0)
-        img_rgb = img_rgb.transpose(2, 0, 1)  # (3, 96, 96)
-        self.stack.append(img_rgb)
-        assert len(self.stack) == args.img_stack
-        obs = np.concatenate(self.stack, axis=0)  # (12, 96, 96)
         return obs, total_reward, done, die
 
     def render(self, *arg) -> None:  # noqa: ANN002
@@ -103,6 +96,10 @@ class Net(nn.Module):
             nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x: torch.Tensor) -> tuple:
+        # x.shape = (batch_size, args.img_stack, 96, 96, 3)
+        bs, st, h, w, c = x.shape
+        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, args.img_stack, 3, 96, 96)
+        x = x.reshape(bs, st * c, h, w)
         x = self.cnn_base(x)
         x = x.view(-1, 256)
         v = self.v(x)
@@ -206,11 +203,11 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float64, (args.img_stack * 3, 96, 96)),
+            ("s", np.float64, (args.img_stack, 96, 96, 3)),
             ("a", np.float64, (3,)),
             ("a_logp", np.float64),
             ("r", np.float64),
-            ("s_", np.float64, (args.img_stack * 3, 96, 96)),
+            ("s_", np.float64, (args.img_stack, 96, 96, 3)),
         ]
     )
 
