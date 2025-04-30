@@ -250,12 +250,11 @@ if __name__ == "__main__":
     env = DieStateRewardWrapper(env)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.RecordVideo(
-        env, video_folder=video_dir, episode_trigger=lambda x: x % 1 == 0
+        env, video_folder=video_dir, episode_trigger=lambda x: x % 200 == 0
     )
 
     training_records = []
     running_score = 0
-    state, _ = env.reset()
     for i_ep in range(100000):
         score = 0
         state, _ = env.reset()
