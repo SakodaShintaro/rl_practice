@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import gymnasium as gym
 import numpy as np
 import pandas as pd
 import torch
@@ -14,14 +13,12 @@ from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 import wandb
-from wrappers import ActionRepeatWrapper, AverageRewardEarlyStopWrapper, DieStateRewardWrapper
+from wrappers import STACK_SIZE, make_env
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--action-repeat", type=int, default=8)
-    parser.add_argument("--img-stack", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=10)
     return parser.parse_args()
@@ -34,8 +31,8 @@ class Net(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.cnn_base = nn.Sequential(  # input shape (args.img_stack * 3, 96, 96)
-            nn.Conv2d(args.img_stack * 3, 8, kernel_size=4, stride=2),
+        self.cnn_base = nn.Sequential(  # input shape (STACK_SIZE * 3, 96, 96)
+            nn.Conv2d(STACK_SIZE * 3, 8, kernel_size=4, stride=2),
             nn.ReLU(),
             nn.Conv2d(8, 16, kernel_size=3, stride=2),  # (8, 47, 47)
             nn.ReLU(),
@@ -61,9 +58,9 @@ class Net(nn.Module):
             nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x: torch.Tensor) -> tuple:
-        # x.shape = (batch_size, args.img_stack, 96, 96, 3)
+        # x.shape = (batch_size, STACK_SIZE, 96, 96, 3)
         bs, st, h, w, c = x.shape
-        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, args.img_stack, 3, 96, 96)
+        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, STACK_SIZE, 3, 96, 96)
         x = x.reshape(bs, st * c, h, w)
         x = self.cnn_base(x)
         x = x.view(-1, 256)
@@ -183,24 +180,16 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float64, (args.img_stack, 96, 96, 3)),
+            ("s", np.float64, (STACK_SIZE, 96, 96, 3)),
             ("a", np.float64, (3,)),
             ("a_logp", np.float64),
             ("r", np.float64),
-            ("s_", np.float64, (args.img_stack, 96, 96, 3)),
+            ("s_", np.float64, (STACK_SIZE, 96, 96, 3)),
         ]
     )
 
     agent = Agent()
-    env = gym.make("CarRacing-v3", render_mode="rgb_array")
-    env = gym.wrappers.FrameStackObservation(env, 4)
-    env = ActionRepeatWrapper(env, repeat=args.action_repeat)
-    env = AverageRewardEarlyStopWrapper(env)
-    env = DieStateRewardWrapper(env)
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.RecordVideo(
-        env, video_folder=video_dir, episode_trigger=lambda x: x % 200 == 0
-    )
+    env = make_env(video_dir=video_dir)
 
     wandb.init(project="cleanRL", config=vars(args), name="PPO", monitor_gym=True, save_code=True)
 

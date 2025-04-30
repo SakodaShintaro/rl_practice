@@ -1,6 +1,21 @@
 import gymnasium as gym
 import numpy as np
 
+STACK_SIZE = 4
+
+
+def make_env(video_dir):
+    env = gym.make("CarRacing-v3", render_mode="rgb_array")
+    env = gym.wrappers.FrameStackObservation(env, stack_size=STACK_SIZE)
+    env = ActionRepeatWrapper(env, repeat=8)
+    env = AverageRewardEarlyStopWrapper(env)
+    env = DieStateRewardWrapper(env)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.RecordVideo(
+        env, video_folder=video_dir, episode_trigger=lambda x: x % 100 == 0
+    )
+    return env
+
 
 class ActionRepeatWrapper(gym.Wrapper):
     """
