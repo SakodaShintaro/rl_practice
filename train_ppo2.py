@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 import numpy as np
 import pandas as pd
@@ -222,6 +223,7 @@ if __name__ == "__main__":
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
     result_dir.mkdir(parents=True, exist_ok=True)
+    video_dir = result_dir / "video"
     log_episode = []
 
     use_cuda = torch.cuda.is_available()
@@ -241,11 +243,15 @@ if __name__ == "__main__":
     )
 
     agent = Agent()
-    env = gym.make("CarRacing-v3", render_mode="human")
+    env = gym.make("CarRacing-v3", render_mode="rgb_array")
     env = gym.wrappers.FrameStackObservation(env, 4)
     env = ActionRepeatWrapper(env, repeat=args.action_repeat)
     env = AverageRewardEarlyStopWrapper(env)
     env = DieStateRewardWrapper(env)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.RecordVideo(
+        env, video_folder=video_dir, episode_trigger=lambda x: x % 1 == 0
+    )
 
     training_records = []
     running_score = 0
@@ -260,7 +266,10 @@ if __name__ == "__main__":
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
             if args.render:
-                env.render()
+                rgb_array = env.render()
+                bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+                cv2.imshow("CarRacing", bgr_array)
+                cv2.waitKey(1)
             if agent.store((state, action, a_logp, reward, state_)):
                 print("updating")
                 agent.update()
