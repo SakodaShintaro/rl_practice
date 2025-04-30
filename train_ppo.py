@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 import numpy as np
 import pandas as pd
@@ -11,6 +12,8 @@ import torch.nn.functional as F
 from torch import nn, optim
 from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
+
+from wrappers import ActionRepeatWrapper, AverageRewardEarlyStopWrapper, DieStateRewardWrapper
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,66 +25,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--log-interval", type=int, default=10)
     return parser.parse_args()
-
-
-class Env:
-    """
-    Environment wrapper for CarRacing
-    """
-
-    def __init__(self) -> None:
-        self.env = gym.make("CarRacing-v3", render_mode="human")
-        self.reward_threshold = self.env.spec.reward_threshold
-
-    def reset(self) -> np.ndarray:
-        self.counter = 0
-        self.av_r = self.reward_memory()
-
-        self.die = False
-        img_rgb, _ = self.env.reset()
-        img_rgb = img_rgb.transpose(2, 0, 1)  # (3, 96, 96)
-        self.stack = [img_rgb] * args.img_stack  # four frames for decision
-        return np.concatenate(self.stack, axis=0)  # (12, 96, 96)
-
-    def step(self, action: np.ndarray) -> tuple:
-        total_reward = 0
-        for _ in range(args.action_repeat):
-            img_rgb, reward, die, _, _ = self.env.step(action)
-            # don't penalize "die state"
-            if die:
-                reward += 100
-            # green penalty
-            if np.mean(img_rgb[:, :, 1]) > 185.0:
-                reward -= 0.05
-            total_reward += reward
-            # if no reward recently, end the episode
-            done = self.av_r(reward) <= -0.1
-            if done or die:
-                break
-        self.stack.pop(0)
-        img_rgb = img_rgb.transpose(2, 0, 1)  # (3, 96, 96)
-        self.stack.append(img_rgb)
-        assert len(self.stack) == args.img_stack
-        obs = np.concatenate(self.stack, axis=0)  # (12, 96, 96)
-        return obs, total_reward, done, die
-
-    def render(self, *arg) -> None:  # noqa: ANN002
-        self.env.render(*arg)
-
-    @staticmethod
-    def reward_memory() -> callable:
-        # record reward for last 100 steps
-        count = 0
-        length = 100
-        history = np.zeros(length)
-
-        def memory(reward: float) -> float:
-            nonlocal count
-            history[count] = reward
-            count = (count + 1) % length
-            return np.mean(history)
-
-        return memory
 
 
 class Net(nn.Module):
@@ -118,6 +61,10 @@ class Net(nn.Module):
             nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x: torch.Tensor) -> tuple:
+        # x.shape = (batch_size, args.img_stack, 96, 96, 3)
+        bs, st, h, w, c = x.shape
+        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, args.img_stack, 3, 96, 96)
+        x = x.reshape(bs, st * c, h, w)
         x = self.cnn_base(x)
         x = x.view(-1, 256)
         v = self.v(x)
@@ -211,6 +158,7 @@ if __name__ == "__main__":
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
     result_dir.mkdir(parents=True, exist_ok=True)
+    video_dir = result_dir / "video"
     log_episode = []
 
     use_cuda = torch.cuda.is_available()
@@ -221,31 +169,41 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float64, (args.img_stack * 3, 96, 96)),
+            ("s", np.float64, (args.img_stack, 96, 96, 3)),
             ("a", np.float64, (3,)),
             ("a_logp", np.float64),
             ("r", np.float64),
-            ("s_", np.float64, (args.img_stack * 3, 96, 96)),
+            ("s_", np.float64, (args.img_stack, 96, 96, 3)),
         ]
     )
 
     agent = Agent()
-    env = Env()
+    env = gym.make("CarRacing-v3", render_mode="rgb_array")
+    env = gym.wrappers.FrameStackObservation(env, 4)
+    env = ActionRepeatWrapper(env, repeat=args.action_repeat)
+    env = AverageRewardEarlyStopWrapper(env)
+    env = DieStateRewardWrapper(env)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.RecordVideo(
+        env, video_folder=video_dir, episode_trigger=lambda x: x % 200 == 0
+    )
 
     training_records = []
     running_score = 0
-    state = env.reset()
     for i_ep in range(100000):
         score = 0
-        state = env.reset()
+        state, _ = env.reset()
 
         while True:
             action, a_logp = agent.select_action(state)
-            state_, reward, done, die = env.step(
+            state_, reward, done, die, _ = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
             if args.render:
-                env.render()
+                rgb_array = env.render()
+                bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+                cv2.imshow("CarRacing", bgr_array)
+                cv2.waitKey(1)
             if agent.store((state, action, a_logp, reward, state_)):
                 print("updating")
                 agent.update()
@@ -265,7 +223,7 @@ if __name__ == "__main__":
             log_episode.append(data_dict)
             log_episode_df = pd.DataFrame(log_episode)
             log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
-        if running_score > env.reward_threshold:
+        if running_score > env.spec.reward_threshold:
             print(
                 f"Solved! Running reward is now {running_score} and the last episode runs to {score}!"
             )
