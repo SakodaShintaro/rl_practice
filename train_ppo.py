@@ -1,4 +1,4 @@
-# Reference) https://github.com/xtma/pytorch_car_caring
+# Reference: https://github.com/xtma/pytorch_car_caring
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +13,7 @@ from torch import nn, optim
 from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
+import wandb
 from wrappers import ActionRepeatWrapper, AverageRewardEarlyStopWrapper, DieStateRewardWrapper
 
 
@@ -22,7 +23,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action-repeat", type=int, default=8)
     parser.add_argument("--img-stack", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--render", action="store_true")
     parser.add_argument("--log-interval", type=int, default=10)
     return parser.parse_args()
 
@@ -129,7 +129,11 @@ class Agent:
             adv = target_v - self.net(s)[1]
             # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
+        ave_action_loss_list = []
+        ave_value_loss_list = []
         for _ in range(self.ppo_epoch):
+            sum_action_loss = 0.0
+            sum_value_loss = 0.0
             for index in BatchSampler(
                 SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, drop_last=False
             ):
@@ -145,11 +149,22 @@ class Agent:
                 action_loss = -torch.min(surr1, surr2).mean()
                 value_loss = F.smooth_l1_loss(self.net(s[index])[1], target_v[index])
                 loss = action_loss + 2.0 * value_loss
+                sum_action_loss += action_loss.item() * len(index)
+                sum_value_loss += value_loss.item() * len(index)
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+            ave_action_loss = sum_action_loss / self.buffer_capacity
+            ave_value_loss = sum_value_loss / self.buffer_capacity
+            ave_action_loss_list.append(ave_action_loss)
+            ave_value_loss_list.append(ave_value_loss)
+        result_dict = {}
+        for i in range(len(ave_action_loss_list)):
+            result_dict[f"ppo/action_loss_{i}"] = ave_action_loss_list[i]
+            result_dict[f"ppo/value_loss_{i}"] = ave_value_loss_list[i]
+        return result_dict
 
 
 if __name__ == "__main__":
@@ -159,7 +174,6 @@ if __name__ == "__main__":
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
     result_dir.mkdir(parents=True, exist_ok=True)
     video_dir = result_dir / "video"
-    log_episode = []
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -188,25 +202,39 @@ if __name__ == "__main__":
         env, video_folder=video_dir, episode_trigger=lambda x: x % 200 == 0
     )
 
-    training_records = []
+    wandb.init(project="cleanRL", config=vars(args), name="PPO", monitor_gym=True, save_code=True)
+
+    log_episode = []
+    log_step = []
     running_score = 0
+    global_step = 0
     for i_ep in range(100000):
         score = 0
         state, _ = env.reset()
 
         while True:
+            global_step += 1
             action, a_logp = agent.select_action(state)
-            state_, reward, done, die, _ = env.step(
+            state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
-            if args.render:
-                rgb_array = env.render()
-                bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
-                cv2.imshow("CarRacing", bgr_array)
-                cv2.waitKey(1)
+
+            # render
+            rgb_array = env.render()
+            bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+            cv2.imshow("CarRacing", bgr_array)
+            cv2.waitKey(1)
+
             if agent.store((state, action, a_logp, reward, state_)):
                 print("updating")
-                agent.update()
+                data_dict = agent.update()
+                data_dict["global_step"] = global_step
+                wandb.log(data_dict)
+                fixed_data = {k.replace("ppo/", ""): v for k, v in data_dict.items()}
+                log_step.append(fixed_data)
+                log_step_df = pd.DataFrame(log_step)
+                log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
+
             score += reward
             state = state_
             if done or die:
@@ -216,10 +244,15 @@ if __name__ == "__main__":
         if i_ep % args.log_interval == 0:
             print(f"Ep {i_ep}\tLast score: {score:.2f}\tMoving average score: {running_score:.2f}")
             data_dict = {
+                "global_step": global_step,
                 "episode": i_ep,
                 "score": score,
                 "running_score": running_score,
+                "episodic_return": info["episode"]["r"],
+                "episodic_length": info["episode"]["l"],
             }
+            wandb.log(data_dict)
+
             log_episode.append(data_dict)
             log_episode_df = pd.DataFrame(log_episode)
             log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
