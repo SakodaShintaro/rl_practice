@@ -21,6 +21,7 @@ import wandb
 from network import Actor, SoftQNetwork
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
+from wrappers import STACK_SIZE, make_env
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,8 +59,13 @@ class AVG:
     def __init__(self, cfg: argparse.Namespace, env: gym.Env) -> None:
         self.steps = 0
 
-        self.actor = Actor(env, cfg.hidden_actor).to(cfg.device)
-        self.Q = SoftQNetwork(env, cfg.hidden_critic).to(cfg.device)
+        action_dim = np.prod(env.action_space.shape)
+        self.actor = Actor(
+            in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=cfg.hidden_actor
+        ).to(cfg.device)
+        self.Q = SoftQNetwork(
+            in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=cfg.hidden_critic
+        ).to(cfg.device)
 
         self.actor_lr = cfg.actor_lr
         self.critic_lr = cfg.critic_lr
@@ -231,7 +237,7 @@ if __name__ == "__main__":
         logger.info(f"  {arg}: {value}")
 
     # Env
-    env = gym.make(args.env, render_mode="rgb_array")
+    env = make_env(save_dir / "video")
 
     #### Reproducibility
     env.reset(seed=args.seed)
@@ -250,12 +256,13 @@ if __name__ == "__main__":
 
     agent = AVG(args, env)
 
-    action_coeff = (env.action_space.high - env.action_space.low) / 2
+    action_scale = (env.action_space.high - env.action_space.low) / 2.0
+    action_bias = (env.action_space.high + env.action_space.low) / 2.0
 
     # なぜか追加の係数がないとHumanoid-v5で学習が進まない
-    logger.info(f"Before {action_coeff=}")
-    action_coeff *= args.additional_coeff
-    logger.info(f"After  {action_coeff=}")
+    logger.info(f"Before {action_scale=}")
+    action_scale *= args.additional_coeff
+    logger.info(f"After  {action_scale=}")
 
     # Interaction
     reward_processor = RewardProcessor(args.reward_processing_type)
@@ -272,10 +279,17 @@ if __name__ == "__main__":
         # N.B: Action is a torch.Tensor
         action, lprob, mean = agent.compute_action(obs)
         sim_action = action.detach().cpu().view(-1).numpy()
-        sim_action *= action_coeff
+        sim_action = sim_action * action_scale + action_bias
 
         # Receive reward and next state
         next_obs, reward, terminated, truncated, _ = env.step(sim_action)
+
+        # render
+        rgb_array = env.render()
+        bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+        cv2.imshow("CarRacing", bgr_array)
+        cv2.waitKey(1)
+
         reward_normed = reward_processor.normalize(reward)
         if episode_id % args.record_interval_episode == 0:
             save_image_dir = save_dir / f"images/{episode_id:06d}"
