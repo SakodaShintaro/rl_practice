@@ -2,12 +2,13 @@ import gymnasium as gym
 import numpy as np
 
 STACK_SIZE = 4
+REPEAT = 8
 
 
 def make_env(video_dir):
     env = gym.make("CarRacing-v3", render_mode="rgb_array")
     env = gym.wrappers.FrameStackObservation(env, stack_size=STACK_SIZE)
-    env = ActionRepeatWrapper(env, repeat=8)
+    env = ActionRepeatWrapper(env, repeat=REPEAT)
     env = AverageRewardEarlyStopWrapper(env)
     env = DieStateRewardWrapper(env)
     env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -44,8 +45,8 @@ class AverageRewardEarlyStopWrapper(gym.Wrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        self.window_size = 50
-        self.threshold = -0.1
+        self.window_size = 25
+        self.threshold = -0.1 * REPEAT
         self.recent_rewards = []
 
     def reset(self, **kwargs):
