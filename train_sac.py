@@ -277,6 +277,8 @@ if __name__ == "__main__":
             }
             log_step.append(fixed_data)
             log_step_df = pd.DataFrame(log_step)
-            log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
+            log_step_df.to_csv(
+                result_dir / "log_step.tsv", sep="\t", index=False, float_format="%.3f"
+            )
 
     env.close()
