@@ -57,6 +57,7 @@ class SoftQNetwork(nn.Module):
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
         bs, st, h, w, c = x.shape
         x = x.permute((0, 1, 4, 2, 3))  # (batch_size, STACK_SIZE, 3, 96, 96)
+        x /= 255.0
         x = x.reshape(bs, st * c, h, w)
         x = self.cnn(x)
         x = torch.cat([x, a], dim=1)
@@ -88,6 +89,7 @@ class Actor(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         bs, st, h, w, c = x.shape
         x = x.permute((0, 1, 4, 2, 3))  # (batch_size, STACK_SIZE, 3, 96, 96)
+        x /= 255.0
         x = x.reshape(bs, st * c, h, w)
         x = self.cnn(x)
         x = F.relu(self.fc1(x))
