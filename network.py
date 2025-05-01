@@ -42,22 +42,23 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env: gym.Env, hidden_dim: int, use_normalize: bool = True) -> None:
+    def __init__(
+        self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
+    ) -> None:
         super().__init__()
-        input_dim = RESNET_DIM + np.prod(env.action_space.shape)
-        self.resnet = timm.create_model(
-            "resnet18", pretrained=True, num_classes=0, cache_dir=RESNET_DIR
-        )
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.cnn = BaseCNN(in_channels)
+        mid_dim = 256 + action_dim
+        self.fc1 = nn.Linear(mid_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
         self.use_normalize = use_normalize
         self.apply(orthogonal_weight_init)
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
-        x = x.permute(0, 3, 1, 2)  # (bs, h, w, c) -> (bs, c, h, w)
-        x = x / 255.0
-        x = self.resnet(x)
+        bs, st, h, w, c = x.shape
+        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, STACK_SIZE, 3, 96, 96)
+        x = x.reshape(bs, st * c, h, w)
+        x = self.cnn(x)
         x = torch.cat([x, a], dim=1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -72,37 +73,23 @@ LOG_STD_MIN = -5
 
 
 class Actor(nn.Module):
-    def __init__(self, env: gym.Env, hidden_dim: int, use_normalize: bool = True) -> None:
+    def __init__(
+        self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
+    ) -> None:
         super().__init__()
-        self.resnet = timm.create_model(
-            "resnet18", pretrained=True, num_classes=0, cache_dir=RESNET_DIR
-        )
-        self.fc1 = nn.Linear(RESNET_DIM, hidden_dim)
+        self.cnn = BaseCNN(in_channels)
+        self.fc1 = nn.Linear(256, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_mean = nn.Linear(hidden_dim, np.prod(env.action_space.shape))
-        self.fc_logstd = nn.Linear(hidden_dim, np.prod(env.action_space.shape))
-        # action rescaling
-        self.register_buffer(
-            "action_scale",
-            torch.tensor(
-                (env.action_space.high - env.action_space.low) / 2.0,
-                dtype=torch.float32,
-            ),
-        )
-        self.register_buffer(
-            "action_bias",
-            torch.tensor(
-                (env.action_space.high + env.action_space.low) / 2.0,
-                dtype=torch.float32,
-            ),
-        )
+        self.fc_mean = nn.Linear(hidden_dim, action_dim)
+        self.fc_logstd = nn.Linear(hidden_dim, action_dim)
         self.use_normalize = use_normalize
         self.apply(orthogonal_weight_init)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = x.permute(0, 3, 1, 2)  # (bs, h, w, c) -> (bs, c, h, w)
-        x = x / 255.0
-        x = self.resnet(x)
+        bs, st, h, w, c = x.shape
+        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, STACK_SIZE, 3, 96, 96)
+        x = x.reshape(bs, st * c, h, w)
+        x = self.cnn(x)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         if self.use_normalize:
@@ -122,13 +109,11 @@ class Actor(nn.Module):
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
         y_t = torch.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
         log_prob = normal.log_prob(x_t)
-        # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        log_prob -= torch.log((1 - y_t.pow(2)) + 1e-6)
         log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean
+        mean = torch.tanh(mean)
+        return y_t, log_prob, mean
 
 
 class TimestepEmbedder(nn.Module):

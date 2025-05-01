@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 import numpy as np
 import pandas as pd
@@ -16,6 +17,7 @@ from tqdm import tqdm
 
 import wandb
 from network import Actor, SoftQNetwork
+from wrappers import STACK_SIZE, make_env
 
 
 @dataclass
@@ -112,15 +114,8 @@ class Args:
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    run_name = f"SAC_{args.env_id}_{args.exp_name}"
 
-    wandb.init(
-        project="cleanRL",
-        config=vars(args),
-        name=run_name,
-        monitor_gym=True,
-        save_code=True,
-    )
+    wandb.init(project="cleanRL", config=vars(args), name="SAC", monitor_gym=True, save_code=True)
 
     # seeding
     random.seed(args.seed)
@@ -138,16 +133,24 @@ if __name__ == "__main__":
     log_episode = []
 
     # env setup
-    env = gym.make(args.env_id, render_mode="human")
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.Autoreset(env)
+    env = make_env(result_dir / "video")
     env.action_space.seed(args.seed)
+
+    action_scale = (env.action_space.high - env.action_space.low) / 2.0
+    action_bias = (env.action_space.high + env.action_space.low) / 2.0
 
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    actor = Actor(env, hidden_dim=256, use_normalize=False).to(device)
-    qf1 = SoftQNetwork(env, hidden_dim=256, use_normalize=False).to(device)
-    qf2 = SoftQNetwork(env, hidden_dim=256, use_normalize=False).to(device)
+    action_dim = np.prod(env.action_space.shape)
+    actor = Actor(
+        in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
+    ).to(device)
+    qf1 = SoftQNetwork(
+        in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
+    ).to(device)
+    qf2 = SoftQNetwork(
+        in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
+    ).to(device)
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
@@ -175,10 +178,17 @@ if __name__ == "__main__":
         else:
             action, _, _ = actor.get_action(torch.Tensor(obs).to(device).unsqueeze(0))
             action = action[0].detach().cpu().numpy()
+            action = action * action_scale + action_bias
 
         # execute the game and log data.
         next_obs, reward, termination, truncation, info = env.step(action)
         rb.add(obs, next_obs, action, reward, termination or truncation)
+
+        # render
+        rgb_array = env.render()
+        bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+        cv2.imshow("CarRacing", bgr_array)
+        cv2.waitKey(1)
 
         if termination or truncation:
             data_dict = {
