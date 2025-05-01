@@ -13,6 +13,7 @@ from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 import wandb
+from network import BaseCNN
 from wrappers import STACK_SIZE, make_env
 
 
@@ -31,20 +32,7 @@ class Net(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.cnn_base = nn.Sequential(  # input shape (STACK_SIZE * 3, 96, 96)
-            nn.Conv2d(STACK_SIZE * 3, 8, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(8, 16, kernel_size=3, stride=2),  # (8, 47, 47)
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2),  # (16, 23, 23)
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2),  # (32, 11, 11)
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=1),  # (64, 5, 5)
-            nn.ReLU(),
-            nn.Conv2d(128, 256, kernel_size=3, stride=1),  # (128, 3, 3)
-            nn.ReLU(),
-        )  # output shape (256, 1, 1)
+        self.cnn_base = BaseCNN(STACK_SIZE * 3)
         self.v = nn.Sequential(nn.Linear(256, 100), nn.ReLU(), nn.Linear(100, 1))
         self.fc = nn.Sequential(nn.Linear(256, 100), nn.ReLU())
         self.alpha_head = nn.Sequential(nn.Linear(100, 3), nn.Softplus())
