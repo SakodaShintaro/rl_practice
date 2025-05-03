@@ -41,3 +41,9 @@ class PpoBetaPolicyAndValue(nn.Module):
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
         return action, a_logp
+
+    def calc_action_logp(self, s: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        alpha, beta = self.forward(s)[0]
+        dist = Beta(alpha, beta)
+        a_logp = dist.log_prob(a).sum(dim=1, keepdim=True)
+        return a_logp

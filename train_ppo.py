@@ -9,7 +9,6 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 import wandb
@@ -80,9 +79,7 @@ class Agent:
             for index in BatchSampler(
                 SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, drop_last=False
             ):
-                alpha, beta = self.net(s[index])[0]
-                dist = Beta(alpha, beta)
-                a_logp = dist.log_prob(a[index]).sum(dim=1, keepdim=True)
+                a_logp = self.net.calc_action_logp(s[index], a[index])
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
                 surr1 = ratio * adv[index]
