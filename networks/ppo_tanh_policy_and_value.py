@@ -29,6 +29,9 @@ class PpoTanhPolicyAndValue(nn.Module):
 
         self.apply(self._weights_init)
 
+        self.action_scale = 0.5
+        self.action_bias = 0.5
+
     @staticmethod
     def _weights_init(m: object) -> None:
         if isinstance(m, nn.Conv2d):
@@ -58,22 +61,23 @@ class PpoTanhPolicyAndValue(nn.Module):
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
         raw_a = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        action = torch.tanh(raw_a)
+        action_range2 = torch.tanh(raw_a)
+        action_range1 = action_range2 * self.action_scale + self.action_bias
         a_logp = normal.log_prob(raw_a)
-        a_logp -= torch.log((1 - action.pow(2)) + 1e-6)
+        a_logp -= torch.log(self.action_scale * (1 - action_range2.pow(2)) + 1e-6)
         a_logp = a_logp.sum(1, keepdim=True)
-        mean = torch.tanh(mean)
-        return action, a_logp
+        return action_range1, a_logp
 
     def calc_action_logp(self, s: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
         mean, log_std = self.forward(s)[0]
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
 
-        a_clipped = torch.clamp(a, -0.999, 0.999)
-        raw_a = torch.atanh(a_clipped)
+        a_range2 = (a - self.action_bias) / self.action_scale
+        a_range2 = torch.clamp(a_range2, -0.999, 0.999)
+        raw_a = torch.atanh(a_range2)
         a_logp = normal.log_prob(raw_a)
-        a_logp -= torch.log((1 - a_clipped.pow(2)) + 1e-6)
+        a_logp -= torch.log(self.action_scale * (1 - a_range2.pow(2)) + 1e-6)
         a_logp = a_logp.sum(1, keepdim=True)
         return a_logp
 
