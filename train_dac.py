@@ -13,7 +13,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from networks.network import DiffusionActor, SoftQNetwork
+from networks.network import DiffusionActor, SacQ
 
 
 @dataclass
@@ -79,10 +79,10 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     actor = DiffusionActor(env, use_normalize=False).to(device)
-    qf1 = SoftQNetwork(env, use_normalize=False).to(device)
-    qf2 = SoftQNetwork(env, use_normalize=False).to(device)
-    qf1_target = SoftQNetwork(env, use_normalize=False).to(device)
-    qf2_target = SoftQNetwork(env, use_normalize=False).to(device)
+    qf1 = SacQ(env, use_normalize=False).to(device)
+    qf2 = SacQ(env, use_normalize=False).to(device)
+    qf1_target = SacQ(env, use_normalize=False).to(device)
+    qf2_target = SacQ(env, use_normalize=False).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)

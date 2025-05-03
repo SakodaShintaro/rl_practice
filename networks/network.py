@@ -12,7 +12,7 @@ def orthogonal_weight_init(m: nn.Module) -> None:
         m.bias.data.fill_(0.0)
 
 
-class SoftQNetwork(nn.Module):
+class SacQ(nn.Module):
     def __init__(
         self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
     ) -> None:
@@ -40,7 +40,7 @@ LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
 
-class Actor(nn.Module):
+class SacTanhPolicy(nn.Module):
     def __init__(
         self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
     ) -> None:

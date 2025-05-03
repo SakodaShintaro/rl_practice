@@ -18,7 +18,7 @@ import pandas as pd
 import torch
 
 import wandb
-from networks.network import Actor, SoftQNetwork
+from networks.network import SacQ, SacTanhPolicy
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
 from wrappers import STACK_SIZE, make_env
@@ -60,10 +60,10 @@ class AVG:
         self.steps = 0
 
         action_dim = np.prod(env.action_space.shape)
-        self.actor = Actor(
+        self.actor = SacTanhPolicy(
             in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=cfg.hidden_actor
         ).to(cfg.device)
-        self.Q = SoftQNetwork(
+        self.Q = SacQ(
             in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=cfg.hidden_critic
         ).to(cfg.device)
 

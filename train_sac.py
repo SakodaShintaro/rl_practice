@@ -15,7 +15,8 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from networks.network import Actor, SoftQNetwork
+from networks.backbone import BaseCNN
+from networks.network import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
 from wrappers import STACK_SIZE, make_env
 
@@ -64,17 +65,22 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    actor = Actor(
+    encoder = BaseCNN(in_channels=3 * STACK_SIZE).to(device)
+    actor = SacTanhPolicy(
         in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
     ).to(device)
-    qf1 = SoftQNetwork(
+    qf1 = SacQ(
         in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
     ).to(device)
-    qf2 = SoftQNetwork(
+    qf2 = SacQ(
         in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
     ).to(device)
-    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
-    actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
+    q_optimizer = optim.Adam(
+        list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr
+    )
+    actor_optimizer = optim.Adam(
+        list(encoder.parameters()) + list(actor.parameters()), lr=args.policy_lr
+    )
 
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
