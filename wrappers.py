@@ -15,6 +15,7 @@ def make_env(video_dir):
     env = gym.wrappers.RecordVideo(
         env, video_folder=video_dir, episode_trigger=lambda x: x % 100 == 0
     )
+    env = TransposeAndNormalizeObs(env)
     return env
 
 
@@ -83,3 +84,18 @@ class DieStateRewardWrapper(gym.Wrapper):
             reward += self.bonus_reward
 
         return obs, reward, terminated, truncated, info
+
+
+class TransposeAndNormalizeObs(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        h, w = env.observation_space.shape[1:3]
+        self.observation_space = gym.spaces.Box(
+            low=0.0, high=1.0, shape=(STACK_SIZE * 3, h, w), dtype=np.float32
+        )
+
+    def observation(self, obs):
+        # obs: (STACK_SIZE, H, W, 3)
+        o = obs.astype(np.float32) / 255.0
+        o = np.transpose(o, (0, 3, 1, 2))  # (STACK_SIZE, 3, H, W)
+        return o.reshape(-1, o.shape[2], o.shape[3])

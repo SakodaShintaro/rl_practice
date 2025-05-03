@@ -46,10 +46,7 @@ class Net(nn.Module):
             nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x: torch.Tensor) -> tuple:
-        # x.shape = (batch_size, STACK_SIZE, 96, 96, 3)
-        bs, st, h, w, c = x.shape
-        x = x.permute((0, 1, 4, 2, 3))  # (batch_size, STACK_SIZE, 3, 96, 96)
-        x = x.reshape(bs, st * c, h, w)
+        # x.shape = (batch_size, STACK_SIZE * 3, 96, 96)
         x = self.cnn_base(x)
         x = x.view(-1, 256)
         v = self.v(x)
@@ -168,11 +165,11 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float64, (STACK_SIZE, 96, 96, 3)),
+            ("s", np.float64, (STACK_SIZE * 3, 96, 96)),
             ("a", np.float64, (3,)),
             ("a_logp", np.float64),
             ("r", np.float64),
-            ("s_", np.float64, (STACK_SIZE, 96, 96, 3)),
+            ("s_", np.float64, (STACK_SIZE * 3, 96, 96)),
         ]
     )
 
