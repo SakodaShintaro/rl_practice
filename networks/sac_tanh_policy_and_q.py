@@ -2,8 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .backbone import BaseCNN
-
 
 def orthogonal_weight_init(m: nn.Module) -> None:
     """Orthogonal weight initialization for neural networks."""
@@ -17,8 +15,7 @@ class SacQ(nn.Module):
         self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
     ) -> None:
         super().__init__()
-        self.cnn = BaseCNN(in_channels)
-        mid_dim = 256 + action_dim
+        mid_dim = in_channels + action_dim
         self.fc1 = nn.Linear(mid_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
@@ -26,7 +23,6 @@ class SacQ(nn.Module):
         self.apply(orthogonal_weight_init)
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
-        x = self.cnn(x)
         x = torch.cat([x, a], dim=1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -45,8 +41,7 @@ class SacTanhPolicy(nn.Module):
         self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
     ) -> None:
         super().__init__()
-        self.cnn = BaseCNN(in_channels)
-        self.fc1 = nn.Linear(256, hidden_dim)
+        self.fc1 = nn.Linear(in_channels, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc_mean = nn.Linear(hidden_dim, action_dim)
         self.fc_logstd = nn.Linear(hidden_dim, action_dim)
@@ -54,7 +49,6 @@ class SacTanhPolicy(nn.Module):
         self.apply(orthogonal_weight_init)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self.cnn(x)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         if self.use_normalize:

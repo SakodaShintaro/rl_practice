@@ -61,20 +61,21 @@ if __name__ == "__main__":
 
     action_scale = (env.action_space.high - env.action_space.low) / 2.0
     action_bias = (env.action_space.high + env.action_space.low) / 2.0
+    print(f"action_scale: {action_scale}, action_bias: {action_bias}")
 
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
     encoder = BaseCNN(in_channels=3 * STACK_SIZE).to(device)
+    cnn_dim = 256
     actor = SacTanhPolicy(
-        in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
-    ).to(device)
-    qf1 = SacQ(
-        in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
-    ).to(device)
-    qf2 = SacQ(
-        in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=256, use_normalize=False
-    ).to(device)
+        in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=False
+    )
+    qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=False)
+    qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=False)
+    actor = actor.to(device)
+    qf1 = qf1.to(device)
+    qf2 = qf2.to(device)
     q_optimizer = optim.Adam(
         list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr
     )
@@ -104,7 +105,8 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_action(torch.Tensor(obs).to(device).unsqueeze(0))
+            obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
+            action, _, _ = actor.get_action(encoder(obs_tensor))
             action = action[0].detach().cpu().numpy()
             action = action * action_scale + action_bias
 
@@ -142,17 +144,19 @@ if __name__ == "__main__":
         # training.
         data = rb.sample(args.batch_size)
         with torch.no_grad():
-            next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-            qf1_next_target = qf1(data.next_observations, next_state_actions)
-            qf2_next_target = qf2(data.next_observations, next_state_actions)
+            state_next = encoder(data.next_observations)
+            next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
+            qf1_next_target = qf1(state_next, next_state_actions)
+            qf2_next_target = qf2(state_next, next_state_actions)
             min_q = torch.min(qf1_next_target, qf2_next_target)
             min_qf_next_target = min_q - alpha * next_state_log_pi
             next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (
                 min_qf_next_target
             ).view(-1)
 
-        qf1_a_values = qf1(data.observations, data.actions).view(-1)
-        qf2_a_values = qf2(data.observations, data.actions).view(-1)
+        state_curr = encoder(data.observations)
+        qf1_a_values = qf1(state_curr, data.actions).view(-1)
+        qf2_a_values = qf2(state_curr, data.actions).view(-1)
         qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
         qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
         qf_loss = qf1_loss + qf2_loss
@@ -162,9 +166,10 @@ if __name__ == "__main__":
         qf_loss.backward()
         q_optimizer.step()
 
-        pi, log_pi, _ = actor.get_action(data.observations)
-        qf1_pi = qf1(data.observations, pi)
-        qf2_pi = qf2(data.observations, pi)
+        state_curr = encoder(data.observations)
+        pi, log_pi, _ = actor.get_action(state_curr)
+        qf1_pi = qf1(state_curr, pi)
+        qf2_pi = qf2(state_curr, pi)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
         actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
@@ -173,7 +178,7 @@ if __name__ == "__main__":
         actor_optimizer.step()
 
         with torch.no_grad():
-            _, log_pi, _ = actor.get_action(data.observations)
+            _, log_pi, _ = actor.get_action(encoder(data.observations))
         alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
 
         a_optimizer.zero_grad()
