@@ -80,8 +80,6 @@ class ReplayBuffer:
 
 @dataclass
 class Args:
-    exp_name: str = ""
-    """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
