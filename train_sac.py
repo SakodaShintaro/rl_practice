@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 import wandb
 from networks.network import Actor, SoftQNetwork
-from replay_buffer import ReplayBuffer, ReplayBufferData
+from replay_buffer import ReplayBuffer
 from wrappers import STACK_SIZE, make_env
 
 
@@ -25,12 +25,6 @@ from wrappers import STACK_SIZE, make_env
 class Args:
     seed: int = 1
     """seed of the experiment"""
-    torch_deterministic: bool = True
-    """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = True
-    """if toggled, cuda will be enabled by default"""
-    gpu_id: int = 0
-    """the gpu id to use"""
 
     # Algorithm specific arguments
     env_id: str = "CarRacing-v3"
@@ -62,10 +56,10 @@ if __name__ == "__main__":
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
-    torch.cuda.set_device(args.gpu_id)
+    torch.backends.cudnn.deterministic = True
+    torch.cuda.set_device(0)
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_SAC"
