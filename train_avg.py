@@ -18,7 +18,7 @@ import pandas as pd
 import torch
 
 import wandb
-from networks.network import SacQ, SacTanhPolicy
+from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
 from wrappers import STACK_SIZE, make_env

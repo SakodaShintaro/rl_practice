@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 import wandb
 from networks.backbone import BaseCNN
-from networks.network import SacQ, SacTanhPolicy
+from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
 from wrappers import STACK_SIZE, make_env
 

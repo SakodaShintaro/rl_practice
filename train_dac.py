@@ -13,7 +13,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from networks.network import DiffusionActor, SacQ
+from networks.sac_tanh_policy_and_q import DiffusionActor, SacQ
 
 
 @dataclass
