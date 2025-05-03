@@ -1,7 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
+import argparse
 import random
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import tyro
 from torch import optim
 from tqdm import tqdm
 
@@ -21,34 +20,22 @@ from replay_buffer import ReplayBuffer
 from wrappers import STACK_SIZE, make_env
 
 
-@dataclass
-class Args:
-    seed: int = 1
-    """seed of the experiment"""
-
-    # Algorithm specific arguments
-    env_id: str = "CarRacing-v3"
-    """the environment id of the task"""
-    total_timesteps: int = 1_000_000
-    """total timesteps of the experiments"""
-    buffer_size: int = int(1e5)
-    """the replay memory buffer size"""
-    gamma: float = 0.99
-    """the discount factor gamma"""
-    tau: float = 0.005
-    """target smoothing coefficient (default: 0.005)"""
-    batch_size: int = 64
-    """the batch size of sample from the reply memory"""
-    learning_starts: int = 1e3
-    """timestep to start learning"""
-    policy_lr: float = 3e-4
-    """the learning rate of the policy network optimizer"""
-    q_lr: float = 1e-3
-    """the learning rate of the Q network network optimizer"""
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
+    parser.add_argument("--buffer_size", type=int, default=int(1e5))
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--tau", type=float, default=0.005)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--learning_starts", type=int, default=1e3)
+    parser.add_argument("--policy_lr", type=float, default=3e-4)
+    parser.add_argument("--q_lr", type=float, default=1e-3)
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    args = tyro.cli(Args)
+    args = parse_args()
 
     wandb.init(project="cleanRL", config=vars(args), name="SAC", monitor_gym=True, save_code=True)
 
