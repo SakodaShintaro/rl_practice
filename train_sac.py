@@ -16,7 +16,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from network import Actor, SoftQNetwork
+from networks.network import Actor, SoftQNetwork
 from wrappers import STACK_SIZE, make_env
 
 

@@ -18,7 +18,7 @@ import pandas as pd
 import torch
 
 import wandb
-from network import Actor, SoftQNetwork
+from networks.network import Actor, SoftQNetwork
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
 from wrappers import STACK_SIZE, make_env

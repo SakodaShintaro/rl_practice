@@ -13,7 +13,7 @@ from torch.distributions import Beta
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 import wandb
-from network import BaseCNN
+from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
 from wrappers import STACK_SIZE, make_env
 
 
@@ -23,38 +23,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=10)
     return parser.parse_args()
-
-
-class Net(nn.Module):
-    """
-    Actor-Critic Network for PPO
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.cnn_base = BaseCNN(STACK_SIZE * 3)
-        self.v = nn.Sequential(nn.Linear(256, 100), nn.ReLU(), nn.Linear(100, 1))
-        self.fc = nn.Sequential(nn.Linear(256, 100), nn.ReLU())
-        self.alpha_head = nn.Sequential(nn.Linear(100, 3), nn.Softplus())
-        self.beta_head = nn.Sequential(nn.Linear(100, 3), nn.Softplus())
-        self.apply(self._weights_init)
-
-    @staticmethod
-    def _weights_init(m: object) -> None:
-        if isinstance(m, nn.Conv2d):
-            nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("relu"))
-            nn.init.constant_(m.bias, 0.1)
-
-    def forward(self, x: torch.Tensor) -> tuple:
-        # x.shape = (batch_size, STACK_SIZE * 3, 96, 96)
-        x = self.cnn_base(x)
-        x = x.view(-1, 256)
-        v = self.v(x)
-        x = self.fc(x)
-        alpha = self.alpha_head(x) + 1
-        beta = self.beta_head(x) + 1
-
-        return (alpha, beta), v
 
 
 class Agent:
@@ -69,7 +37,7 @@ class Agent:
 
     def __init__(self) -> None:
         self.training_step = 0
-        self.net = Net().double().to(device)
+        self.net = PpoBetaPolicyAndValue(STACK_SIZE * 3).double().to(device)
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
         self.counter = 0
 

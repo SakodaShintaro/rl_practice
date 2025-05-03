@@ -13,7 +13,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from network import DiffusionActor, SoftQNetwork
+from networks.network import DiffusionActor, SoftQNetwork
 
 
 @dataclass
