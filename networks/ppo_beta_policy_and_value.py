@@ -37,9 +37,6 @@ class PpoBetaPolicyAndValue(nn.Module):
         dist = Beta(alpha, beta)
         action = dist.sample()
         a_logp = dist.log_prob(action).sum(dim=1)
-
-        action = action.squeeze().cpu().numpy()
-        a_logp = a_logp.item()
         return action, a_logp
 
     def calc_action_logp(self, s: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
@@ -47,3 +44,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         dist = Beta(alpha, beta)
         a_logp = dist.log_prob(a).sum(dim=1, keepdim=True)
         return a_logp
+
+    def get_value(self, x: torch.Tensor) -> torch.Tensor:
+        _, v = self.forward(x)
+        return v

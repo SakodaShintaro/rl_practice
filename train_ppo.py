@@ -13,6 +13,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
+from networks.ppo_tanh_policy_and_value import PpoTanhPolicyAndValue
 from wrappers import STACK_SIZE, make_env
 
 
@@ -37,7 +38,11 @@ class Agent:
 
     def __init__(self) -> None:
         self.training_step = 0
-        self.net = PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).double().to(device)
+        network_type = "beta"
+        self.net = {
+            "beta": PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).double().to(device),
+            "tanh": PpoTanhPolicyAndValue(STACK_SIZE * 3, 3).double().to(device),
+        }[network_type]
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
         self.counter = 0
 
@@ -45,7 +50,10 @@ class Agent:
 
     def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).double().to(device).unsqueeze(0)
-        return self.net.get_action(state)
+        action, a_logp = self.net.get_action(state)
+        action = action.squeeze().cpu().numpy()
+        a_logp = a_logp.item()
+        return action, a_logp
 
     def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
@@ -67,8 +75,8 @@ class Agent:
         old_a_logp = torch.tensor(self.buffer["a_logp"], dtype=torch.double).to(device).view(-1, 1)
 
         with torch.no_grad():
-            target_v = r + args.gamma * self.net(s_)[1]
-            adv = target_v - self.net(s)[1]
+            target_v = r + args.gamma * self.net.get_value(s_)
+            adv = target_v - self.net.get_value(s)
             # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
         ave_action_loss_list = []
