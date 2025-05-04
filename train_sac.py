@@ -27,7 +27,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--learning_starts", type=int, default=2e4)
     parser.add_argument("--policy_lr", type=float, default=3e-4)
