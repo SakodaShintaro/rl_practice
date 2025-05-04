@@ -183,7 +183,9 @@ if __name__ == "__main__":
         running_score = running_score * 0.99 + score * 0.01
 
         if i_ep % args.log_interval == 0:
-            print(f"Ep {i_ep}\tLast score: {score:.2f}\tMoving average score: {running_score:.2f}")
+            print(
+                f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {running_score:.2f}"
+            )
             data_dict = {
                 "global_step": global_step,
                 "episode": i_ep,
