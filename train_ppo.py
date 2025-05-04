@@ -169,6 +169,7 @@ if __name__ == "__main__":
                 print("updating")
                 data_dict = agent.update()
                 data_dict["global_step"] = global_step
+                data_dict["a_logp"] = a_logp
                 wandb.log(data_dict)
                 fixed_data = {k.replace("ppo/", ""): v for k, v in data_dict.items()}
                 log_step.append(fixed_data)
