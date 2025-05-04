@@ -19,7 +19,6 @@ from wrappers import STACK_SIZE, make_env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=10)
     return parser.parse_args()
@@ -35,6 +34,7 @@ class Agent:
     ppo_epoch = 10
     buffer_capacity = 2000
     batch_size = 128
+    gamma = 0.99
 
     def __init__(self) -> None:
         self.training_step = 0
@@ -75,7 +75,7 @@ class Agent:
         old_a_logp = torch.tensor(self.buffer["a_logp"], dtype=torch.double).to(device).view(-1, 1)
 
         with torch.no_grad():
-            target_v = r + args.gamma * self.net.get_value(s_)
+            target_v = r + self.gamma * self.net.get_value(s_)
             adv = target_v - self.net.get_value(s)
             # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
