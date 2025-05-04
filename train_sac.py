@@ -88,6 +88,7 @@ if __name__ == "__main__":
     log_alpha = torch.zeros(1, requires_grad=True, device=device)
     alpha = log_alpha.exp().item()
     a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
+    print(f"{target_entropy=}")
 
     rb = ReplayBuffer(
         args.buffer_size,
