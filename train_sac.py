@@ -3,6 +3,7 @@ import argparse
 import random
 import time
 from datetime import datetime
+from distutils.util import strtobool
 from pathlib import Path
 
 import cv2
@@ -31,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning_starts", type=int, default=2e4)
     parser.add_argument("--policy_lr", type=float, default=3e-4)
     parser.add_argument("--q_lr", type=float, default=1e-3)
+    parser.add_argument("--render", type=strtobool, default="True")
     return parser.parse_args()
 
 
@@ -115,10 +117,11 @@ if __name__ == "__main__":
         rb.add(obs, next_obs, action, reward, termination or truncation)
 
         # render
-        rgb_array = env.render()
-        bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
-        cv2.imshow("CarRacing", bgr_array)
-        cv2.waitKey(1)
+        if args.render:
+            rgb_array = env.render()
+            bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+            cv2.imshow("CarRacing", bgr_array)
+            cv2.waitKey(1)
 
         if termination or truncation:
             data_dict = {
