@@ -10,7 +10,6 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
@@ -26,6 +25,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+class SequentialBatchSampler:
+    def __init__(self, buffer_capacity, batch_size, k_frames, drop_last=False):
+        self.buffer_capacity = buffer_capacity
+        self.batch_size = batch_size
+        self.k_frames = k_frames
+        self.drop_last = drop_last
+
+    def __iter__(self):
+        valid_starts = range(self.buffer_capacity - self.k_frames + 1)
+        randomized_starts = torch.randperm(len(valid_starts)).tolist()
+
+        batch = []
+        for start_idx in randomized_starts:
+            seq_indices = list(range(start_idx, start_idx + self.k_frames))
+            batch.append(seq_indices)
+
+            if len(batch) == self.batch_size:
+                yield batch
+                batch = []
+
+        if batch and not self.drop_last:
+            yield batch
+
+    def __len__(self):
+        num_samples = self.buffer_capacity - self.k_frames + 1
+        if self.drop_last:
+            return num_samples // self.batch_size
+        else:
+            return (num_samples + self.batch_size - 1) // self.batch_size
+
+
 class Agent:
     """
     Agent for training
@@ -34,7 +64,7 @@ class Agent:
     max_grad_norm = 0.5
     clip_param = 0.1  # epsilon in clipped loss
     ppo_epoch = 10
-    buffer_capacity = 2000
+    buffer_capacity = 200
     batch_size = 128
     gamma = 0.99
 
@@ -86,9 +116,11 @@ class Agent:
         for _ in range(self.ppo_epoch):
             sum_action_loss = 0.0
             sum_value_loss = 0.0
-            for index in BatchSampler(
-                SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, drop_last=False
+            for indices in SequentialBatchSampler(
+                self.buffer_capacity, self.batch_size, k_frames=5, drop_last=False
             ):
+                indices = np.array(indices, dtype=np.int64)
+                index = indices[:, -1]
                 a_logp = self.net.calc_action_logp(s[index], a[index])
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
