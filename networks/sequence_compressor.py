@@ -46,13 +46,13 @@ class SequenceCompressor(nn.Module):
         self.output_layer = nn.Linear(self.hidden_dim, self.hidden_dim)
 
     def forward(
-        self, states: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+        self, states: torch.Tensor, rewards: torch.Tensor, actions: torch.Tensor
     ) -> torch.Tensor:
         """
         Args:
             states (torch.Tensor): 過去の状態(画像)シーケンス (batch_size, seq_len, C, H, W)
-            actions (torch.Tensor): 過去の行動シーケンス (batch_size, seq_len, action_dim)
             rewards (torch.Tensor): 過去の報酬シーケンス (batch_size, seq_len, reward_dim)
+            actions (torch.Tensor): 過去の行動シーケンス (batch_size, seq_len, action_dim)
 
         Returns:
             torch.Tensor: 圧縮表現 (batch_size, hidden_dim)
@@ -66,6 +66,7 @@ class SequenceCompressor(nn.Module):
 
         # 報酬をエンコード (batch_size, seq_len, 1) -> (batch_size, seq_len, hidden_dim)
         rewards_embeds = self.reward_encoder(rewards)
+        rewards_embeds = rewards_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 
         # 行動をエンコード (batch_size, seq_len, action_dim) -> (batch_size, seq_len, hidden_dim)
         action_embeds = self.action_encoder(actions)

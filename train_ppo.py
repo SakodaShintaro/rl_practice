@@ -14,6 +14,7 @@ from torch import nn, optim
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
 from networks.ppo_tanh_policy_and_value import PpoTanhPolicyAndValue
+from networks.sequence_compressor import SequenceCompressor
 from wrappers import STACK_SIZE, make_env
 
 
@@ -22,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--buffer_capacity", type=int, default=2000)
     return parser.parse_args()
 
 
@@ -64,21 +66,23 @@ class Agent:
     max_grad_norm = 0.5
     clip_param = 0.1  # epsilon in clipped loss
     ppo_epoch = 10
-    buffer_capacity = 200
     batch_size = 128
     gamma = 0.99
 
-    def __init__(self) -> None:
+    def __init__(self, buffer_capacity) -> None:
+        self.buffer_capacity = buffer_capacity
         self.training_step = 0
         network_type = "beta"
         self.net = {
             "beta": PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).double().to(device),
             "tanh": PpoTanhPolicyAndValue(STACK_SIZE * 3, 3).double().to(device),
         }[network_type]
+        self.sequential_compressor = SequenceCompressor(seq_len=4).to(device)
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
         self.counter = 0
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
+        self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
 
     def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).double().to(device).unsqueeze(0)
@@ -138,6 +142,17 @@ class Agent:
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+
+                # update sequence compressor
+                out = self.sequential_compressor(
+                    s[indices][:, :-1].float(),
+                    r[indices][:, :-1].float(),
+                    a[indices][:, :-1].float(),
+                )
+                loss_sc = F.mse_loss(out, torch.ones_like(out))
+                self.optimizer_sc.zero_grad()
+                loss_sc.backward()
+                self.optimizer_sc.step()
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
@@ -176,7 +191,7 @@ if __name__ == "__main__":
         ]
     )
 
-    agent = Agent()
+    agent = Agent(args.buffer_capacity)
     env = make_env(video_dir=video_dir)
 
     wandb.init(project="cleanRL", config=vars(args), name="PPO", monitor_gym=True, save_code=True)
