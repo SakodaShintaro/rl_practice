@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
+    parser.add_argument("--seq_len", type=int, default=1)
     return parser.parse_args()
 
 
@@ -71,20 +72,23 @@ class Agent:
     batch_size = 128
     gamma = 0.99
 
-    def __init__(self, buffer_capacity) -> None:
+    def __init__(self, buffer_capacity, seq_len) -> None:
         self.buffer_capacity = buffer_capacity
+        self.seq_len = seq_len
         self.training_step = 0
         network_type = "beta"
         self.net = {
             "beta": PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).to(device),
             "tanh": PpoTanhPolicyAndValue(STACK_SIZE * 3, 3).to(device),
         }[network_type]
-        self.sequential_compressor = SequenceCompressor(seq_len=4).to(device)
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
         self.counter = 0
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
-        self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
+
+        if self.seq_len > 1:
+            self.sequential_compressor = SequenceCompressor(seq_len=self.seq_len).to(device)
+            self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
 
     def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).to(device).unsqueeze(0)
@@ -122,7 +126,7 @@ class Agent:
             sum_action_loss = 0.0
             sum_value_loss = 0.0
             for indices in SequentialBatchSampler(
-                self.buffer_capacity, self.batch_size, k_frames=5, drop_last=False
+                self.buffer_capacity, self.batch_size, k_frames=self.seq_len + 1, drop_last=False
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
@@ -145,15 +149,16 @@ class Agent:
                 self.optimizer.step()
 
                 # update sequence compressor
-                out = self.sequential_compressor(
-                    s[indices][:, :-1],
-                    r[indices][:, :-1],
-                    a[indices][:, :-1],
-                )
-                loss_sc = F.mse_loss(out, torch.ones_like(out))
-                self.optimizer_sc.zero_grad()
-                loss_sc.backward()
-                self.optimizer_sc.step()
+                if self.seq_len > 1:
+                    out = self.sequential_compressor(
+                        s[indices][:, :-1],
+                        r[indices][:, :-1],
+                        a[indices][:, :-1],
+                    )
+                    loss_sc = F.mse_loss(out, torch.ones_like(out))
+                    self.optimizer_sc.zero_grad()
+                    loss_sc.backward()
+                    self.optimizer_sc.step()
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
@@ -192,7 +197,7 @@ if __name__ == "__main__":
         ]
     )
 
-    agent = Agent(args.buffer_capacity)
+    agent = Agent(args.buffer_capacity, args.seq_len)
     env = make_env(video_dir=video_dir)
 
     wandb.init(project="cleanRL", config=vars(args), name="PPO", monitor_gym=True, save_code=True)
