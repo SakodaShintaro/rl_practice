@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 
-STACK_SIZE = 4
+STACK_SIZE = 1
 REPEAT = 8
 
 
