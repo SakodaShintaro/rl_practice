@@ -76,8 +76,8 @@ class Agent:
         self.training_step = 0
         network_type = "beta"
         self.net = {
-            "beta": PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).double().to(device),
-            "tanh": PpoTanhPolicyAndValue(STACK_SIZE * 3, 3).double().to(device),
+            "beta": PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).to(device),
+            "tanh": PpoTanhPolicyAndValue(STACK_SIZE * 3, 3).to(device),
         }[network_type]
         self.sequential_compressor = SequenceCompressor(seq_len=4).to(device)
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
@@ -87,7 +87,7 @@ class Agent:
         self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
 
     def select_action(self, state: np.ndarray) -> tuple:
-        state = torch.from_numpy(state).double().to(device).unsqueeze(0)
+        state = torch.from_numpy(state).to(device).unsqueeze(0)
         action, a_logp = self.net.get_action(state)
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
@@ -105,12 +105,11 @@ class Agent:
     def update(self) -> None:
         self.training_step += 1
 
-        s = torch.tensor(self.buffer["s"], dtype=torch.double).to(device)
-        a = torch.tensor(self.buffer["a"], dtype=torch.double).to(device)
-        r = torch.tensor(self.buffer["r"], dtype=torch.double).to(device).view(-1, 1)
-        s_ = torch.tensor(self.buffer["s_"], dtype=torch.double).to(device)
-
-        old_a_logp = torch.tensor(self.buffer["a_logp"], dtype=torch.double).to(device).view(-1, 1)
+        s = torch.tensor(self.buffer["s"]).to(device)
+        a = torch.tensor(self.buffer["a"]).to(device)
+        r = torch.tensor(self.buffer["r"]).to(device).view(-1, 1)
+        s_ = torch.tensor(self.buffer["s_"]).to(device)
+        old_a_logp = torch.tensor(self.buffer["a_logp"]).to(device).view(-1, 1)
 
         with torch.no_grad():
             target_v = r + self.gamma * self.net.get_value(s_)
@@ -147,9 +146,9 @@ class Agent:
 
                 # update sequence compressor
                 out = self.sequential_compressor(
-                    s[indices][:, :-1].float(),
-                    r[indices][:, :-1].float(),
-                    a[indices][:, :-1].float(),
+                    s[indices][:, :-1],
+                    r[indices][:, :-1],
+                    a[indices][:, :-1],
                 )
                 loss_sc = F.mse_loss(out, torch.ones_like(out))
                 self.optimizer_sc.zero_grad()
@@ -185,11 +184,11 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float64, (STACK_SIZE * 3, 96, 96)),
-            ("a", np.float64, (3,)),
-            ("a_logp", np.float64),
-            ("r", np.float64),
-            ("s_", np.float64, (STACK_SIZE * 3, 96, 96)),
+            ("s", np.float32, (STACK_SIZE * 3, 96, 96)),
+            ("a", np.float32, (3,)),
+            ("a_logp", np.float32),
+            ("r", np.float32),
+            ("s_", np.float32, (STACK_SIZE * 3, 96, 96)),
         ]
     )
 
