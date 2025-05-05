@@ -1,5 +1,6 @@
 # Reference: https://github.com/xtma/pytorch_car_caring
 import argparse
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=10)
+    parser.add_argument("--off_wandb", action="store_true")
     return parser.parse_args()
 
 
@@ -117,6 +119,9 @@ class Agent:
 
 if __name__ == "__main__":
     args = parse_args()
+
+    if args.off_wandb:
+        os.environ["WANDB_MODE"] = "offline"
 
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
