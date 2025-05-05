@@ -2,6 +2,7 @@
 import argparse
 import os
 from datetime import datetime
+from distutils.util import strtobool
 from pathlib import Path
 
 import cv2
@@ -24,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--buffer_capacity", type=int, default=2000)
+    parser.add_argument("--render", type=strtobool, default="True")
     return parser.parse_args()
 
 
@@ -212,10 +214,11 @@ if __name__ == "__main__":
             )
 
             # render
-            rgb_array = env.render()
-            bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
-            cv2.imshow("CarRacing", bgr_array)
-            cv2.waitKey(1)
+            if args.render:
+                rgb_array = env.render()
+                bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+                cv2.imshow("CarRacing", bgr_array)
+                cv2.waitKey(1)
 
             if agent.store((state, action, a_logp, reward, state_)):
                 print("updating")
