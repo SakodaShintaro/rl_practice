@@ -70,10 +70,10 @@ if __name__ == "__main__":
     encoder = BaseCNN(in_channels=3 * STACK_SIZE).to(device)
     cnn_dim = 256
     actor = SacTanhPolicy(
-        in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=False
+        in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True
     )
-    qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=False)
-    qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=False)
+    qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True)
+    qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True)
     actor = actor.to(device)
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
