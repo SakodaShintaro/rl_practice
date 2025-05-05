@@ -64,7 +64,7 @@ class SequenceCompressor(nn.Module):
 
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
         with torch.no_grad():
-            states_flat = states.view(-1, *states.shape[2:])
+            states_flat = states.reshape(-1, *states.shape[2:])
             state_embeds = (
                 self.state_encoder.encode(states_flat).latent_dist.sample().mul_(0.18215)
             )  # (batch_size * seq_len, 4, 12, 12)
