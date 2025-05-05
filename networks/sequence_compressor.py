@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from diffusers.models import AutoencoderKL
 
-from .backbone import BaseCNN
 from .diffusion_policy import TimestepEmbedder
 
 """
@@ -21,7 +21,10 @@ class SequenceCompressor(nn.Module):
         self.hidden_dim = 256
 
         # 状態(画像)エンコーダー
-        self.state_encoder = BaseCNN(in_channels=3)
+        self.state_encoder = AutoencoderKL.from_pretrained(
+            "stabilityai/sd-vae-ft-ema", cache_dir="pretrained"
+        )
+        self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
 
         # 報酬エンコーダー
         self.reward_encoder = TimestepEmbedder(self.hidden_dim)
@@ -60,9 +63,13 @@ class SequenceCompressor(nn.Module):
         batch_size = states.shape[0]
 
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
-        states_flat = states.view(-1, *states.shape[2:])
-        state_embeds_flat = self.state_encoder(states_flat)
-        state_embeds = state_embeds_flat.view(batch_size, self.seq_len, self.hidden_dim)
+        with torch.no_grad():
+            states_flat = states.view(-1, *states.shape[2:])
+            state_embeds = (
+                self.state_encoder.encode(states_flat).latent_dist.sample().mul_(0.18215)
+            )  # (batch_size * seq_len, 4, 12, 12)
+            state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
+            state_embeds = self.state_encoder_linear(state_embeds)
 
         # 報酬をエンコード (batch_size, seq_len, 1) -> (batch_size, seq_len, hidden_dim)
         rewards_embeds = self.reward_encoder(rewards)

@@ -6,3 +6,5 @@ tyro
 stable-baselines3
 timm
 opencv-python
+diffusers
+accelerate
