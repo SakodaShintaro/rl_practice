@@ -27,10 +27,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(2e3))
+    parser.add_argument("--buffer_size", type=int, default=int(8e3))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--learning_starts", type=int, default=2e3)
+    parser.add_argument("--learning_starts", type=int, default=8e3)
     parser.add_argument("--policy_lr", type=float, default=3e-4)
     parser.add_argument("--q_lr", type=float, default=1e-3)
     parser.add_argument("--render", type=strtobool, default="True")
@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
-    log_alpha = torch.tensor([-6.0], requires_grad=True, device=device)
+    log_alpha = torch.tensor([-9.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
     a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
     print(f"{target_entropy=}")
@@ -120,6 +120,7 @@ if __name__ == "__main__":
 
         # execute the game and log data.
         next_obs, reward, termination, truncation, info = env.step(action)
+        reward = np.clip(reward, -3.0, 3.0)
         rb.add(obs, next_obs, action, reward, termination or truncation)
 
         # render
@@ -148,6 +149,9 @@ if __name__ == "__main__":
         progress_bar.update(1)
 
         if global_step <= args.learning_starts:
+            continue
+
+        if global_step % 80 != 0:
             continue
 
         # training.
@@ -193,7 +197,7 @@ if __name__ == "__main__":
         a_optimizer.step()
         alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
 
-        if global_step % 100 == 0:
+        if global_step % 10 == 0:
             elapsed_time = time.time() - start_time
             data_dict = {
                 "global_step": global_step,
