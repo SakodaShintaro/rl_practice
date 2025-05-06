@@ -27,10 +27,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(2e4))
+    parser.add_argument("--buffer_size", type=int, default=int(2e3))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--learning_starts", type=int, default=2e4)
+    parser.add_argument("--learning_starts", type=int, default=2e3)
     parser.add_argument("--policy_lr", type=float, default=3e-4)
     parser.add_argument("--q_lr", type=float, default=1e-3)
     parser.add_argument("--render", type=strtobool, default="True")
@@ -202,6 +202,8 @@ if __name__ == "__main__":
                 "losses/qf1_loss": qf1_loss.item(),
                 "losses/qf2_loss": qf2_loss.item(),
                 "losses/qf_loss": qf_loss.item() / 2.0,
+                "losses/min_qf_next_target": min_qf_next_target.mean().item(),
+                "losses/next_q_value": next_q_value.mean().item(),
                 "losses/actor_loss": actor_loss.item(),
                 "losses/alpha": alpha,
                 "losses/log_pi": log_pi.mean().item(),
