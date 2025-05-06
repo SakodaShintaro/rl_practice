@@ -114,7 +114,7 @@ if __name__ == "__main__":
             action = env.action_space.sample()
         else:
             obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
-            action, _, _ = actor.get_action(encoder(obs_tensor))
+            action, selected_log_pi, _ = actor.get_action(encoder(obs_tensor))
             action = action[0].detach().cpu().numpy()
             action = action * action_scale + action_bias
 
@@ -205,6 +205,7 @@ if __name__ == "__main__":
                 "losses/actor_loss": actor_loss.item(),
                 "losses/alpha": alpha,
                 "losses/log_pi": log_pi.mean().item(),
+                "a_logp": selected_log_pi.mean().item(),
                 "losses/alpha_loss": alpha_loss.item(),
                 "charts/elapse_time_sec": elapsed_time,
                 "charts/SPS": int(global_step / elapsed_time),
