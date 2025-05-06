@@ -1,5 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
+import os
 import random
 import time
 from datetime import datetime
@@ -33,11 +34,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--policy_lr", type=float, default=3e-4)
     parser.add_argument("--q_lr", type=float, default=1e-3)
     parser.add_argument("--render", type=strtobool, default="True")
+    parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--fixed_alpha", type=float, default=None)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+
+    if args.off_wandb:
+        os.environ["WANDB_MODE"] = "offline"
 
     wandb.init(project="cleanRL", config=vars(args), name="SAC", monitor_gym=True, save_code=True)
 
@@ -87,7 +93,7 @@ if __name__ == "__main__":
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
     log_alpha = torch.zeros(1, requires_grad=True, device=device)
-    alpha = log_alpha.exp().item()
+    alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
     a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
     print(f"{target_entropy=}")
 
@@ -185,7 +191,7 @@ if __name__ == "__main__":
         a_optimizer.zero_grad()
         alpha_loss.backward()
         a_optimizer.step()
-        alpha = log_alpha.exp().item()
+        alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
 
         if global_step % 100 == 0:
             elapsed_time = time.time() - start_time
