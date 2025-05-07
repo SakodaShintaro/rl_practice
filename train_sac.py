@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
+    parser.add_argument("--action_noise", type=float, default=0.0)
     return parser.parse_args()
 
 
@@ -66,8 +67,11 @@ if __name__ == "__main__":
     env = make_env(result_dir / "video")
     env.action_space.seed(args.seed)
 
-    action_scale = (env.action_space.high - env.action_space.low) / 2.0
-    action_bias = (env.action_space.high + env.action_space.low) / 2.0
+    action_low = env.action_space.low
+    action_high = env.action_space.high
+    print(f"action_low: {action_low}, action_high: {action_high}")
+    action_scale = (action_high - action_low) / 2.0
+    action_bias = (action_high + action_low) / 2.0
     print(f"action_scale: {action_scale}, action_bias: {action_bias}")
 
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -117,6 +121,11 @@ if __name__ == "__main__":
             action, selected_log_pi, _ = actor.get_action(encoder(obs_tensor))
             action = action[0].detach().cpu().numpy()
             action = action * action_scale + action_bias
+
+            action_noise = env.action_space.sample()
+            c = args.action_noise
+            action = (1 - c) * action + c * action_noise
+            action = np.clip(action, action_low, action_high)
 
         # execute the game and log data.
         next_obs, reward, termination, truncation, info = env.step(action)
