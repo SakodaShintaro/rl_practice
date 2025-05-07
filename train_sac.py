@@ -182,7 +182,6 @@ if __name__ == "__main__":
         qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
         qf_loss = qf1_loss + qf2_loss
 
-        state_curr = encoder(data.observations)
         pi, log_pi, _ = actor.get_action(state_curr)
         qf1_pi = qf1(state_curr, pi)
         qf2_pi = qf2(state_curr, pi)
