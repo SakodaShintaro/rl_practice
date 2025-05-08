@@ -17,11 +17,11 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from networks.backbone import BaseCNN
+from networks.backbone import AE
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
-from wrappers import STACK_SIZE, make_env
+from wrappers import make_env
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,8 +78,8 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    encoder = BaseCNN(in_channels=3 * STACK_SIZE).to(device)
-    cnn_dim = 256
+    encoder = AE().to(device)
+    cnn_dim = 576
     actor = {
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True
@@ -118,11 +118,14 @@ if __name__ == "__main__":
     progress_bar = tqdm(range(args.total_timesteps), dynamic_ncols=True)
     for global_step in range(args.total_timesteps):
         # put action logic here
+        obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
+        output_enc = encoder.encode(obs_tensor).detach()
+        output_dec = encoder.decode(output_enc).detach()
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
-            action, selected_log_pi, _ = actor.get_action(encoder(obs_tensor))
+            output_enc = output_enc.flatten(start_dim=1)
+            action, selected_log_pi, _ = actor.get_action(output_enc)
             action = action[0].detach().cpu().numpy()
             action = action * action_scale + action_bias
 
@@ -138,8 +141,17 @@ if __name__ == "__main__":
 
         # render
         if args.render:
-            rgb_array = env.render()
-            bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+            output_dec = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
+            obs_to_render = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
+            dec_to_render = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+            concat = cv2.vconcat([obs_to_render, dec_to_render])  # (192, 96, 3)
+            rgb_array = env.render()  # (400, 600, 3)
+            rem = rgb_array.shape[0] - concat.shape[0]
+            concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            concat *= 255
+            concat = np.clip(concat, 0, 255).astype(np.uint8)
+            concat = cv2.hconcat([rgb_array, concat])  # (400, 696, 3)
+            bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
             cv2.imshow("CarRacing", bgr_array)
             cv2.waitKey(1)
 
@@ -170,7 +182,8 @@ if __name__ == "__main__":
         # training.
         data = rb.sample(args.batch_size)
         with torch.no_grad():
-            state_next = encoder(data.next_observations)
+            state_next = encoder.encode(data.next_observations)
+            state_next = state_next.flatten(start_dim=1)
             next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
             qf1_next_target = qf1(state_next, next_state_actions)
             qf2_next_target = qf2(state_next, next_state_actions)
@@ -180,7 +193,8 @@ if __name__ == "__main__":
                 min_qf_next_target
             ).view(-1)
 
-        state_curr = encoder(data.observations)
+        state_curr = encoder.encode(data.observations).detach()
+        state_curr = state_curr.flatten(start_dim=1)
         qf1_a_values = qf1(state_curr, data.actions).view(-1)
         qf2_a_values = qf2(state_curr, data.actions).view(-1)
         qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
@@ -192,7 +206,8 @@ if __name__ == "__main__":
         qf_loss.backward()
         q_optimizer.step()
 
-        state_curr = encoder(data.observations)
+        state_curr = encoder.encode(data.observations).detach()
+        state_curr = state_curr.flatten(start_dim=1)
         pi, log_pi, _ = actor.get_action(state_curr)
         qf1_pi = qf1(state_curr, pi)
         qf2_pi = qf2(state_curr, pi)
