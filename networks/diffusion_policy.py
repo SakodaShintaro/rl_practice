@@ -52,8 +52,6 @@ class DiffusionPolicy(nn.Module):
         self,
         state_dim: int,
         action_dim: int,
-        action_scale: np.ndarray,
-        action_bias: np.ndarray,
         use_normalize: bool = False,
     ) -> None:
         super().__init__()
@@ -61,15 +59,6 @@ class DiffusionPolicy(nn.Module):
         self.fc1 = nn.Linear(state_dim + action_dim + time_embedding_size, 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, action_dim)
-        # action rescaling
-        self.register_buffer(
-            "action_scale",
-            torch.tensor(action_scale, dtype=torch.float32),
-        )
-        self.register_buffer(
-            "action_bias",
-            torch.tensor(action_bias, dtype=torch.float32),
-        )
         self.use_normalize = use_normalize
         self.action_dim = action_dim
         self.step_num = 5
@@ -91,23 +80,17 @@ class DiffusionPolicy(nn.Module):
             torch.zeros((bs, self.action_dim), device=x.device),
             torch.ones((bs, self.action_dim), device=x.device),
         )
-        a_t = normal.sample().to(x.device)
-        log_prob = normal.log_prob(a_t)
+        action = normal.sample().to(x.device)
         dt = 1.0 / self.step_num
 
         curr_time = torch.zeros((bs), device=x.device)
 
         for _ in range(self.step_num):
-            v = self.forward(a_t, curr_time, x)
-            a_t = a_t + dt * v
+            v = self.forward(action, curr_time, x)
+            action = action + dt * v
             curr_time += dt
 
-        y_t = torch.tanh(a_t)
-
-        action = y_t * self.action_scale + self.action_bias
-        # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
+        action = torch.tanh(action)
 
         # nanがあったら終了
         if torch.isnan(action).any():
@@ -117,4 +100,5 @@ class DiffusionPolicy(nn.Module):
 
             sys.exit(1)
 
-        return action, torch.zeros((1, 1))
+        dummy = torch.zeros((bs, 1), device=x.device)
+        return action, dummy, dummy

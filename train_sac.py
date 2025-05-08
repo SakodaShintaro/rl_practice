@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 import wandb
 from networks.backbone import BaseCNN
+from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
 from wrappers import STACK_SIZE, make_env
@@ -79,9 +80,12 @@ if __name__ == "__main__":
     action_dim = np.prod(env.action_space.shape)
     encoder = BaseCNN(in_channels=3 * STACK_SIZE).to(device)
     cnn_dim = 256
-    actor = SacTanhPolicy(
-        in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True
-    )
+    actor = {
+        "tanh": SacTanhPolicy(
+            in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True
+        ),
+        "diffusion": DiffusionPolicy(state_dim=cnn_dim, action_dim=action_dim, use_normalize=True),
+    }["tanh"]
     qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True)
     qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True)
     actor = actor.to(device)
