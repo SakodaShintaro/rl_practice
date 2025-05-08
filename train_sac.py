@@ -28,9 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(8e3))
+    parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--learning_starts", type=int, default=100)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
@@ -90,10 +90,14 @@ if __name__ == "__main__":
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
     lr = 3e-4
-    q_optimizer = optim.Adam(
-        list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()), lr=lr
+    q_optimizer = optim.AdamW(
+        list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()),
+        lr=lr,
+        weight_decay=1e-5,
     )
-    actor_optimizer = optim.Adam(list(encoder.parameters()) + list(actor.parameters()), lr=lr)
+    actor_optimizer = optim.AdamW(
+        list(encoder.parameters()) + list(actor.parameters()), lr=lr, weight_decay=1e-5
+    )
 
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
