@@ -13,13 +13,6 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.fc = nn.Sequential(nn.Linear(256, 100), nn.ReLU())
         self.alpha_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
         self.beta_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
-        self.apply(self._weights_init)
-
-    @staticmethod
-    def _weights_init(m: object) -> None:
-        if isinstance(m, nn.Conv2d):
-            nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("relu"))
-            nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x: torch.Tensor) -> tuple:
         # x.shape = (batch_size, STACK_SIZE * 3, 96, 96)
