@@ -31,9 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_size", type=int, default=int(8e3))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--learning_starts", type=int, default=8e3)
-    parser.add_argument("--policy_lr", type=float, default=3e-4)
-    parser.add_argument("--q_lr", type=float, default=1e-3)
+    parser.add_argument("--learning_starts", type=int, default=100)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
@@ -91,18 +89,17 @@ if __name__ == "__main__":
     actor = actor.to(device)
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
+    lr = 3e-4
     q_optimizer = optim.Adam(
-        list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr
+        list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()), lr=lr
     )
-    actor_optimizer = optim.Adam(
-        list(encoder.parameters()) + list(actor.parameters()), lr=args.policy_lr
-    )
+    actor_optimizer = optim.Adam(list(encoder.parameters()) + list(actor.parameters()), lr=lr)
 
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
     log_alpha = torch.tensor([-9.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
-    a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
+    a_optimizer = optim.Adam([log_alpha], lr=lr)
     print(f"{target_entropy=}")
 
     rb = ReplayBuffer(
@@ -176,7 +173,7 @@ if __name__ == "__main__":
         if global_step <= args.learning_starts:
             continue
 
-        if global_step % 80 != 0:
+        if global_step % 40 != 0:
             continue
 
         # training.
