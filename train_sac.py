@@ -89,7 +89,7 @@ if __name__ == "__main__":
     actor = actor.to(device)
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
-    lr = 3e-4
+    lr = 2e-4
     q_optimizer = optim.AdamW(
         list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()),
         lr=lr,
@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item() * 2.0
-    log_alpha = torch.tensor([-2.0], requires_grad=True, device=device)
+    log_alpha = torch.tensor([-4.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
     a_optimizer = optim.Adam([log_alpha], lr=lr)
     print(f"{target_entropy=}")
