@@ -115,8 +115,10 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # start the game
+    episode_id = 0
+    score_list = []
     obs, _ = env.reset(seed=args.seed)
-    progress_bar = tqdm(range(args.total_timesteps), dynamic_ncols=True)
+    progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     for global_step in range(args.total_timesteps):
         # put action logic here
         obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
@@ -124,6 +126,7 @@ if __name__ == "__main__":
         output_dec = encoder.decode(output_enc).detach()
         if global_step < args.learning_starts:
             action = env.action_space.sample()
+            progress_bar.update(1)
         else:
             output_enc = output_enc.flatten(start_dim=1)
             action, selected_log_pi, _ = actor.get_action(output_enc)
@@ -157,10 +160,16 @@ if __name__ == "__main__":
             cv2.waitKey(1)
 
         if termination or truncation:
+            score = info["episode"]["r"]
+            score_list.append(score)
+            score_list = score_list[-10:]
+            recent_10_score = np.mean(score_list)
+
             data_dict = {
                 "global_step": global_step,
                 "episodic_return": info["episode"]["r"],
                 "episodic_length": info["episode"]["l"],
+                "recent_10_score": recent_10_score,
             }
             wandb.log(data_dict)
 
@@ -168,11 +177,23 @@ if __name__ == "__main__":
             log_episode_df = pd.DataFrame(log_episode)
             log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
 
+            is_solved = recent_10_score > env.spec.reward_threshold
+
+            if episode_id % 10 == 0 or is_solved:
+                print(
+                    f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_10_score:.2f}\tLength: {info['episode']['l']:.2f}"
+                )
+            episode_id += 1
+
+            if is_solved:
+                print(
+                    f"Solved! Running reward is now {recent_10_score} and the last episode runs to {score}!"
+                )
+                break
+
             obs, _ = env.reset()
         else:
             obs = next_obs
-
-        progress_bar.update(1)
 
         if global_step <= args.learning_starts:
             continue
