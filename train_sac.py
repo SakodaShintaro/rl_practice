@@ -162,14 +162,14 @@ if __name__ == "__main__":
         if termination or truncation:
             score = info["episode"]["r"]
             score_list.append(score)
-            score_list = score_list[-10:]
-            recent_10_score = np.mean(score_list)
+            score_list = score_list[-20:]
+            recent_average_score = np.mean(score_list)
 
             data_dict = {
                 "global_step": global_step,
                 "episodic_return": info["episode"]["r"],
                 "episodic_length": info["episode"]["l"],
-                "recent_10_score": recent_10_score,
+                "recent_average_score": recent_average_score,
             }
             wandb.log(data_dict)
 
@@ -177,17 +177,17 @@ if __name__ == "__main__":
             log_episode_df = pd.DataFrame(log_episode)
             log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
 
-            is_solved = recent_10_score > env.spec.reward_threshold
+            is_solved = recent_average_score > env.spec.reward_threshold
 
             if episode_id % 10 == 0 or is_solved:
                 print(
-                    f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_10_score:.2f}\tLength: {info['episode']['l']:.2f}"
+                    f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
                 )
             episode_id += 1
 
             if is_solved:
                 print(
-                    f"Solved! Running reward is now {recent_10_score} and the last episode runs to {score}!"
+                    f"Solved! Running reward is now {recent_average_score} and the last episode runs to {score}!"
                 )
                 break
 

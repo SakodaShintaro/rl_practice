@@ -239,29 +239,29 @@ if __name__ == "__main__":
                 break
         score = info["episode"]["r"]
         score_list.append(score)
-        score_list = score_list[-10:]
-        recent_10_score = np.mean(score_list)
-        is_solved = recent_10_score > env.spec.reward_threshold
+        score_list = score_list[-20:]
+        recent_average_score = np.mean(score_list)
+        is_solved = recent_average_score > env.spec.reward_threshold
 
         if i_ep % args.log_interval == 0 or is_solved:
             print(
-                f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_10_score:.2f}\tLength: {info['episode']['l']:.2f}"
+                f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
             )
-            data_dict = {
-                "global_step": global_step,
-                "episode": i_ep,
-                "score": score,
-                "recent_10_score": recent_10_score,
-                "episodic_return": info["episode"]["r"],
-                "episodic_length": info["episode"]["l"],
-            }
-            wandb.log(data_dict)
+        data_dict = {
+            "global_step": global_step,
+            "episode": i_ep,
+            "score": score,
+            "recent_average_score": recent_average_score,
+            "episodic_return": info["episode"]["r"],
+            "episodic_length": info["episode"]["l"],
+        }
+        wandb.log(data_dict)
 
-            log_episode.append(data_dict)
-            log_episode_df = pd.DataFrame(log_episode)
-            log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
+        log_episode.append(data_dict)
+        log_episode_df = pd.DataFrame(log_episode)
+        log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
         if is_solved:
             print(
-                f"Solved! Running reward is now {recent_10_score} and the last episode runs to {score}!"
+                f"Solved! Running reward is now {recent_average_score} and the last episode runs to {score}!"
             )
             break
