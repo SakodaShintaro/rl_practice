@@ -7,6 +7,8 @@ REPEAT = 8
 
 def make_env(video_dir):
     env = gym.make("CarRacing-v3", render_mode="rgb_array")
+    env = env.env  # Unwrap the original TimeLimit wrapper
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
     env = gym.wrappers.FrameStackObservation(env, stack_size=STACK_SIZE)
     env = ActionRepeatWrapper(env, repeat=REPEAT)
     env = AverageRewardEarlyStopWrapper(env)
