@@ -49,7 +49,6 @@ class AverageRewardEarlyStopWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.window_size = 25
-        self.threshold = -0.1 * REPEAT
         self.recent_rewards = []
 
     def reset(self, **kwargs):
@@ -63,8 +62,8 @@ class AverageRewardEarlyStopWrapper(gym.Wrapper):
         self.recent_rewards = self.recent_rewards[-self.window_size :]
 
         if len(self.recent_rewards) >= self.window_size:
-            avg_reward = np.mean(self.recent_rewards)
-            if avg_reward <= self.threshold:
+            count = sum(r < 0.0 for r in self.recent_rewards)
+            if count == self.window_size:
                 terminated = True
 
         return obs, reward, terminated, truncated, info
