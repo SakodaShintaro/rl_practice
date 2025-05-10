@@ -22,7 +22,7 @@ from wrappers import STACK_SIZE, make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--log-interval", type=int, default=10)
+    parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
@@ -204,10 +204,9 @@ if __name__ == "__main__":
 
     log_episode = []
     log_step = []
-    running_score = 0
+    score_list = []
     global_step = 0
     for i_ep in range(100000):
-        score = 0
         state, _ = env.reset()
 
         while True:
@@ -225,7 +224,7 @@ if __name__ == "__main__":
                 cv2.waitKey(1)
 
             if agent.store((state, action, a_logp, reward, state_)):
-                print("updating")
+                print("updating", end="\r")
                 data_dict = agent.update()
                 data_dict["global_step"] = global_step
                 data_dict["a_logp"] = a_logp
@@ -235,21 +234,22 @@ if __name__ == "__main__":
                 log_step_df = pd.DataFrame(log_step)
                 log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
 
-            score += reward
             state = state_
             if done or die:
                 break
-        running_score = running_score * 0.99 + score * 0.01
+        score = info["episode"]["r"]
+        score_list.append(score)
+        recent_10_score = np.mean(score_list[-10:])
 
         if i_ep % args.log_interval == 0:
             print(
-                f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {running_score:.2f}"
+                f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_10_score:.2f}\tLength: {info['episode']['l']:.2f}"
             )
             data_dict = {
                 "global_step": global_step,
                 "episode": i_ep,
                 "score": score,
-                "running_score": running_score,
+                "recent_10_score": recent_10_score,
                 "episodic_return": info["episode"]["r"],
                 "episodic_length": info["episode"]["l"],
             }
@@ -258,8 +258,8 @@ if __name__ == "__main__":
             log_episode.append(data_dict)
             log_episode_df = pd.DataFrame(log_episode)
             log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
-        if running_score > env.spec.reward_threshold:
+        if recent_10_score > env.spec.reward_threshold:
             print(
-                f"Solved! Running reward is now {running_score} and the last episode runs to {score}!"
+                f"Solved! Running reward is now {recent_10_score} and the last episode runs to {score}!"
             )
             break
