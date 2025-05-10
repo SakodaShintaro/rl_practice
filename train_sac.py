@@ -28,10 +28,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(4e4))
+    parser.add_argument("--buffer_size", type=int, default=int(8e4))
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--learning_starts", type=int, default=2000)
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--learning_starts", type=int, default=4000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
@@ -177,7 +177,7 @@ if __name__ == "__main__":
         if global_step <= args.learning_starts:
             continue
 
-        if global_step % 40 != 0:
+        if global_step % 20 != 0:
             continue
 
         # training.
