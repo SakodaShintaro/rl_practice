@@ -28,10 +28,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(2e4))
+    parser.add_argument("--buffer_size", type=int, default=int(4e4))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--learning_starts", type=int, default=100)
+    parser.add_argument("--learning_starts", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
@@ -80,12 +80,12 @@ if __name__ == "__main__":
     cnn_dim = 576
     actor = {
         "tanh": SacTanhPolicy(
-            in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True
+            in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
         ),
-        "diffusion": DiffusionPolicy(state_dim=cnn_dim, action_dim=action_dim, use_normalize=True),
+        "diffusion": DiffusionPolicy(state_dim=cnn_dim, action_dim=action_dim, use_normalize=False),
     }["tanh"]
-    qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True)
-    qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=256, use_normalize=True)
+    qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False)
+    qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False)
     actor = actor.to(device)
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
-    log_alpha = torch.tensor([-9.0], requires_grad=True, device=device)
+    log_alpha = torch.tensor([-1.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
     a_optimizer = optim.Adam([log_alpha], lr=lr)
     print(f"{target_entropy=}")

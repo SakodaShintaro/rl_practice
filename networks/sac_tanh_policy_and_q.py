@@ -3,6 +3,21 @@ import torch.nn.functional as F
 from torch import nn
 
 
+def weights_init_(m):
+    """
+    Function to initialize weights.
+    When used with apply(fn) recursively applied to every submodule as well as self.
+
+    ## Input:
+
+    - **m** *(nn.Module)*: Checks if the layer is a feedforward layer and initializes using the uniform glorot scheme if True.
+
+    """
+    if isinstance(m, nn.Linear):
+        torch.nn.init.xavier_uniform_(m.weight, gain=1)
+        torch.nn.init.constant_(m.bias, 0)
+
+
 def orthogonal_weight_init(m: nn.Module) -> None:
     """Orthogonal weight initialization for neural networks."""
     if isinstance(m, nn.Linear):
@@ -20,7 +35,7 @@ class SacQ(nn.Module):
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
         self.use_normalize = use_normalize
-        self.apply(orthogonal_weight_init)
+        self.apply(weights_init_)
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
         x = torch.cat([x, a], dim=1)
@@ -46,7 +61,7 @@ class SacTanhPolicy(nn.Module):
         self.fc_mean = nn.Linear(hidden_dim, action_dim)
         self.fc_logstd = nn.Linear(hidden_dim, action_dim)
         self.use_normalize = use_normalize
-        self.apply(orthogonal_weight_init)
+        self.apply(weights_init_)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = F.relu(self.fc1(x))
