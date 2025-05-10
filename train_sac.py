@@ -100,8 +100,8 @@ if __name__ == "__main__":
     )
 
     # Automatic entropy tuning
-    target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item()
-    log_alpha = torch.tensor([-1.0], requires_grad=True, device=device)
+    target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item() * 2.0
+    log_alpha = torch.tensor([-2.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
     a_optimizer = optim.Adam([log_alpha], lr=lr)
     print(f"{target_entropy=}")
