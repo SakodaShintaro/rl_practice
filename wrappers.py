@@ -88,7 +88,7 @@ class DieStateRewardWrapper(gym.Wrapper):
 class TransposeAndNormalizeObs(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
-        h, w = env.observation_space.shape[1:3]
+        h, w = env.observation_space.shape[0:2]
         self.observation_space = gym.spaces.Box(
             low=0.0, high=1.0, shape=(3, h, w), dtype=np.float32
         )
