@@ -16,7 +16,7 @@ import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
 from networks.ppo_tanh_policy_and_value import PpoTanhPolicyAndValue
 from networks.sequence_compressor import SequenceCompressor
-from wrappers import STACK_SIZE, make_env
+from wrappers import make_env
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,8 +78,8 @@ class Agent:
         self.training_step = 0
         network_type = "beta"
         self.net = {
-            "beta": PpoBetaPolicyAndValue(STACK_SIZE * 3, 3).to(device),
-            "tanh": PpoTanhPolicyAndValue(STACK_SIZE * 3, 3).to(device),
+            "beta": PpoBetaPolicyAndValue(3, 3).to(device),
+            "tanh": PpoTanhPolicyAndValue(3, 3).to(device),
         }[network_type]
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
         self.counter = 0
@@ -189,11 +189,11 @@ if __name__ == "__main__":
 
     transition = np.dtype(
         [
-            ("s", np.float32, (STACK_SIZE * 3, 96, 96)),
+            ("s", np.float32, (3, 96, 96)),
             ("a", np.float32, (3,)),
             ("a_logp", np.float32),
             ("r", np.float32),
-            ("s_", np.float32, (STACK_SIZE * 3, 96, 96)),
+            ("s_", np.float32, (3, 96, 96)),
         ]
     )
 

@@ -21,7 +21,7 @@ import wandb
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
-from wrappers import STACK_SIZE, make_env
+from wrappers import make_env
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,11 +61,11 @@ class AVG:
 
         action_dim = np.prod(env.action_space.shape)
         self.actor = SacTanhPolicy(
-            in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=cfg.hidden_actor
+            in_channels=3, action_dim=action_dim, hidden_dim=cfg.hidden_actor
         ).to(cfg.device)
-        self.Q = SacQ(
-            in_channels=3 * STACK_SIZE, action_dim=action_dim, hidden_dim=cfg.hidden_critic
-        ).to(cfg.device)
+        self.Q = SacQ(in_channels=3, action_dim=action_dim, hidden_dim=cfg.hidden_critic).to(
+            cfg.device
+        )
 
         self.actor_lr = cfg.actor_lr
         self.critic_lr = cfg.critic_lr

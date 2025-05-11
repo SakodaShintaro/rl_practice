@@ -15,7 +15,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.beta_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
 
     def forward(self, x: torch.Tensor) -> tuple:
-        # x.shape = (batch_size, STACK_SIZE * 3, 96, 96)
+        # x.shape = (batch_size, 3, 96, 96)
         x = self.cnn_base(x)
         x = x.view(-1, 256)
         v = self.v(x)

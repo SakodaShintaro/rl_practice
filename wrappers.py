@@ -1,7 +1,6 @@
 import gymnasium as gym
 import numpy as np
 
-STACK_SIZE = 1
 REPEAT = 8
 
 
@@ -9,7 +8,6 @@ def make_env(video_dir):
     env = gym.make("CarRacing-v3", render_mode="rgb_array")
     env = env.env  # Unwrap the original TimeLimit wrapper
     env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
-    env = gym.wrappers.FrameStackObservation(env, stack_size=STACK_SIZE)
     env = ActionRepeatWrapper(env, repeat=REPEAT)
     env = AverageRewardEarlyStopWrapper(env)
     env = DieStateRewardWrapper(env)
@@ -92,11 +90,11 @@ class TransposeAndNormalizeObs(gym.ObservationWrapper):
         super().__init__(env)
         h, w = env.observation_space.shape[1:3]
         self.observation_space = gym.spaces.Box(
-            low=0.0, high=1.0, shape=(STACK_SIZE * 3, h, w), dtype=np.float32
+            low=0.0, high=1.0, shape=(3, h, w), dtype=np.float32
         )
 
     def observation(self, obs):
-        # obs: (STACK_SIZE, H, W, 3)
+        # obs: (H, W, 3)
         o = obs.astype(np.float32) / 255.0
-        o = np.transpose(o, (0, 3, 1, 2))  # (STACK_SIZE, 3, H, W)
-        return o.reshape(-1, o.shape[2], o.shape[3])
+        o = np.transpose(o, (2, 0, 1))  # (3, H, W)
+        return o
