@@ -38,10 +38,15 @@ class PpoTanhPolicyAndValue(nn.Module):
             nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("relu"))
             nn.init.constant_(m.bias, 0.1)
 
-    def forward(self, x: torch.Tensor) -> tuple:
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
         # x.shape = (batch_size, 3, 96, 96)
         x = self.cnn_base(x)
         x = x.view(-1, 256)
+        return x
+
+    def forward(self, x: torch.Tensor) -> tuple:
+        # x.shape = (batch_size, 3, 96, 96)
+        x = self.encode(x)
         v = self.v(x)
 
         x = F.relu(self.fc1(x))
@@ -68,8 +73,8 @@ class PpoTanhPolicyAndValue(nn.Module):
         a_logp = a_logp.sum(1, keepdim=True)
         return action_range1, a_logp
 
-    def calc_action_logp(self, s: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
-        mean, log_std = self.forward(s)[0]
+    def get_action_log_p_and_value(self, s: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        (mean, log_std), v = self.forward(s)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
 
@@ -79,7 +84,7 @@ class PpoTanhPolicyAndValue(nn.Module):
         a_logp = normal.log_prob(raw_a)
         a_logp -= torch.log(self.action_scale * (1 - a_range2.pow(2)) + 1e-6)
         a_logp = a_logp.sum(1, keepdim=True)
-        return a_logp
+        return a_logp, v
 
     def get_value(self, x: torch.Tensor) -> torch.Tensor:
         _, v = self.forward(x)

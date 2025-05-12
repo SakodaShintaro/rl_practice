@@ -130,7 +130,7 @@ class Agent:
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
-                a_logp = self.net.calc_action_logp(s[index], a[index])
+                a_logp, v = self.net.get_action_log_p_and_value(s[index], a[index])
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
                 surr1 = ratio * adv[index]
@@ -138,7 +138,7 @@ class Agent:
                     torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv[index]
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
-                value_loss = F.smooth_l1_loss(self.net(s[index])[1], target_v[index])
+                value_loss = F.smooth_l1_loss(v, target_v[index])
                 loss = action_loss + 2.0 * value_loss
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
