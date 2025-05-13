@@ -81,7 +81,17 @@ class Agent:
             "beta": PpoBetaPolicyAndValue(3, 3).to(device),
             "tanh": PpoTanhPolicyAndValue(3, 3).to(device),
         }[network_type]
-        self.buffer = np.empty(self.buffer_capacity, dtype=transition)
+        self.buffer = np.empty(
+            self.buffer_capacity,
+            dtype=np.dtype(
+                [
+                    ("s", np.float32, (3, 96, 96)),
+                    ("a", np.float32, (3,)),
+                    ("a_logp", np.float32),
+                    ("r", np.float32),
+                ]
+            ),
+        )
         self.counter = 0
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
@@ -112,12 +122,11 @@ class Agent:
         s = torch.tensor(self.buffer["s"]).to(device)
         a = torch.tensor(self.buffer["a"]).to(device)
         r = torch.tensor(self.buffer["r"]).to(device).view(-1, 1)
-        s_ = torch.tensor(self.buffer["s_"]).to(device)
         old_a_logp = torch.tensor(self.buffer["a_logp"]).to(device).view(-1, 1)
 
         with torch.no_grad():
-            target_v = r + self.gamma * self.net.get_value(s_)
-            adv = target_v - self.net.get_value(s)
+            target_v = r[:-1] + self.gamma * self.net.get_value(s[1:])
+            adv = target_v - self.net.get_value(s[:-1])
             # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
         ave_action_loss_list = []
@@ -126,7 +135,10 @@ class Agent:
             sum_action_loss = 0.0
             sum_value_loss = 0.0
             for indices in SequentialBatchSampler(
-                self.buffer_capacity, self.batch_size, k_frames=self.seq_len + 1, drop_last=False
+                self.buffer_capacity - 1,
+                self.batch_size,
+                k_frames=self.seq_len + 1,
+                drop_last=False,
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
@@ -187,16 +199,6 @@ if __name__ == "__main__":
     if use_cuda:
         torch.cuda.manual_seed(args.seed)
 
-    transition = np.dtype(
-        [
-            ("s", np.float32, (3, 96, 96)),
-            ("a", np.float32, (3,)),
-            ("a_logp", np.float32),
-            ("r", np.float32),
-            ("s_", np.float32, (3, 96, 96)),
-        ]
-    )
-
     agent = Agent(args.buffer_capacity, args.seq_len)
     env = make_env(video_dir=video_dir)
 
@@ -223,7 +225,7 @@ if __name__ == "__main__":
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
-            if agent.store((state, action, a_logp, reward, state_)):
+            if agent.store((state, action, a_logp, reward)):
                 print("updating", end="\r")
                 data_dict = agent.update()
                 data_dict["global_step"] = global_step
