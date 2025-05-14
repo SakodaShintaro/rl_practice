@@ -89,6 +89,7 @@ class Agent:
                     ("a", np.float32, (3,)),
                     ("a_logp", np.float32),
                     ("r", np.float32),
+                    ("v", np.float32),
                 ]
             ),
         )
@@ -102,10 +103,11 @@ class Agent:
 
     def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).to(device).unsqueeze(0)
-        action, a_logp = self.net.get_action(state)
+        action, a_logp, value = self.net.get_action_and_value(state)
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
-        return action, a_logp
+        value = value.item()
+        return action, a_logp, value
 
     def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
@@ -122,11 +124,12 @@ class Agent:
         s = torch.tensor(self.buffer["s"]).to(device)
         a = torch.tensor(self.buffer["a"]).to(device)
         r = torch.tensor(self.buffer["r"]).to(device).view(-1, 1)
+        v = torch.tensor(self.buffer["v"]).to(device).view(-1, 1)
         old_a_logp = torch.tensor(self.buffer["a_logp"]).to(device).view(-1, 1)
 
         with torch.no_grad():
-            target_v = r[:-1] + self.gamma * self.net.get_value(s[1:])
-            adv = target_v - self.net.get_value(s[:-1])
+            target_v = r[:-1] + self.gamma * v[1:]
+            adv = target_v - v[:-1]
             # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
         ave_action_loss_list = []
@@ -142,7 +145,7 @@ class Agent:
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
-                a_logp, v = self.net.get_action_log_p_and_value(s[index], a[index])
+                a_logp, value = self.net.get_action_log_p_and_value(s[index], a[index])
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
                 surr1 = ratio * adv[index]
@@ -150,7 +153,7 @@ class Agent:
                     torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv[index]
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
-                value_loss = F.smooth_l1_loss(v, target_v[index])
+                value_loss = F.smooth_l1_loss(value, target_v[index])
                 loss = action_loss + 2.0 * value_loss
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
@@ -213,7 +216,7 @@ if __name__ == "__main__":
 
         while True:
             global_step += 1
-            action, a_logp = agent.select_action(state)
+            action, a_logp, value = agent.select_action(state)
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
@@ -225,7 +228,7 @@ if __name__ == "__main__":
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
-            if agent.store((state, action, a_logp, reward)):
+            if agent.store((state, action, a_logp, reward, value)):
                 print("updating", end="\r")
                 data_dict = agent.update()
                 data_dict["global_step"] = global_step

@@ -61,8 +61,10 @@ class PpoTanhPolicyAndValue(nn.Module):
         return (mean, log_std), v
 
     @torch.inference_mode()
-    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean, log_std = self.forward(x)[0]
+    def get_action_and_value(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        (mean, log_std), v = self.forward(x)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
         raw_a = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
@@ -71,7 +73,7 @@ class PpoTanhPolicyAndValue(nn.Module):
         a_logp = normal.log_prob(raw_a)
         a_logp -= torch.log(self.action_scale * (1 - action_range2.pow(2)) + 1e-6)
         a_logp = a_logp.sum(1, keepdim=True)
-        return action_range1, a_logp
+        return action_range1, a_logp, v
 
     def get_action_log_p_and_value(self, s: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
         (mean, log_std), v = self.forward(s)
