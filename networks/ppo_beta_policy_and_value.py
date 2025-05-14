@@ -45,7 +45,3 @@ class PpoBetaPolicyAndValue(nn.Module):
         action = dist.sample()
         a_logp = dist.log_prob(action).sum(dim=1)
         return action, a_logp, v
-
-    def get_value(self, x: torch.Tensor) -> torch.Tensor:
-        _, v = self.forward(x)
-        return v

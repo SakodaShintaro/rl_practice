@@ -87,7 +87,3 @@ class PpoTanhPolicyAndValue(nn.Module):
         a_logp -= torch.log(self.action_scale * (1 - a_range2.pow(2)) + 1e-6)
         a_logp = a_logp.sum(1, keepdim=True)
         return a_logp, v
-
-    def get_value(self, x: torch.Tensor) -> torch.Tensor:
-        _, v = self.forward(x)
-        return v

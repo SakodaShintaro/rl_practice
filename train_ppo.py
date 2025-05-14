@@ -127,10 +127,9 @@ class Agent:
         v = torch.tensor(self.buffer["v"]).to(device).view(-1, 1)
         old_a_logp = torch.tensor(self.buffer["a_logp"]).to(device).view(-1, 1)
 
-        with torch.no_grad():
-            target_v = r[:-1] + self.gamma * v[1:]
-            adv = target_v - v[:-1]
-            # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
+        target_v = r[:-1] + self.gamma * v[1:]
+        adv = target_v - v[:-1]
+        # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
         ave_action_loss_list = []
         ave_value_loss_list = []
