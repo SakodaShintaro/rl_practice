@@ -90,6 +90,7 @@ class Agent:
                     ("a_logp", np.float32),
                     ("r", np.float32),
                     ("v", np.float32),
+                    ("done", np.int32),
                 ]
             ),
         )
@@ -126,8 +127,9 @@ class Agent:
         r = torch.tensor(self.buffer["r"]).to(device).view(-1, 1)
         v = torch.tensor(self.buffer["v"]).to(device).view(-1, 1)
         old_a_logp = torch.tensor(self.buffer["a_logp"]).to(device).view(-1, 1)
+        done = torch.tensor(self.buffer["done"]).to(device).view(-1, 1)
 
-        target_v = r[:-1] + self.gamma * v[1:]
+        target_v = r[:-1] + (1 - done[:-1]) * self.gamma * v[1:]
         adv = target_v - v[:-1]
         # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
 
@@ -219,6 +221,7 @@ if __name__ == "__main__":
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
+            done = bool(done or die)
 
             # render
             if args.render:
@@ -227,11 +230,12 @@ if __name__ == "__main__":
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
-            if agent.store((state, action, a_logp, reward, value)):
+            if agent.store((state, action, a_logp, reward, value, done)):
                 print("updating", end="\r")
                 data_dict = agent.update()
                 data_dict["global_step"] = global_step
                 data_dict["a_logp"] = a_logp
+                data_dict["value"] = value
                 wandb.log(data_dict)
                 fixed_data = {k.replace("ppo/", ""): v for k, v in data_dict.items()}
                 log_step.append(fixed_data)
