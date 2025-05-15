@@ -95,18 +95,40 @@ class Agent:
             ),
         )
         self.counter = 0
-
-        self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
-
         self.sequential_compressor = SequenceCompressor(seq_len=self.seq_len).to(device)
-        self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
 
-    def select_action(self, state: np.ndarray) -> tuple:
+        self.optimizer = optim.Adam(
+            list(self.net.parameters()) + list(self.sequential_compressor.parameters()), lr=1e-3
+        )
+
+        self.r_list = []
+        self.s_list = []
+        self.a_list = []
+
+    def select_action(self, reward: float, state: np.ndarray) -> tuple:
+        reward = torch.from_numpy(np.array(reward)).to(device).unsqueeze(0)
         state = torch.from_numpy(state).to(device).unsqueeze(0)
-        action, a_logp, value = self.net.get_action_and_value(state)
+        self.r_list.append(reward)
+        self.r_list = self.r_list[-self.seq_len :]
+        self.s_list.append(state)
+        self.s_list = self.s_list[-self.seq_len :]
+
+        curr_r = torch.cat(self.r_list, dim=0).unsqueeze(0).unsqueeze(-1)
+        curr_s = torch.cat(self.s_list, dim=0).unsqueeze(0)
+        a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=device)]
+        curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
+
+        feature = self.sequential_compressor(curr_r, curr_s, curr_a)
+
+        action, a_logp, value = self.net.get_action_and_value(feature)
+        self.a_list.append(action)
+        self.a_list = self.a_list[-self.seq_len :]
+        self.a_list = self.a_list[1:]
+
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
         value = value.item()
+
         return action, a_logp, value
 
     def store(self, transition: tuple) -> bool:
@@ -145,7 +167,12 @@ class Agent:
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
-                a_logp, value = self.net.get_action_log_p_and_value(s[index], a[index])
+                curr_action = a[indices][:, :-1]
+                dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=device)
+                curr_action = torch.cat((curr_action, dummy_action), dim=1)
+                feature = self.sequential_compressor(r[indices], s[indices], curr_action)
+
+                a_logp, value = self.net.get_action_log_p_and_value(feature, a[index])
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
                 surr1 = ratio * adv[index]
@@ -163,16 +190,6 @@ class Agent:
                 nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                # update sequence compressor
-                out = self.sequential_compressor(
-                    r[indices],
-                    s[indices],
-                    a[indices][:, :-1],
-                )
-                loss_sc = F.mse_loss(out, torch.ones_like(out))
-                self.optimizer_sc.zero_grad()
-                loss_sc.backward()
-                self.optimizer_sc.step()
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
@@ -210,12 +227,13 @@ if __name__ == "__main__":
     log_step = []
     score_list = []
     global_step = 0
+    reward = 0.0
     for i_ep in range(100000):
         state, _ = env.reset()
 
         while True:
             global_step += 1
-            action, a_logp, value = agent.select_action(state)
+            action, a_logp, value = agent.select_action(reward, state)
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
