@@ -15,7 +15,6 @@ from torch import nn, optim
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
 from networks.ppo_tanh_policy_and_value import PpoTanhPolicyAndValue
-from networks.sequence_compressor import SequenceCompressor
 from wrappers import make_env
 
 
@@ -98,10 +97,6 @@ class Agent:
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
 
-        if self.seq_len > 1:
-            self.sequential_compressor = SequenceCompressor(seq_len=self.seq_len).to(device)
-            self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
-
     def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).to(device).unsqueeze(0)
         action, a_logp, value = self.net.get_action_and_value(state)
@@ -164,17 +159,6 @@ class Agent:
                 nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                # update sequence compressor
-                if self.seq_len > 1:
-                    out = self.sequential_compressor(
-                        s[indices][:, :-1],
-                        r[indices][:, :-1],
-                        a[indices][:, :-1],
-                    )
-                    loss_sc = F.mse_loss(out, torch.ones_like(out))
-                    self.optimizer_sc.zero_grad()
-                    loss_sc.backward()
-                    self.optimizer_sc.step()
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
