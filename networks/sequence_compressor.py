@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.models import AutoencoderKL
 
-from .backbone import AE
 from .diffusion_policy import TimestepEmbedder
 
 """
@@ -21,18 +20,20 @@ class SequenceCompressor(nn.Module):
         self.seq_len = seq_len
         self.hidden_dim = 256
 
+        # 状態(画像)エンコーダー
+        self.state_encoder = AutoencoderKL.from_pretrained(
+            "stabilityai/sd-vae-ft-ema", cache_dir="pretrained"
+        )
+        self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
+
         # 報酬エンコーダー
         self.reward_encoder = TimestepEmbedder(self.hidden_dim)
-
-        # 状態(画像)エンコーダー
-        self.state_encoder = AE()
-        self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
 
         # 行動エンコーダー
         self.action_encoder = nn.Linear(3, self.hidden_dim)
 
         # Positional Encoding
-        self.pos_embedding = nn.Parameter(torch.randn(1, seq_len * 3 - 1, self.hidden_dim))
+        self.pos_embedding = nn.Parameter(torch.randn(1, seq_len * 3, self.hidden_dim))
 
         # Transformer Encoder
         encoder_layer = nn.TransformerEncoderLayer(
@@ -43,53 +44,47 @@ class SequenceCompressor(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=4)
 
-        # 出力層
+        # 出力層（最後のトークンまたはCLSトークンを使用）
         self.norm = nn.LayerNorm(self.hidden_dim)
         self.output_layer = nn.Linear(self.hidden_dim, self.hidden_dim)
 
     def forward(
-        self, rewards: torch.Tensor, states: torch.Tensor, actions: torch.Tensor
+        self, states: torch.Tensor, rewards: torch.Tensor, actions: torch.Tensor
     ) -> torch.Tensor:
         """
         Args:
-            rewards (torch.Tensor): 過去の報酬シーケンス (batch_size, seq_len, reward_dim)
             states (torch.Tensor): 過去の状態(画像)シーケンス (batch_size, seq_len, C, H, W)
-            actions (torch.Tensor): 過去の行動シーケンス (batch_size, seq_len - 1, action_dim)
-        actionだけはこの後に方策を出して生成するのでseq_len - 1
+            rewards (torch.Tensor): 過去の報酬シーケンス (batch_size, seq_len, reward_dim)
+            actions (torch.Tensor): 過去の行動シーケンス (batch_size, seq_len, action_dim)
 
         Returns:
             torch.Tensor: 圧縮表現 (batch_size, hidden_dim)
         """
         batch_size = states.shape[0]
 
-        # 報酬をエンコード (batch_size, seq_len, 1) -> (batch_size, seq_len, hidden_dim)
-        rewards_embeds = self.reward_encoder(rewards)
-        rewards_embeds = rewards_embeds.view(batch_size, self.seq_len, self.hidden_dim)
-
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
         with torch.no_grad():
             states_flat = states.reshape(-1, *states.shape[2:])
-            state_embeds = self.state_encoder.encode(
-                states_flat
+            state_embeds = (
+                self.state_encoder.encode(states_flat).latent_dist.sample().mul_(0.18215)
             )  # (batch_size * seq_len, 4, 12, 12)
             state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
             state_embeds = self.state_encoder_linear(state_embeds)
 
-        # 行動をエンコード (batch_size, seq_len - 1, action_dim) -> (batch_size, seq_len - 1, hidden_dim)
-        action_embeds = self.action_encoder(actions)
-        action_embeds = torch.cat(
-            (action_embeds, torch.zeros(batch_size, 1, self.hidden_dim).to(actions.device)),
-            dim=1,
-        )  # 連結するためにseq_lenを揃える (batch_size, seq_len, hidden_dim)
+        # 報酬をエンコード (batch_size, seq_len, 1) -> (batch_size, seq_len, hidden_dim)
+        rewards_embeds = self.reward_encoder(rewards)
+        rewards_embeds = rewards_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 
-        # エンコードされた報酬、状態、行動を結合
-        x = torch.stack((rewards_embeds, state_embeds, action_embeds), dim=2)
+        # 行動をエンコード (batch_size, seq_len, action_dim) -> (batch_size, seq_len, hidden_dim)
+        action_embeds = self.action_encoder(actions)
+
+        # エンコードされた状態、報酬、行動を結合
+        x = torch.stack((state_embeds, rewards_embeds, action_embeds), dim=2)
         x = x.permute(0, 2, 1, 3)
         x = x.reshape(batch_size, self.seq_len * 3, self.hidden_dim)
-        x = x[:, :-1]  # dummyのactionを削除 (batch_size, seq_len * 3 - 1, hidden_dim)
 
         # Positional Encodingを追加
-        x += self.pos_embedding
+        x += self.pos_embedding[:, : self.seq_len * 3]
 
         # Transformer Encoderに通す
         transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)

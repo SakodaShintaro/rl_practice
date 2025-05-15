@@ -98,8 +98,9 @@ class Agent:
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
 
-        self.sequential_compressor = SequenceCompressor(seq_len=self.seq_len).to(device)
-        self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
+        if self.seq_len > 1:
+            self.sequential_compressor = SequenceCompressor(seq_len=self.seq_len).to(device)
+            self.optimizer_sc = optim.Adam(self.sequential_compressor.parameters(), lr=1e-3)
 
     def select_action(self, state: np.ndarray) -> tuple:
         state = torch.from_numpy(state).to(device).unsqueeze(0)
@@ -140,7 +141,7 @@ class Agent:
             for indices in SequentialBatchSampler(
                 self.buffer_capacity - 1,
                 self.batch_size,
-                k_frames=self.seq_len,
+                k_frames=self.seq_len + 1,
                 drop_last=False,
             ):
                 indices = np.array(indices, dtype=np.int64)
@@ -164,15 +165,16 @@ class Agent:
                 self.optimizer.step()
 
                 # update sequence compressor
-                out = self.sequential_compressor(
-                    r[indices],
-                    s[indices],
-                    a[indices][:, :-1],
-                )
-                loss_sc = F.mse_loss(out, torch.ones_like(out))
-                self.optimizer_sc.zero_grad()
-                loss_sc.backward()
-                self.optimizer_sc.step()
+                if self.seq_len > 1:
+                    out = self.sequential_compressor(
+                        s[indices][:, :-1],
+                        r[indices][:, :-1],
+                        a[indices][:, :-1],
+                    )
+                    loss_sc = F.mse_loss(out, torch.ones_like(out))
+                    self.optimizer_sc.zero_grad()
+                    loss_sc.backward()
+                    self.optimizer_sc.step()
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
