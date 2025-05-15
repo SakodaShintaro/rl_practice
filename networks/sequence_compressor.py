@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from diffusers.models import AutoencoderKL
 
-from .backbone import AE, BaseCNN
+from .backbone import AE
 from .diffusion_policy import TimestepEmbedder
 
 """
@@ -24,7 +25,7 @@ class SequenceCompressor(nn.Module):
         self.reward_encoder = TimestepEmbedder(self.hidden_dim)
 
         # 状態(画像)エンコーダー
-        self.state_encoder = BaseCNN(in_channels=3)
+        self.state_encoder = AE()
         self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
 
         # 行動エンコーダー
@@ -53,8 +54,8 @@ class SequenceCompressor(nn.Module):
         Args:
             rewards (torch.Tensor): 過去の報酬シーケンス (batch_size, seq_len, reward_dim)
             states (torch.Tensor): 過去の状態(画像)シーケンス (batch_size, seq_len, C, H, W)
-            actions (torch.Tensor): 過去の行動シーケンス (batch_size, seq_len, action_dim)
-        actionの末尾はdummy
+            actions (torch.Tensor): 過去の行動シーケンス (batch_size, seq_len - 1, action_dim)
+        actionだけはこの後に方策を出して生成するのでseq_len - 1
 
         Returns:
             torch.Tensor: 圧縮表現 (batch_size, hidden_dim)
@@ -68,20 +69,18 @@ class SequenceCompressor(nn.Module):
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
         with torch.no_grad():
             states_flat = states.reshape(-1, *states.shape[2:])
-
-            # AEを使う場合
-            # state_embeds = self.state_encoder.encode(
-            #     states_flat
-            # )  # (batch_size * seq_len, 4, 12, 12)
-            # state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
-            # state_embeds = self.state_encoder_linear(state_embeds)
-
-            # BaseCNNを使う場合
-            state_embeds = self.state_encoder(states_flat)  # (batch_size * seq_len, 256)
+            state_embeds = self.state_encoder.encode(
+                states_flat
+            )  # (batch_size * seq_len, 4, 12, 12)
             state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
+            state_embeds = self.state_encoder_linear(state_embeds)
 
-        # 行動をエンコード (batch_size, seq_len, action_dim) -> (batch_size, seq_len, hidden_dim)
+        # 行動をエンコード (batch_size, seq_len - 1, action_dim) -> (batch_size, seq_len - 1, hidden_dim)
         action_embeds = self.action_encoder(actions)
+        action_embeds = torch.cat(
+            (action_embeds, torch.zeros(batch_size, 1, self.hidden_dim).to(actions.device)),
+            dim=1,
+        )  # 連結するためにseq_lenを揃える (batch_size, seq_len, hidden_dim)
 
         # エンコードされた報酬、状態、行動を結合
         x = torch.stack((rewards_embeds, state_embeds, action_embeds), dim=2)
