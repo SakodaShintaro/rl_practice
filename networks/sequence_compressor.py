@@ -1,16 +1,15 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .backbone import AE, BaseCNN
 from .diffusion_policy import TimestepEmbedder
 
 """
-観測 o_t
 報酬 r_t
+観測 o_t
 行動 a_t
 の系列を圧縮するためのTransformerベースのネットワーク
-o_t, r_t, a_tはそれぞれ同じ次元(HIDDEN_DIM)に変換される
+r_t, o_t, a_tはそれぞれ同じ次元(HIDDEN_DIM)に変換される
 """
 
 

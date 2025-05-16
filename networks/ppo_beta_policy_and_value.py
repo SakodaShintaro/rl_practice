@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from torch.distributions import Beta
 
-from .backbone import BaseCNN
 from .sequence_compressor import SequenceCompressor
 
 
@@ -10,7 +9,6 @@ class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, in_channels: int, action_dim: int) -> None:
         super().__init__()
         self.sequential_compressor = SequenceCompressor(seq_len=1)
-        self.cnn_base = BaseCNN(in_channels)
         self.v = nn.Sequential(nn.Linear(256, 100), nn.ReLU(), nn.Linear(100, 1))
         self.fc = nn.Sequential(nn.Linear(256, 100), nn.ReLU())
         self.alpha_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
