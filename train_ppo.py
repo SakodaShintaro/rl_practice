@@ -97,9 +97,28 @@ class Agent:
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
 
-    def select_action(self, state: np.ndarray) -> tuple:
+        self.r_list = []
+        self.s_list = []
+        self.a_list = []
+
+    def select_action(self, reward: float, state: np.ndarray) -> tuple:
+        reward = torch.from_numpy(np.array(reward)).to(device).unsqueeze(0)
         state = torch.from_numpy(state).to(device).unsqueeze(0)
-        action, a_logp, value = self.net.get_action_and_value(state)
+        self.r_list.append(reward)
+        self.r_list = self.r_list[-self.seq_len :]
+        self.s_list.append(state)
+        self.s_list = self.s_list[-self.seq_len :]
+
+        curr_r = torch.cat(self.r_list, dim=0).unsqueeze(0).unsqueeze(-1)
+        curr_s = torch.cat(self.s_list, dim=0).unsqueeze(0)
+        a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=device)]
+        curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
+
+        action, a_logp, value = self.net.get_action_and_value(curr_r, curr_s, curr_a)
+        self.a_list.append(action)
+        self.a_list = self.a_list[-self.seq_len :]
+        self.a_list = self.a_list[1:]
+
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
         value = value.item()
@@ -136,12 +155,18 @@ class Agent:
             for indices in SequentialBatchSampler(
                 self.buffer_capacity - 1,
                 self.batch_size,
-                k_frames=self.seq_len + 1,
+                k_frames=self.seq_len,
                 drop_last=False,
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
-                a_logp, value = self.net.get_action_log_p_and_value(s[index], a[index])
+                curr_action = a[indices][:, :-1]
+                dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=device)
+                curr_action = torch.cat((curr_action, dummy_action), dim=1)
+
+                a_logp, value = self.net.get_action_log_p_and_value(
+                    r[indices], s[indices], curr_action, a[index]
+                )
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
                 surr1 = ratio * adv[index]
@@ -196,12 +221,13 @@ if __name__ == "__main__":
     log_step = []
     score_list = []
     global_step = 0
+    reward = 0.0
     for i_ep in range(100000):
         state, _ = env.reset()
 
         while True:
             global_step += 1
-            action, a_logp, value = agent.select_action(state)
+            action, a_logp, value = agent.select_action(reward, state)
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )

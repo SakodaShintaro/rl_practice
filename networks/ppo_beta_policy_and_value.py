@@ -16,33 +16,28 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.alpha_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
         self.beta_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        # x.shape = (batch_size, 3, 96, 96)
-        x = self.cnn_base(x)
+    def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
+        x = self.sequential_compressor(r_seq, s_seq, a_seq)
         x = x.view(-1, 256)
-        return x
-
-    def head(self, x: torch.Tensor) -> torch.Tensor:
         v = self.v(x)
         x = self.fc(x)
         alpha = self.alpha_head(x) + 1
         beta = self.beta_head(x) + 1
         return (alpha, beta), v
 
-    def forward(self, x: torch.Tensor) -> tuple:
-        # x.shape = (batch_size, 3, 96, 96)
-        x = self.encode(x)
-        return self.head(x)
-
-    def get_action_log_p_and_value(self, s: torch.Tensor, a: torch.Tensor) -> tuple:
-        (alpha, beta), v = self.forward(s)
+    def get_action_log_p_and_value(
+        self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor, a: torch.Tensor
+    ) -> tuple:
+        (alpha, beta), v = self.forward(r_seq, s_seq, a_seq)
         dist = Beta(alpha, beta)
         a_logp = dist.log_prob(a).sum(dim=1, keepdim=True)
         return a_logp, v
 
     @torch.inference_mode()
-    def get_action_and_value(self, x: torch.Tensor) -> tuple:
-        (alpha, beta), v = self.forward(x)
+    def get_action_and_value(
+        self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor
+    ) -> tuple:
+        (alpha, beta), v = self.forward(r_seq, s_seq, a_seq)
         dist = Beta(alpha, beta)
         action = dist.sample()
         a_logp = dist.log_prob(action).sum(dim=1)

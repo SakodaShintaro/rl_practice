@@ -66,19 +66,18 @@ class SequenceCompressor(nn.Module):
         rewards_embeds = rewards_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
-        with torch.no_grad():
-            states_flat = states.reshape(-1, *states.shape[2:])
+        states_flat = states.reshape(-1, *states.shape[2:])
 
-            # AEを使う場合
-            # state_embeds = self.state_encoder.encode(
-            #     states_flat
-            # )  # (batch_size * seq_len, 4, 12, 12)
-            # state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
-            # state_embeds = self.state_encoder_linear(state_embeds)
+        # AEを使う場合
+        # state_embeds = self.state_encoder.encode(
+        #     states_flat
+        # )  # (batch_size * seq_len, 4, 12, 12)
+        # state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
+        # state_embeds = self.state_encoder_linear(state_embeds)
 
-            # BaseCNNを使う場合
-            state_embeds = self.state_encoder(states_flat)  # (batch_size * seq_len, 256)
-            state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
+        # BaseCNNを使う場合
+        state_embeds = self.state_encoder(states_flat)  # (batch_size * seq_len, 256)
+        state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
 
         # 行動をエンコード (batch_size, seq_len, action_dim) -> (batch_size, seq_len, hidden_dim)
         action_embeds = self.action_encoder(actions)
@@ -90,17 +89,18 @@ class SequenceCompressor(nn.Module):
         x = x[:, :-1]  # dummyのactionを削除 (batch_size, seq_len * 3 - 1, hidden_dim)
 
         # Positional Encodingを追加
-        x += self.pos_embedding
+        # x += self.pos_embedding
 
         # Transformer Encoderに通す
-        transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
+        # transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
+        transformer_output = x
 
         # 最後のトークンの出力を圧縮表現とする
         compressed_representation = transformer_output[:, -1, :]  # (batch_size, hidden_dim)
 
         # 出力層を通す
-        compressed_representation = self.norm(compressed_representation)
-        compressed_representation = F.relu(compressed_representation)
-        compressed_representation = self.output_layer(compressed_representation)
+        # compressed_representation = self.norm(compressed_representation)
+        # compressed_representation = F.relu(compressed_representation)
+        # compressed_representation = self.output_layer(compressed_representation)
 
         return compressed_representation
