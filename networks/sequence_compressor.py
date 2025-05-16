@@ -39,6 +39,8 @@ class SequenceCompressor(nn.Module):
             dim_feedforward=self.hidden_dim * 4,
             batch_first=True,
             dropout=0.0,
+            norm_first=True,
+            bias=False,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
 
