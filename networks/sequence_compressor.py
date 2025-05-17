@@ -1,5 +1,9 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn import Dropout, LayerNorm, Linear, Module, MultiheadAttention
 
 from .backbone import AE, BaseCNN
 from .diffusion_policy import TimestepEmbedder
@@ -11,6 +15,131 @@ from .diffusion_policy import TimestepEmbedder
 の系列を圧縮するためのTransformerベースのネットワーク
 r_t, o_t, a_tはそれぞれ同じ次元(HIDDEN_DIM)に変換される
 """
+
+
+class TransformerEncoderLayer(Module):
+    __constants__ = ["norm_first"]
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        layer_norm_eps: float = 1e-5,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.self_attn = MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            bias=bias,
+            batch_first=batch_first,
+            **factory_kwargs,
+        )
+        # Implementation of Feedforward model
+        self.linear1 = Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)
+        self.dropout = Dropout(dropout)
+        self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
+
+        self.norm_first = norm_first
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.dropout1 = Dropout(dropout)
+        self.dropout2 = Dropout(dropout)
+        self.activation_relu_or_gelu = 1
+        self.activation = F.relu
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        if not hasattr(self, "activation"):
+            self.activation = F.relu
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        r"""Pass the input through the encoder layer.
+
+        Args:
+            src: the sequence to the encoder layer (required).
+            src_mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as ``src mask``.
+                Default: ``False``.
+                Warning:
+                ``is_causal`` provides a hint that ``src_mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+
+        Shape:
+            see the docs in :class:`~torch.nn.Transformer`.
+        """
+        src_key_padding_mask = F._canonical_mask(
+            mask=src_key_padding_mask,
+            mask_name="src_key_padding_mask",
+            other_type=F._none_or_dtype(src_mask),
+            other_name="src_mask",
+            target_type=src.dtype,
+        )
+
+        src_mask = F._canonical_mask(
+            mask=src_mask,
+            mask_name="src_mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
+        )
+
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
+        x = src
+        if self.norm_first:
+            x = x + 0.0 * self._sa_block(
+                self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal
+            )
+            x = x + 0.0 * self._ff_block(self.norm2(x))
+        else:
+            x = self.norm1(
+                x + self._sa_block(x, src_mask, src_key_padding_mask, is_causal=is_causal)
+            )
+            x = self.norm2(x + self._ff_block(x))
+
+        return x
+
+    # self-attention block
+    def _sa_block(
+        self,
+        x: torch.Tensor,
+        attn_mask: Optional[torch.Tensor],
+        key_padding_mask: Optional[torch.Tensor],
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        x = self.self_attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+            is_causal=is_causal,
+        )[0]
+        return self.dropout1(x)
+
+    # feed forward block
+    def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout2(x)
 
 
 class SequenceCompressor(nn.Module):
@@ -33,7 +162,7 @@ class SequenceCompressor(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, seq_len * 3 - 1, self.hidden_dim))
 
         # Transformer Encoder
-        encoder_layer = nn.TransformerEncoderLayer(
+        encoder_layer = TransformerEncoderLayer(
             d_model=self.hidden_dim,
             nhead=8,
             dim_feedforward=self.hidden_dim * 4,
@@ -94,8 +223,7 @@ class SequenceCompressor(nn.Module):
         x += self.pos_embedding
 
         # Transformer Encoderに通す
-        # transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
-        transformer_output = x
+        transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
 
         # 最後のトークンの出力を圧縮表現とする
         compressed_representation = transformer_output[:, -1, :]  # (batch_size, hidden_dim)
