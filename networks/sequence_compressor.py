@@ -27,7 +27,6 @@ class TransformerEncoderLayer(Module):
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
         layer_norm_eps: float = 1e-5,
-        batch_first: bool = False,
         device=None,
         dtype=None,
     ) -> None:
@@ -39,7 +38,7 @@ class TransformerEncoderLayer(Module):
             nhead,
             dropout=dropout,
             bias=bias,
-            batch_first=batch_first,
+            batch_first=True,
             **factory_kwargs,
         )
         # Implementation of Feedforward model
@@ -101,7 +100,7 @@ class TransformerEncoderLayer(Module):
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
-        coeff = 1e-8
+        coeff = 1e-7
         x = src
         x = x + coeff * self._sa_block(
             self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal
@@ -158,7 +157,6 @@ class SequenceCompressor(nn.Module):
             d_model=self.hidden_dim,
             nhead=8,
             dim_feedforward=self.hidden_dim * 4,
-            batch_first=True,
             dropout=0.0,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
