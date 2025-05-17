@@ -25,11 +25,10 @@ class TransformerEncoderLayer(Module):
         d_model: int,
         nhead: int,
         dim_feedforward: int = 2048,
-        dropout: float = 0.1,
-        layer_norm_eps: float = 1e-5,
         device=None,
         dtype=None,
     ) -> None:
+        dropout = 0.0
         bias = False
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -46,6 +45,7 @@ class TransformerEncoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
+        layer_norm_eps: float = 1e-5
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
@@ -100,7 +100,7 @@ class TransformerEncoderLayer(Module):
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
-        coeff = 1e-7
+        coeff = 1e-6
         x = src
         x = x + coeff * self._sa_block(
             self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal
@@ -157,7 +157,6 @@ class SequenceCompressor(nn.Module):
             d_model=self.hidden_dim,
             nhead=8,
             dim_feedforward=self.hidden_dim * 4,
-            dropout=0.0,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
 
