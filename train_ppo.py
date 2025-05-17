@@ -74,7 +74,7 @@ class Agent:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
         self.training_step = 0
-        self.net = PpoBetaPolicyAndValue(3, 3).to(device)
+        self.net = PpoBetaPolicyAndValue(3).to(device)
         self.buffer = np.empty(
             self.buffer_capacity,
             dtype=np.dtype(

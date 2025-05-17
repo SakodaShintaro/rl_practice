@@ -6,7 +6,7 @@ from .sequence_compressor import SequenceCompressor
 
 
 class PpoBetaPolicyAndValue(nn.Module):
-    def __init__(self, in_channels: int, action_dim: int) -> None:
+    def __init__(self, action_dim: int) -> None:
         super().__init__()
         self.sequential_compressor = SequenceCompressor(seq_len=1)
         self.v = nn.Sequential(nn.Linear(256, 100), nn.ReLU(), nn.Linear(100, 1))
