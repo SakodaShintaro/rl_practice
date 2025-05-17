@@ -9,14 +9,16 @@ class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int) -> None:
         super().__init__()
         self.sequential_compressor = SequenceCompressor(seq_len=1)
-        self.v = nn.Sequential(nn.Linear(256, 100), nn.ReLU(), nn.Linear(100, 1))
-        self.fc = nn.Sequential(nn.Linear(256, 100), nn.ReLU())
-        self.alpha_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
-        self.beta_head = nn.Sequential(nn.Linear(100, action_dim), nn.Softplus())
+        rep_dim = 256
+        hidden_dim = 100
+        self.v = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1))
+        self.fc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
+        self.alpha_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
+        self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
         x = self.sequential_compressor(r_seq, s_seq, a_seq)
-        x = x.view(-1, 256)
+        x = x.flatten(start_dim=1)
         v = self.v(x)
         x = self.fc(x)
         alpha = self.alpha_head(x) + 1
