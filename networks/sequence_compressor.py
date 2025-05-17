@@ -91,7 +91,7 @@ class SequenceCompressor(nn.Module):
         x = x[:, :-1]  # dummyのactionを削除 (batch_size, seq_len * 3 - 1, hidden_dim)
 
         # Positional Encodingを追加
-        # x += self.pos_embedding
+        x += self.pos_embedding
 
         # Transformer Encoderに通す
         # transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
