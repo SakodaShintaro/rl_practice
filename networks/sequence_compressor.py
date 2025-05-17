@@ -28,10 +28,10 @@ class TransformerEncoderLayer(Module):
         dropout: float = 0.1,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
-        bias: bool = True,
         device=None,
         dtype=None,
     ) -> None:
+        bias = False
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.self_attn = MultiheadAttention(
@@ -101,7 +101,7 @@ class TransformerEncoderLayer(Module):
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
-        coeff = 1e-9
+        coeff = 1e-8
         x = src
         x = x + coeff * self._sa_block(
             self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal
@@ -160,7 +160,6 @@ class SequenceCompressor(nn.Module):
             dim_feedforward=self.hidden_dim * 4,
             batch_first=True,
             dropout=0.0,
-            bias=False,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
 
