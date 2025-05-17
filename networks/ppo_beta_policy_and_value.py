@@ -11,7 +11,10 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.sequential_compressor = SequenceCompressor(seq_len=1)
         rep_dim = 256
         hidden_dim = 100
-        self.v = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1))
+        bin_num = 51
+        self.v = nn.Sequential(
+            nn.Linear(rep_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, bin_num)
+        )
         self.fc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
         self.alpha_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
         self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())

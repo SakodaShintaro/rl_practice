@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
+from hl_gauss_pytorch import HLGaussLoss
 from torch import nn, optim
 
 import wandb
@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--seq_len", type=int, default=1)
+    parser.add_argument("--value_bin_num", type=int, default=51)
     return parser.parse_args()
 
 
@@ -70,9 +71,19 @@ class Agent:
     batch_size = 128
     gamma = 0.99
 
-    def __init__(self, buffer_capacity, seq_len) -> None:
+    def __init__(self, buffer_capacity, seq_len, value_bin_num) -> None:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
+        self.value_bin_num = value_bin_num
+        self.value_min = -50
+        self.value_max = 150
+        self.hl_gauss_loss = HLGaussLoss(
+            min_value=self.value_min,
+            max_value=self.value_max,
+            num_bins=self.value_bin_num,
+            clamp_to_range=True,
+        ).to(device)
+
         self.training_step = 0
         self.net = PpoBetaPolicyAndValue(3).to(device)
         self.buffer = np.empty(
@@ -109,15 +120,18 @@ class Agent:
         a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=device)]
         curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
 
-        action, a_logp, value = self.net.get_action_and_value(curr_r, curr_s, curr_a)
+        action, a_logp, value_logits = self.net.get_action_and_value(curr_r, curr_s, curr_a)
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
         self.a_list = self.a_list[1:]
 
+        value_scalar = self.hl_gauss_loss(value_logits)
+
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
-        value = value.item()
-        return action, a_logp, value
+        value_scalar = value_scalar.item()
+
+        return action, a_logp, value_scalar
 
     def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
@@ -159,7 +173,7 @@ class Agent:
                 dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=device)
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
 
-                a_logp, value = self.net.get_action_log_p_and_value(
+                a_logp, value_logits = self.net.get_action_log_p_and_value(
                     r[indices], s[indices], curr_action, a[index]
                 )
                 ratio = torch.exp(a_logp - old_a_logp[index])
@@ -169,7 +183,9 @@ class Agent:
                     torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv[index]
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
-                value_loss = F.smooth_l1_loss(value, target_v[index])
+
+                value_loss = self.hl_gauss_loss(value_logits, target_v[index].squeeze(1))
+
                 loss = action_loss + 2.0 * value_loss
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
@@ -207,7 +223,7 @@ if __name__ == "__main__":
     if use_cuda:
         torch.cuda.manual_seed(args.seed)
 
-    agent = Agent(args.buffer_capacity, args.seq_len)
+    agent = Agent(args.buffer_capacity, args.seq_len, args.value_bin_num)
     env = make_env(video_dir=video_dir)
 
     wandb.init(project="cleanRL", config=vars(args), name="PPO", monitor_gym=True, save_code=True)
