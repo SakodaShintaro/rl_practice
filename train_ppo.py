@@ -14,7 +14,6 @@ from torch import nn, optim
 
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
-from networks.ppo_tanh_policy_and_value import PpoTanhPolicyAndValue
 from wrappers import make_env
 
 
@@ -75,11 +74,7 @@ class Agent:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
         self.training_step = 0
-        network_type = "beta"
-        self.net = {
-            "beta": PpoBetaPolicyAndValue(3, 3).to(device),
-            "tanh": PpoTanhPolicyAndValue(3, 3).to(device),
-        }[network_type]
+        self.net = PpoBetaPolicyAndValue(3, 3).to(device)
         self.buffer = np.empty(
             self.buffer_capacity,
             dtype=np.dtype(
