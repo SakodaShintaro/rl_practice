@@ -85,7 +85,7 @@ class Agent:
         ).to(device)
 
         self.training_step = 0
-        self.net = PpoBetaPolicyAndValue(3).to(device)
+        self.net = PpoBetaPolicyAndValue(3, value_bin_num).to(device)
         self.buffer = np.empty(
             self.buffer_capacity,
             dtype=np.dtype(
