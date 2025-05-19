@@ -184,9 +184,16 @@ class Agent:
             ave_action_loss_list.append(ave_action_loss)
             ave_value_loss_list.append(ave_value_loss)
         result_dict = {}
+        ratio_list = []
         for i in range(len(ave_action_loss_list)):
             result_dict[f"ppo/action_loss_{i}"] = ave_action_loss_list[i]
             result_dict[f"ppo/value_loss_{i}"] = ave_value_loss_list[i]
+            ratio = ave_action_loss_list[i] / ave_value_loss_list[i]
+            result_dict[f"ppo/ratio_{i}"] = ratio
+            ratio_list.append(ratio)
+        result_dict["ppo/average_action_loss"] = np.mean(ave_action_loss_list)
+        result_dict["ppo/average_value_loss"] = np.mean(ave_value_loss_list)
+        result_dict["ppo/average_ratio"] = np.mean(ratio_list)
         return result_dict
 
 
@@ -235,17 +242,24 @@ if __name__ == "__main__":
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
+            data_dict = {
+                "global_step": global_step,
+                "a_logp": a_logp,
+                "value": value,
+                "reward": reward,
+            }
+
             if agent.store((state, action, a_logp, reward, value, done)):
                 print("updating", end="\r")
-                data_dict = agent.update()
-                data_dict["global_step"] = global_step
-                data_dict["a_logp"] = a_logp
-                data_dict["value"] = value
+                train_result = agent.update()
+                data_dict.update(train_result)
                 wandb.log(data_dict)
                 fixed_data = {k.replace("ppo/", ""): v for k, v in data_dict.items()}
                 log_step.append(fixed_data)
                 log_step_df = pd.DataFrame(log_step)
                 log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
+            elif global_step % 100 == 0:
+                wandb.log(data_dict)
 
             state = state_
             if done or die:
