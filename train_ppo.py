@@ -65,7 +65,8 @@ class Agent:
     """
 
     max_grad_norm = 0.5
-    clip_param = 0.1  # epsilon in clipped loss
+    clip_param_policy = 0.1
+    clip_param_value = 0.2
     ppo_epoch = 10
     batch_size = 128
     gamma = 0.99
@@ -166,10 +167,18 @@ class Agent:
 
                 surr1 = ratio * adv[index]
                 surr2 = (
-                    torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv[index]
+                    torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
+                    * adv[index]
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
-                value_loss = F.smooth_l1_loss(value, target_v[index])
+
+                value_clipped = torch.clamp(
+                    value, v[index] - self.clip_param_value, v[index] + self.clip_param_value
+                )
+                value_loss_unclipped = F.smooth_l1_loss(value, target_v[index])
+                value_loss_clipped = F.smooth_l1_loss(value_clipped, target_v[index])
+                value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
+
                 loss = action_loss + 2.0 * value_loss
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
