@@ -82,6 +82,7 @@ class Agent:
             max_value=self.value_max,
             num_bins=self.value_bin_num,
             clamp_to_range=True,
+            sigma_to_bin_ratio=0.75,
         ).to(device)
 
         self.training_step = 0
@@ -186,7 +187,7 @@ class Agent:
 
                 value_loss = self.hl_gauss_loss(value_logits, target_v[index].squeeze(1))
 
-                loss = action_loss + 2.0 * value_loss
+                loss = action_loss + value_loss
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
 
