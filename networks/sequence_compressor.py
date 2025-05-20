@@ -210,7 +210,8 @@ class SequenceCompressor(nn.Module):
         x += self.pos_embedding
 
         # Transformer Encoderに通す
-        transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
+        # transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
+        transformer_output = x
 
         # 最後のトークンの出力を圧縮表現とする
         compressed_representation = transformer_output[:, -1, :]  # (batch_size, hidden_dim)
