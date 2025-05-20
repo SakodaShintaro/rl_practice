@@ -1,8 +1,36 @@
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Beta
 
 from .sequence_compressor import SequenceCompressor
+
+
+class ReluSquared(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x.sign() * F.relu(x) ** 2
+
+
+class SimBaBlock(nn.Module):
+    """https://github.com/SonyResearch/simba/blob/master/scale_rl/networks/layers.py"""
+
+    def __init__(self, input_dim: int):
+        super().__init__()
+        dim_hidden = input_dim * 4
+        self.layer = nn.Sequential(
+            nn.RMSNorm(input_dim),
+            nn.Linear(input_dim, dim_hidden),
+            ReluSquared(),
+            nn.Linear(dim_hidden, input_dim),
+        )
+
+    def forward(self, x):
+        res = x
+        x = self.layer(x)
+        return x + res
 
 
 class PpoBetaPolicyAndValue(nn.Module):
@@ -10,11 +38,10 @@ class PpoBetaPolicyAndValue(nn.Module):
         super().__init__()
         self.sequential_compressor = SequenceCompressor(seq_len=1)
         rep_dim = 256
-        hidden_dim = 100
-        self.v = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1))
-        self.fc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
-        self.alpha_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
-        self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
+        self.v = nn.Sequential(SimBaBlock(rep_dim), nn.Linear(rep_dim, 1))
+        self.fc = nn.Sequential(SimBaBlock(rep_dim))
+        self.alpha_head = nn.Sequential(nn.Linear(rep_dim, action_dim), nn.Softplus())
+        self.beta_head = nn.Sequential(nn.Linear(rep_dim, action_dim), nn.Softplus())
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
         x = self.sequential_compressor(r_seq, s_seq, a_seq)
