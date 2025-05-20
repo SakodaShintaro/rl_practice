@@ -23,12 +23,12 @@ class PpoBetaPolicyAndValue(nn.Module):
         x = self.fc(x)
         alpha = self.alpha_head(x) + 1
         beta = self.beta_head(x) + 1
-        return (alpha, beta), v
+        return (alpha, beta), v, x
 
     def get_action_log_p_and_value(
         self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor, a: torch.Tensor
     ) -> tuple:
-        (alpha, beta), v = self.forward(r_seq, s_seq, a_seq)
+        (alpha, beta), v, _ = self.forward(r_seq, s_seq, a_seq)
         dist = Beta(alpha, beta)
         a_logp = dist.log_prob(a).sum(dim=1, keepdim=True)
         return a_logp, v
@@ -37,8 +37,13 @@ class PpoBetaPolicyAndValue(nn.Module):
     def get_action_and_value(
         self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor
     ) -> tuple:
-        (alpha, beta), v = self.forward(r_seq, s_seq, a_seq)
+        (alpha, beta), v, x = self.forward(r_seq, s_seq, a_seq)
         dist = Beta(alpha, beta)
         action = dist.sample()
         a_logp = dist.log_prob(action).sum(dim=1)
-        return action, a_logp, v
+        info_dict = {
+            "norm_x": x.norm(dim=1),
+            "mean_x": x.mean(dim=1),
+            "std_x": x.std(dim=1),
+        }
+        return action, a_logp, v, info_dict

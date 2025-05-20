@@ -110,7 +110,7 @@ class Agent:
         a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=device)]
         curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
 
-        action, a_logp, value = self.net.get_action_and_value(curr_r, curr_s, curr_a)
+        action, a_logp, value, info_dict = self.net.get_action_and_value(curr_r, curr_s, curr_a)
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
         self.a_list = self.a_list[1:]
@@ -118,7 +118,7 @@ class Agent:
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
         value = value.item()
-        return action, a_logp, value
+        return action, a_logp, value, info_dict
 
     def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
@@ -238,7 +238,7 @@ if __name__ == "__main__":
 
         while True:
             global_step += 1
-            action, a_logp, value = agent.select_action(reward, state)
+            action, a_logp, value, info_dict = agent.select_action(reward, state)
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
@@ -256,6 +256,9 @@ if __name__ == "__main__":
                 "a_logp": a_logp,
                 "value": value,
                 "reward": reward,
+                "norm_x": info_dict["norm_x"].mean().item(),
+                "mean_x": info_dict["mean_x"].mean().item(),
+                "std_x": info_dict["std_x"].mean().item(),
             }
 
             if agent.store((state, action, a_logp, reward, value, done)):
