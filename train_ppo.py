@@ -243,6 +243,7 @@ if __name__ == "__main__":
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
             done = bool(done or die)
+            normed_reward = reward / 10.0
 
             # render
             if args.render:
@@ -256,12 +257,13 @@ if __name__ == "__main__":
                 "a_logp": a_logp,
                 "value": value,
                 "reward": reward,
+                "normed_reward": normed_reward,
                 "norm_x": info_dict["norm_x"].mean().item(),
                 "mean_x": info_dict["mean_x"].mean().item(),
                 "std_x": info_dict["std_x"].mean().item(),
             }
 
-            if agent.store((state, action, a_logp, reward, value, done)):
+            if agent.store((state, action, a_logp, normed_reward, value, done)):
                 print("updating", end="\r")
                 train_result = agent.update()
                 data_dict.update(train_result)
