@@ -271,11 +271,15 @@ if __name__ == "__main__":
                 print("updating", end="\r")
                 train_result = agent.update()
                 data_dict.update(train_result)
-                wandb.log(data_dict)
                 fixed_data = {k.replace("ppo/", ""): v for k, v in data_dict.items()}
                 log_step.append(fixed_data)
                 log_step_df = pd.DataFrame(log_step)
                 log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
+
+                for name, p in agent.net.named_parameters():
+                    data_dict[f"params/{name}"] = p.norm().item()
+
+                wandb.log(data_dict)
             elif global_step % 100 == 0:
                 wandb.log(data_dict)
 
