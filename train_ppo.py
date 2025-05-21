@@ -66,7 +66,8 @@ class Agent:
     """
 
     max_grad_norm = 0.5
-    clip_param = 0.1  # epsilon in clipped loss
+    clip_param_policy = 0.1
+    clip_param_value = 1.0
     ppo_epoch = 10
     batch_size = 128
     gamma = 0.99
@@ -121,7 +122,9 @@ class Agent:
         a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=device)]
         curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
 
-        action, a_logp, value_logits = self.net.get_action_and_value(curr_r, curr_s, curr_a)
+        action, a_logp, value_logits, activation_dict = self.net.get_action_and_value(
+            curr_r, curr_s, curr_a
+        )
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
         self.a_list = self.a_list[1:]
@@ -132,7 +135,7 @@ class Agent:
         a_logp = a_logp.item()
         value_scalar = value_scalar.item()
 
-        return action, a_logp, value_scalar
+        return action, a_logp, value_scalar, activation_dict
 
     def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
@@ -181,13 +184,15 @@ class Agent:
 
                 surr1 = ratio * adv[index]
                 surr2 = (
-                    torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv[index]
+                    torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
+                    * adv[index]
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
 
                 value_loss = self.hl_gauss_loss(value_logits, target_v[index].squeeze(1))
 
                 loss = action_loss + value_loss
+
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
 
@@ -201,9 +206,16 @@ class Agent:
             ave_action_loss_list.append(ave_action_loss)
             ave_value_loss_list.append(ave_value_loss)
         result_dict = {}
+        ratio_list = []
         for i in range(len(ave_action_loss_list)):
             result_dict[f"ppo/action_loss_{i}"] = ave_action_loss_list[i]
             result_dict[f"ppo/value_loss_{i}"] = ave_value_loss_list[i]
+            ratio = ave_action_loss_list[i] / ave_value_loss_list[i]
+            result_dict[f"ppo/ratio_{i}"] = ratio
+            ratio_list.append(ratio)
+        result_dict["ppo/average_action_loss"] = np.mean(ave_action_loss_list)
+        result_dict["ppo/average_value_loss"] = np.mean(ave_value_loss_list)
+        result_dict["ppo/average_ratio"] = np.mean(ratio_list)
         return result_dict
 
 
@@ -239,11 +251,12 @@ if __name__ == "__main__":
 
         while True:
             global_step += 1
-            action, a_logp, value = agent.select_action(reward, state)
+            action, a_logp, value, activation_dict = agent.select_action(reward, state)
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
             done = bool(done or die)
+            normed_reward = reward / 1.0
 
             # render
             if args.render:
@@ -252,17 +265,34 @@ if __name__ == "__main__":
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
-            if agent.store((state, action, a_logp, reward, value, done)):
+            data_dict = {
+                "global_step": global_step,
+                "a_logp": a_logp,
+                "value": value,
+                "reward": reward,
+                "normed_reward": normed_reward,
+            }
+
+            for key, value_tensor in activation_dict.items():
+                data_dict[f"activation/{key}_norm"] = value_tensor.norm(dim=1).mean().item()
+                data_dict[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
+                data_dict[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
+
+            if agent.store((state, action, a_logp, normed_reward, value, done)):
                 print("updating", end="\r")
-                data_dict = agent.update()
-                data_dict["global_step"] = global_step
-                data_dict["a_logp"] = a_logp
-                data_dict["value"] = value
-                wandb.log(data_dict)
+                train_result = agent.update()
+                data_dict.update(train_result)
                 fixed_data = {k.replace("ppo/", ""): v for k, v in data_dict.items()}
                 log_step.append(fixed_data)
                 log_step_df = pd.DataFrame(log_step)
                 log_step_df.to_csv(result_dir / "log_step.tsv", sep="\t", index=False)
+
+                for name, p in agent.net.named_parameters():
+                    data_dict[f"params/{name}"] = p.norm().item()
+
+                wandb.log(data_dict)
+            elif global_step % 100 == 0:
+                wandb.log(data_dict)
 
             state = state_
             if done or die:
