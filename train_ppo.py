@@ -205,6 +205,8 @@ class Agent:
         result_dict["ppo/average_action_loss"] = np.mean(ave_action_loss_list)
         result_dict["ppo/average_value_loss"] = np.mean(ave_value_loss_list)
         result_dict["ppo/average_ratio"] = np.mean(ratio_list)
+        result_dict["ppo/average_target_v"] = target_v.mean().item()
+        result_dict["ppo/average_adv"] = adv.mean().item()
         return result_dict
 
 
