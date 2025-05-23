@@ -100,12 +100,9 @@ class TransformerEncoderLayer(Module):
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
-        coeff = 1e-6
         x = src
-        x = x + coeff * self._sa_block(
-            self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal
-        )
-        x = x + coeff * self._ff_block(self.norm2(x))
+        x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal)
+        x = x + self._ff_block(self.norm2(x))
         return x
 
     # self-attention block
