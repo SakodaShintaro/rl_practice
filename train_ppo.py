@@ -76,8 +76,8 @@ class Agent:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
         self.value_bin_num = value_bin_num
-        self.value_min = -50
-        self.value_max = 150
+        self.value_min = -150
+        self.value_max = +150
         self.hl_gauss_loss = HLGaussLoss(
             min_value=self.value_min,
             max_value=self.value_max,
