@@ -19,7 +19,7 @@ from wrappers import make_env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--buffer_capacity", type=int, default=2000)
@@ -223,9 +223,12 @@ if __name__ == "__main__":
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    torch.manual_seed(args.seed)
+    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+    torch.manual_seed(seed)
     if use_cuda:
-        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed(seed)
+    with open(result_dir / "seed.txt", "w") as f:
+        f.write(str(seed))
 
     agent = Agent(args.buffer_capacity, args.seq_len)
     env = make_env(video_dir=video_dir)
