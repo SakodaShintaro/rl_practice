@@ -18,8 +18,11 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
-        x = self.sequential_compressor(r_seq, s_seq, a_seq)  # (batch_size, seq_len, hidden_dim)
-        x = x[:, -1]  # Use the last time step representation (batch_size, hidden_dim)
+        # -> (batch_size, seq_len * 3 - 1, hidden_dim)
+        before, after = self.sequential_compressor(r_seq, s_seq, a_seq)
+        x = after[:, -1]  # Use the last time step representation (batch_size, hidden_dim)
+
+        error = (after[:, :-1] - before[:, 1:]) ** 2  # (batch_size, seq_len * 3 - 2, hidden_dim)
 
         value_x = self.value_enc(x)
         v = self.value_head(value_x)
@@ -27,7 +30,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         policy_x = self.policy_enc(x)
         alpha = self.alpha_head(policy_x) + 1
         beta = self.beta_head(policy_x) + 1
-        return (alpha, beta), v, {"x": x, "value_x": value_x, "policy_x": policy_x}
+        return (alpha, beta), v, {"x": x, "value_x": value_x, "policy_x": policy_x, "error": error}
 
     def get_action_log_p_and_value(
         self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor, a: torch.Tensor

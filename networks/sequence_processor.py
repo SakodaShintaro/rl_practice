@@ -156,7 +156,8 @@ class SequenceProcessor(nn.Module):
         actionの末尾はdummy
 
         Returns:
-            torch.Tensor: 変換後の系列表現 (batch_size, seq_len, hidden_dim)
+            torch.Tensor: 変換前の系列表現 (batch_size, seq_len * 3 - 1, hidden_dim)
+            torch.Tensor: 変換後の系列表現 (batch_size, seq_len * 3 - 1, hidden_dim)
         """
         batch_size = states.shape[0]
 
@@ -189,6 +190,7 @@ class SequenceProcessor(nn.Module):
         # Positional Encodingを追加
         x += self.pos_embedding
 
-        # Transformer Encoderに通す
-        return x  # 現状では学習が上手く進まなくなるのでそのまま返す
-        return self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
+        before = x  # (batch_size, seq_len * 3 - 1, hidden_dim)
+        after = self.transformer_encoder(x)  # (batch_size, seq_len * 3 - 1, hidden_dim)
+
+        return before, after
