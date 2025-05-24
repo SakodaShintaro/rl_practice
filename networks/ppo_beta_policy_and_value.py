@@ -2,13 +2,13 @@ import torch
 from torch import nn
 from torch.distributions import Beta
 
-from .sequence_compressor import SequenceCompressor
+from .sequence_compressor import SequenceProcessor
 
 
 class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int, seq_len: int) -> None:
         super().__init__()
-        self.sequential_compressor = SequenceCompressor(seq_len=seq_len)
+        self.sequential_compressor = SequenceProcessor(seq_len=seq_len)
         rep_dim = 256
         hidden_dim = 100
         self.value_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
@@ -18,8 +18,8 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
-        x = self.sequential_compressor(r_seq, s_seq, a_seq)
-        x = x.flatten(start_dim=1)
+        x = self.sequential_compressor(r_seq, s_seq, a_seq)  # (batch_size, seq_len, hidden_dim)
+        x = x[:, -1]  # Use the last time step representation (batch_size, hidden_dim)
 
         value_x = self.value_enc(x)
         v = self.value_head(value_x)

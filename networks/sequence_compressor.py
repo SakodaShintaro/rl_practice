@@ -12,7 +12,7 @@ from .diffusion_policy import TimestepEmbedder
 報酬 r_t
 観測 o_t
 行動 a_t
-の系列を圧縮するためのTransformerベースのネットワーク
+の系列を処理するためのTransformerベースのネットワーク
 r_t, o_t, a_tはそれぞれ同じ次元(HIDDEN_DIM)に変換される
 """
 
@@ -112,7 +112,7 @@ class TransformerEncoderLayer(Module):
         return self.dropout2(x)
 
 
-class SequenceCompressor(nn.Module):
+class SequenceProcessor(nn.Module):
     def __init__(self, seq_len: int):
         super().__init__()
         self.seq_len = seq_len
@@ -144,10 +144,6 @@ class SequenceCompressor(nn.Module):
             dim_feedforward=self.hidden_dim * 4,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
-
-        # 出力層
-        self.norm = nn.LayerNorm(self.hidden_dim)
-        self.output_layer = nn.Linear(self.hidden_dim, self.hidden_dim)
 
     def forward(
         self, rewards: torch.Tensor, states: torch.Tensor, actions: torch.Tensor
@@ -194,15 +190,5 @@ class SequenceCompressor(nn.Module):
         x += self.pos_embedding
 
         # Transformer Encoderに通す
-        # transformer_output = self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
-        transformer_output = x
-
-        # 最後のトークンの出力を圧縮表現とする
-        compressed_representation = transformer_output[:, -1, :]  # (batch_size, hidden_dim)
-
-        # 出力層を通す
-        # compressed_representation = self.norm(compressed_representation)
-        # compressed_representation = F.relu(compressed_representation)
-        # compressed_representation = self.output_layer(compressed_representation)
-
-        return compressed_representation
+        return x  # 現状では学習が上手く進まなくなるのでそのまま返す
+        return self.transformer_encoder(x)  # (batch_size, seq_len, hidden_dim)
