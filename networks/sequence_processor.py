@@ -156,7 +156,7 @@ class SequenceProcessor(nn.Module):
         actionの末尾はdummy
 
         Returns:
-            torch.Tensor: 圧縮表現 (batch_size, hidden_dim)
+            torch.Tensor: 変換後の系列表現 (batch_size, seq_len, hidden_dim)
         """
         batch_size = states.shape[0]
 
