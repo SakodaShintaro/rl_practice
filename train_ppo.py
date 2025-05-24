@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
-    parser.add_argument("--seq_len", type=int, default=1)
+    parser.add_argument("--seq_len", type=int, default=2)
     return parser.parse_args()
 
 
@@ -75,7 +75,7 @@ class Agent:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
         self.training_step = 0
-        self.net = PpoBetaPolicyAndValue(3).to(device)
+        self.net = PpoBetaPolicyAndValue(3, seq_len).to(device)
         self.buffer = np.empty(
             self.buffer_capacity,
             dtype=np.dtype(
@@ -110,12 +110,25 @@ class Agent:
         a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=device)]
         curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
 
+        if curr_r.shape[1] < self.seq_len:
+            padding_size = self.seq_len - curr_r.shape[1]
+            pad_r = torch.zeros(1, padding_size, *curr_r.shape[2:], device=device)
+            pad_s = torch.zeros(1, padding_size, *curr_s.shape[2:], device=device)
+            pad_a = torch.zeros(1, padding_size, *curr_a.shape[2:], device=device)
+            curr_r = torch.cat((pad_r, curr_r), dim=1)
+            curr_s = torch.cat((pad_s, curr_s), dim=1)
+            curr_a = torch.cat((pad_a, curr_a), dim=1)
+        assert curr_r.shape[1] == self.seq_len
+        assert curr_s.shape[1] == self.seq_len
+        assert curr_a.shape[1] == self.seq_len
+
         action, a_logp, value, activation_dict = self.net.get_action_and_value(
             curr_r, curr_s, curr_a
         )
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
-        self.a_list = self.a_list[1:]
+        if len(self.a_list) == self.seq_len:
+            self.a_list = self.a_list[1:]
 
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
