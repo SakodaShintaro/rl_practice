@@ -239,6 +239,9 @@ if __name__ == "__main__":
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
     result_dir.mkdir(parents=True, exist_ok=True)
     video_dir = result_dir / "video"
+    image_dir = result_dir / "image"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    image_save_interval = 1000
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -262,6 +265,10 @@ if __name__ == "__main__":
     for i_ep in range(100000):
         state, _ = env.reset()
 
+        if i_ep % image_save_interval == 0:
+            curr_image_dir = image_dir / f"ep_{i_ep:08d}"
+            curr_image_dir.mkdir(parents=True, exist_ok=True)
+
         while True:
             global_step += 1
             action, a_logp, value, activation_dict = agent.select_action(reward, state)
@@ -272,25 +279,25 @@ if __name__ == "__main__":
             normed_reward = reward / 1.0
 
             # render
+            ae = agent.net.sequential_compressor.state_encoder
+            predicted_s = activation_dict["predicted_s"]
+            predicted_s = predicted_s.view(1, 4, 12, 12)
+            output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
+            obs_to_render = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
+            dec_to_render = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+            concat = cv2.vconcat([obs_to_render, dec_to_render])  # (192, 96, 3)
+            rgb_array = env.render()  # (400, 600, 3)
+            rem = rgb_array.shape[0] - concat.shape[0]
+            concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            concat *= 255
+            concat = np.clip(concat, 0, 255).astype(np.uint8)
+            concat = cv2.hconcat([rgb_array, concat])  # (400, 696, 3)
+            bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
             if args.render:
-                ae = agent.net.sequential_compressor.state_encoder
-                predicted_s = activation_dict["predicted_s"]
-                predicted_s = predicted_s.view(1, 4, 12, 12)
-                output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
-                obs_to_render = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
-                dec_to_render = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
-                concat = cv2.vconcat([obs_to_render, dec_to_render])  # (192, 96, 3)
-                rgb_array = env.render()  # (400, 600, 3)
-                rem = rgb_array.shape[0] - concat.shape[0]
-                concat = cv2.copyMakeBorder(
-                    concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0)
-                )
-                concat *= 255
-                concat = np.clip(concat, 0, 255).astype(np.uint8)
-                concat = cv2.hconcat([rgb_array, concat])  # (400, 696, 3)
-                bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
+            if i_ep % image_save_interval == 0:
+                cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             data_dict = {
                 "global_step": global_step,
