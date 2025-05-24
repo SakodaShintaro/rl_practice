@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.distributions import Beta
 
-from .sequence_compressor import SequenceProcessor
+from .sequence_processor import SequenceProcessor
 
 
 class PpoBetaPolicyAndValue(nn.Module):
