@@ -116,20 +116,20 @@ class SequenceProcessor(nn.Module):
     def __init__(self, seq_len: int):
         super().__init__()
         self.seq_len = seq_len
-        self.hidden_dim = 256
-
-        # 報酬エンコーダー
-        self.reward_encoder = TimestepEmbedder(self.hidden_dim)
 
         # 状態(画像)エンコーダー
         self.encoder_model = "ae"
         if self.encoder_model == "base_cnn":
             self.state_encoder = BaseCNN(in_channels=3)
+            self.hidden_dim = 256
         elif self.encoder_model == "ae":
             self.state_encoder = AE()
-            self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
+            self.hidden_dim = 4 * 12 * 12
         else:
             raise ValueError()
+
+        # 報酬エンコーダー
+        self.reward_encoder = TimestepEmbedder(self.hidden_dim)
 
         # 行動エンコーダー
         self.action_encoder = nn.Linear(3, self.hidden_dim)
@@ -174,7 +174,6 @@ class SequenceProcessor(nn.Module):
                 # (batch_size * seq_len, 4, 12, 12)
                 state_embeds = self.state_encoder.encode(states)
             state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
-            state_embeds = self.state_encoder_linear(state_embeds)
 
         state_embeds = state_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 

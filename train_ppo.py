@@ -273,8 +273,22 @@ if __name__ == "__main__":
 
             # render
             if args.render:
-                rgb_array = env.render()
-                bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+                ae = agent.net.sequential_compressor.state_encoder
+                predicted_s = activation_dict["predicted_s"]
+                predicted_s = predicted_s.view(1, 4, 12, 12)
+                output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
+                obs_to_render = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
+                dec_to_render = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+                concat = cv2.vconcat([obs_to_render, dec_to_render])  # (192, 96, 3)
+                rgb_array = env.render()  # (400, 600, 3)
+                rem = rgb_array.shape[0] - concat.shape[0]
+                concat = cv2.copyMakeBorder(
+                    concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0)
+                )
+                concat *= 255
+                concat = np.clip(concat, 0, 255).astype(np.uint8)
+                concat = cv2.hconcat([rgb_array, concat])  # (400, 696, 3)
+                bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
