@@ -140,7 +140,7 @@ class SequenceCompressor(nn.Module):
         self.reward_encoder = TimestepEmbedder(self.hidden_dim)
 
         # 状態(画像)エンコーダー
-        self.encoder_model = "base_cnn"
+        self.encoder_model = "ae"
         if self.encoder_model == "base_cnn":
             self.state_encoder = BaseCNN(in_channels=3)
         elif self.encoder_model == "ae":
@@ -191,7 +191,9 @@ class SequenceCompressor(nn.Module):
         if self.encoder_model == "base_cnn":
             state_embeds = self.state_encoder(states)  # (batch_size * seq_len, 256)
         elif self.encoder_model == "ae":
-            state_embeds = self.state_encoder.encode(states)  # (batch_size * seq_len, 4, 12, 12)
+            with torch.no_grad():
+                # (batch_size * seq_len, 4, 12, 12)
+                state_embeds = self.state_encoder.encode(states)
             state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
             state_embeds = self.state_encoder_linear(state_embeds)
 
