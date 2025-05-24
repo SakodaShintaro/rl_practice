@@ -140,8 +140,14 @@ class SequenceCompressor(nn.Module):
         self.reward_encoder = TimestepEmbedder(self.hidden_dim)
 
         # 状態(画像)エンコーダー
-        self.state_encoder = BaseCNN(in_channels=3)
-        self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
+        self.encoder_model = "base_cnn"
+        if self.encoder_model == "base_cnn":
+            self.state_encoder = BaseCNN(in_channels=3)
+        elif self.encoder_model == "ae":
+            self.state_encoder = AE()
+            self.state_encoder_linear = nn.Linear(4 * 12 * 12, self.hidden_dim)
+        else:
+            raise ValueError()
 
         # 行動エンコーダー
         self.action_encoder = nn.Linear(3, self.hidden_dim)
@@ -181,18 +187,15 @@ class SequenceCompressor(nn.Module):
         rewards_embeds = rewards_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
-        states_flat = states.reshape(-1, *states.shape[2:])
+        states = states.reshape(-1, *states.shape[2:])
+        if self.encoder_model == "base_cnn":
+            state_embeds = self.state_encoder(states)  # (batch_size * seq_len, 256)
+        elif self.encoder_model == "ae":
+            state_embeds = self.state_encoder.encode(states)  # (batch_size * seq_len, 4, 12, 12)
+            state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
+            state_embeds = self.state_encoder_linear(state_embeds)
 
-        # AEを使う場合
-        # state_embeds = self.state_encoder.encode(
-        #     states_flat
-        # )  # (batch_size * seq_len, 4, 12, 12)
-        # state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
-        # state_embeds = self.state_encoder_linear(state_embeds)
-
-        # BaseCNNを使う場合
-        state_embeds = self.state_encoder(states_flat)  # (batch_size * seq_len, 256)
-        state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
+        state_embeds = state_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 
         # 行動をエンコード (batch_size, seq_len, action_dim) -> (batch_size, seq_len, hidden_dim)
         action_embeds = self.action_encoder(actions)
