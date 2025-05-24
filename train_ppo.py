@@ -160,9 +160,11 @@ class Agent:
 
         ave_action_loss_list = []
         ave_value_loss_list = []
+        ave_pred_s_loss_list = []
         for _ in range(self.ppo_epoch):
             sum_action_loss = 0.0
             sum_value_loss = 0.0
+            sum_pred_s_loss = 0.0
             for indices in SequentialBatchSampler(
                 self.buffer_capacity - 1,
                 self.batch_size,
@@ -203,6 +205,7 @@ class Agent:
                 loss = action_loss + 2.0 * value_loss + pred_loss_s
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
+                sum_pred_s_loss += pred_loss_s.item() * len(index)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -211,18 +214,15 @@ class Agent:
 
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
+            ave_pred_s_loss = sum_pred_s_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
             ave_value_loss_list.append(ave_value_loss)
+            ave_pred_s_loss_list.append(ave_pred_s_loss)
         result_dict = {}
         ratio_list = []
-        for i in range(len(ave_action_loss_list)):
-            result_dict[f"ppo/action_loss_{i}"] = ave_action_loss_list[i]
-            result_dict[f"ppo/value_loss_{i}"] = ave_value_loss_list[i]
-            ratio = ave_action_loss_list[i] / ave_value_loss_list[i]
-            result_dict[f"ppo/ratio_{i}"] = ratio
-            ratio_list.append(ratio)
         result_dict["ppo/average_action_loss"] = np.mean(ave_action_loss_list)
         result_dict["ppo/average_value_loss"] = np.mean(ave_value_loss_list)
+        result_dict["ppo/average_pred_s_loss"] = np.mean(ave_pred_s_loss_list)
         result_dict["ppo/average_ratio"] = np.mean(ratio_list)
         result_dict["ppo/average_target_v"] = target_v.mean().item()
         result_dict["ppo/average_adv"] = adv.mean().item()
