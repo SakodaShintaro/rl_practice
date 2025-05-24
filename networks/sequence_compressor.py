@@ -63,7 +63,7 @@ class TransformerEncoderLayer(Module):
         src: torch.Tensor,
         src_mask: Optional[torch.Tensor] = None,
         src_key_padding_mask: Optional[torch.Tensor] = None,
-        is_causal: bool = False,
+        is_causal: bool = True,
     ) -> torch.Tensor:
         r"""Pass the input through the encoder layer.
 
@@ -71,37 +71,19 @@ class TransformerEncoderLayer(Module):
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
-            is_causal: If specified, applies a causal mask as ``src mask``.
-                Default: ``False``.
-                Warning:
-                ``is_causal`` provides a hint that ``src_mask`` is the
-                causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
 
         Shape:
             see the docs in :class:`~torch.nn.Transformer`.
         """
-        src_key_padding_mask = F._canonical_mask(
-            mask=src_key_padding_mask,
-            mask_name="src_key_padding_mask",
-            other_type=F._none_or_dtype(src_mask),
-            other_name="src_mask",
-            target_type=src.dtype,
-        )
-
-        src_mask = F._canonical_mask(
-            mask=src_mask,
-            mask_name="src_mask",
-            other_type=None,
-            other_name="",
-            target_type=src.dtype,
-            check_other=False,
-        )
+        # 因果マスクを作成
+        seq_len = src.size(1)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(seq_len, device=src.device)
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         x = src
-        x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal)
+        x = x + self._sa_block(
+            self.norm1(x), attn_mask=causal_mask, key_padding_mask=None, is_causal=True
+        )
         x = x + self._ff_block(self.norm2(x))
         return x
 
