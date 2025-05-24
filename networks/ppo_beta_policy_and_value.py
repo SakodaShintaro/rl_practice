@@ -12,10 +12,13 @@ class PpoBetaPolicyAndValue(nn.Module):
         rep_dim = 256
         hidden_dim = 100
         self.value_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
-        self.value_head = nn.Sequential(nn.Linear(hidden_dim, bin_num))
+        self.value_head = nn.Linear(hidden_dim, bin_num)
         self.policy_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
         self.alpha_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
         self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
+
+        torch.nn.init.zeros_(self.value_head.weight)
+        torch.nn.init.zeros_(self.value_head.bias)
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
         x = self.sequential_compressor(r_seq, s_seq, a_seq)
