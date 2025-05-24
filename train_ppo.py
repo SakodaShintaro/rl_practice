@@ -175,7 +175,7 @@ class Agent:
                 dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=device)
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
 
-                a_logp, value = self.net.get_action_log_p_and_value(
+                a_logp, value, info = self.net.get_action_log_p_and_value(
                     r[indices], s[indices], curr_action, a[index]
                 )
                 ratio = torch.exp(a_logp - old_a_logp[index])
@@ -194,7 +194,13 @@ class Agent:
                 value_loss_clipped = F.smooth_l1_loss(value_clipped, target_v[index])
                 value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-                loss = action_loss + 2.0 * value_loss
+                pred_error = info["error"]
+                pred_error_s = pred_error[:, 0::3]
+                pred_error_a = pred_error[:, 1::3]
+                pred_error_r = pred_error[:, 2::3]
+                pred_loss_s = pred_error_s.mean()
+
+                loss = action_loss + 2.0 * value_loss + pred_loss_s
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
 

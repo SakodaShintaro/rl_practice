@@ -35,10 +35,10 @@ class PpoBetaPolicyAndValue(nn.Module):
     def get_action_log_p_and_value(
         self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor, a: torch.Tensor
     ) -> tuple:
-        (alpha, beta), v, _ = self.forward(r_seq, s_seq, a_seq)
+        (alpha, beta), v, info = self.forward(r_seq, s_seq, a_seq)
         dist = Beta(alpha, beta)
         a_logp = dist.log_prob(a).sum(dim=1, keepdim=True)
-        return a_logp, v
+        return a_logp, v, info
 
     @torch.inference_mode()
     def get_action_and_value(
