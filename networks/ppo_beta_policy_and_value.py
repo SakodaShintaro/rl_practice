@@ -24,7 +24,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         before, after = self.sequential_compressor(r_seq, s_seq, a_seq)
 
         # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
-        error = (after[:, :-1] - before[:, 1:]) ** 2
+        error = (after[:, :-1] - before[:, 1:].detach()) ** 2
 
         x = before[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
         x = self.linear(x)  # (batch_size, rep_dim)
