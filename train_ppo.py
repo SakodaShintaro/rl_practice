@@ -197,7 +197,7 @@ class Agent:
                 value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
                 pred_error = info["error"]
-                pred_error_s = pred_error[:, 0::3]
+                pred_error_s = pred_error[:, 3::3]  # 先頭は明らかに予測不可能なので3から
                 pred_error_a = pred_error[:, 1::3]
                 pred_error_r = pred_error[:, 2::3]
                 pred_loss_s = pred_error_s.mean()
