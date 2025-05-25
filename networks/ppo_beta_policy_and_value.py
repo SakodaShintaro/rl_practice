@@ -8,8 +8,8 @@ from .sequence_processor import SequenceProcessor
 class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int, seq_len: int) -> None:
         super().__init__()
-        self.sequential_compressor = SequenceProcessor(seq_len=seq_len)
-        seq_hidden_dim = self.sequential_compressor.hidden_dim
+        self.sequential_processor = SequenceProcessor(seq_len=seq_len)
+        seq_hidden_dim = self.sequential_processor.hidden_dim
         rep_dim = 256
         hidden_dim = 100
         self.linear = nn.Linear(seq_hidden_dim, rep_dim)
@@ -21,7 +21,7 @@ class PpoBetaPolicyAndValue(nn.Module):
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
         # (batch_size, seq_len * 3 - 1, seq_hidden_dim)
-        before, after = self.sequential_compressor(r_seq, s_seq, a_seq)
+        before, after = self.sequential_processor(r_seq, s_seq, a_seq)
 
         # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
         error = (after[:, :-1] - before[:, 1:].detach()) ** 2
