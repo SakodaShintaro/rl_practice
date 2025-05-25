@@ -186,10 +186,11 @@ class SequenceProcessor(nn.Module):
         x = x.reshape(batch_size, self.seq_len * 3, self.hidden_dim)
         x = x[:, :-1]  # dummyのactionを削除 (batch_size, seq_len * 3 - 1, hidden_dim)
 
-        # Positional Encodingを追加
-        x += self.pos_embedding
-
+        # 処理前
         before = x  # (batch_size, seq_len * 3 - 1, hidden_dim)
+
+        # 処理
+        x += self.pos_embedding
         after = self.transformer_encoder(x)  # (batch_size, seq_len * 3 - 1, hidden_dim)
 
         return before, after

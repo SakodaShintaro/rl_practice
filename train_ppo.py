@@ -241,7 +241,7 @@ if __name__ == "__main__":
     video_dir = result_dir / "video"
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
-    image_save_interval = 1000
+    image_save_interval = 100
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -276,7 +276,7 @@ if __name__ == "__main__":
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
             done = bool(done or die)
-            normed_reward = reward / 1.0
+            normed_reward = reward / 10.0
 
             # render
             ae = agent.net.sequential_compressor.state_encoder
