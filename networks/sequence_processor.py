@@ -181,10 +181,16 @@ class SequenceProcessor(nn.Module):
         action_embeds = self.action_encoder(actions)
 
         # エンコードされた報酬、状態、行動を結合
-        x = torch.stack((rewards_embeds, state_embeds, action_embeds), dim=2)
-        x = x.permute(0, 2, 1, 3)
-        x = x.reshape(batch_size, self.seq_len * 3, self.hidden_dim)
-        x = x[:, :-1]  # dummyのactionを削除 (batch_size, seq_len * 3 - 1, hidden_dim)
+        # 時系列順に(r1, s1, a1, r2, s2, a2, ..., rn, sn)と並べる
+        x_list = []
+        for i in range(self.seq_len):
+            x_list.append(rewards_embeds[:, i])  # r_i
+            x_list.append(state_embeds[:, i])  # s_i
+            if i < self.seq_len - 1:  # 最後のアクションはダミーなので除外
+                x_list.append(action_embeds[:, i])  # a_i
+
+        # リストをスタックして結合 (batch_size, seq_len * 3 - 1, hidden_dim)
+        x = torch.stack(x_list, dim=1)
 
         # 処理前
         before = x  # (batch_size, seq_len * 3 - 1, hidden_dim)
