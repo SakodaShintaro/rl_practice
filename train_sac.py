@@ -21,6 +21,7 @@ from networks.backbone import AE
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
+from utils import concat_images
 from wrappers import make_env
 
 
@@ -146,16 +147,9 @@ if __name__ == "__main__":
         # render
         if args.render:
             output_dec = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
-            obs_to_render = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
-            dec_to_render = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
-            concat = cv2.vconcat([obs_to_render, dec_to_render])  # (192, 96, 3)
-            rgb_array = env.render()  # (400, 600, 3)
-            rem = rgb_array.shape[0] - concat.shape[0]
-            concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-            concat *= 255
-            concat = np.clip(concat, 0, 255).astype(np.uint8)
-            concat = cv2.hconcat([rgb_array, concat])  # (400, 696, 3)
-            bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
+            observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
+            reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+            bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
             cv2.imshow("CarRacing", bgr_array)
             cv2.waitKey(1)
 
