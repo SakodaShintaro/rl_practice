@@ -279,7 +279,7 @@ if __name__ == "__main__":
             normed_reward = reward / 10.0
 
             # render
-            ae = agent.net.sequential_compressor.state_encoder
+            ae = agent.net.sequential_processor.state_encoder
             predicted_s = activation_dict["predicted_s"]
             predicted_s = predicted_s.view(1, 4, 12, 12)
             output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
