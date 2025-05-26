@@ -196,7 +196,7 @@ class SequenceProcessor(nn.Module):
         before = x  # (batch_size, seq_len * 3 - 1, hidden_dim)
 
         # 処理
-        x += self.pos_embedding
+        x = x + self.pos_embedding
         after = self.transformer_encoder(x)  # (batch_size, seq_len * 3 - 1, hidden_dim)
 
         return before, after
