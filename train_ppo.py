@@ -270,6 +270,9 @@ if __name__ == "__main__":
             curr_image_dir = image_dir / f"ep_{i_ep:08d}"
             curr_image_dir.mkdir(parents=True, exist_ok=True)
 
+        reward_list = []
+        first_value = None
+
         while True:
             global_step += 1
             action, a_logp, value, activation_dict = agent.select_action(reward, state)
@@ -278,6 +281,9 @@ if __name__ == "__main__":
             )
             done = bool(done or die)
             normed_reward = reward / 10.0
+            if len(reward_list) == 0:
+                first_value = value
+            reward_list.append(reward)
 
             # render
             ae = agent.net.sequential_processor.state_encoder
@@ -331,6 +337,12 @@ if __name__ == "__main__":
         recent_average_score = np.mean(score_list)
         is_solved = recent_average_score > env.spec.reward_threshold
 
+        weighted_reward = 0.0
+        coeff = 1.0
+        for r in reward_list:
+            weighted_reward += coeff * r
+            coeff *= agent.gamma
+
         if i_ep % args.log_interval == 0 or is_solved:
             print(
                 f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
@@ -342,6 +354,8 @@ if __name__ == "__main__":
             "recent_average_score": recent_average_score,
             "episodic_return": info["episode"]["r"],
             "episodic_length": info["episode"]["l"],
+            "weighted_reward": weighted_reward,
+            "first_value": first_value,
         }
         wandb.log(data_dict)
 
