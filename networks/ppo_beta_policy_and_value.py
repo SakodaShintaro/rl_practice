@@ -13,6 +13,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         rep_dim = 256
         hidden_dim = 100
         self.linear = nn.Linear(seq_hidden_dim, rep_dim)
+        self.norm = nn.RMSNorm(rep_dim, elementwise_affine=False)
         self.value_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
         self.value_head = nn.Linear(hidden_dim, 1)
         self.policy_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
@@ -31,6 +32,7 @@ class PpoBetaPolicyAndValue(nn.Module):
 
         x = before[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
         x = self.linear(x)  # (batch_size, rep_dim)
+        x = self.norm(x)
 
         value_x = self.value_enc(x)
         v = self.value_head(value_x)
