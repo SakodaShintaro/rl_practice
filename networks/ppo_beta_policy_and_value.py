@@ -23,8 +23,11 @@ class PpoBetaPolicyAndValue(nn.Module):
         # (batch_size, seq_len * 3 - 1, seq_hidden_dim)
         before, after = self.sequential_processor(r_seq, s_seq, a_seq)
 
+        prediction = after[:, :-1]  # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
+        prediction[:, 3::3] += before[:, 1:-1:3].detach()
+
         # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
-        error = (after[:, :-1] - before[:, 1:].detach()) ** 2
+        error = (prediction - before[:, 1:].detach()) ** 2
 
         x = before[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
         x = self.linear(x)  # (batch_size, rep_dim)
@@ -43,7 +46,7 @@ class PpoBetaPolicyAndValue(nn.Module):
                 "value_x": value_x,
                 "policy_x": policy_x,
                 "error": error,
-                "predicted_s": after[:, -2],
+                "predicted_s": prediction[:, -1],
             },
         )
 
