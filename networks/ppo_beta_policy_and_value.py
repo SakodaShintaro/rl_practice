@@ -26,8 +26,15 @@ class PpoBetaPolicyAndValue(nn.Module):
         prediction = after[:, :-1]  # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
         prediction[:, 3::3] += before[:, 1:-1:3].detach()
 
+        state_embedding = prediction[:, 3::3]  # (batch_size, seq_len - 1, seq_hidden_dim)
+        B, S, D = state_embedding.shape
+        state_embedding = state_embedding.reshape(B * S, 4, 12, 12)
+        state_embedding = state_embedding.detach()
+        reconstruct = self.sequential_processor.state_encoder.decode(state_embedding)
+        error_reconstruct = (reconstruct - s_seq[:, 1:]) ** 2
+
         # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
-        error = (prediction - before[:, 1:].detach()) ** 2
+        error_jepa = (prediction - before[:, 1:].detach()) ** 2
 
         x = before[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
         x = self.linear(x)  # (batch_size, rep_dim)
@@ -45,7 +52,8 @@ class PpoBetaPolicyAndValue(nn.Module):
                 "x": x,
                 "value_x": value_x,
                 "policy_x": policy_x,
-                "error": error,
+                "error_jepa": error_jepa,
+                "error_reconstruct": error_reconstruct,
                 "predicted_s": prediction[:, -1],
             },
         )

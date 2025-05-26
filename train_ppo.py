@@ -69,7 +69,7 @@ class Agent:
     clip_param_policy = 0.1
     clip_param_value = 1.0
     ppo_epoch = 10
-    batch_size = 128
+    batch_size = 64
     gamma = 0.99
 
     def __init__(self, buffer_capacity, seq_len) -> None:
@@ -197,13 +197,15 @@ class Agent:
                 value_loss_clipped = F.smooth_l1_loss(value_clipped, target_v[index])
                 value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-                pred_error = info["error"]
-                pred_error_s = pred_error[:, 3::3]  # 先頭は明らかに予測不可能なので3から
-                pred_error_a = pred_error[:, 1::3]
-                pred_error_r = pred_error[:, 2::3]
+                error_jepa = info["error_jepa"]
+                pred_error_s = error_jepa[:, 3::3]  # 先頭は明らかに予測不可能なので3から
+                pred_error_a = error_jepa[:, 1::3]
+                pred_error_r = error_jepa[:, 2::3]
                 pred_loss_s = pred_error_s.mean()
+                error_reconstruct = info["error_reconstruct"]
+                reconstruct_loss = error_reconstruct.mean()
 
-                loss = action_loss + 2.0 * value_loss + pred_loss_s
+                loss = action_loss + 2.0 * value_loss + pred_loss_s + reconstruct_loss
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
                 sum_pred_s_loss += pred_loss_s.item() * len(index)
