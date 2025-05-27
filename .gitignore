@@ -7,3 +7,4 @@ wandb/
 *.egg-info
 resnet18
 pretrained
+cache
