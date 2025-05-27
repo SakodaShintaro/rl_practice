@@ -17,8 +17,8 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.value_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
         self.value_head = nn.Linear(hidden_dim, 1)
         self.policy_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
-        self.alpha_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
-        self.beta_head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Softplus())
+        self.alpha_head = nn.Linear(hidden_dim, action_dim)
+        self.beta_head = nn.Linear(hidden_dim, action_dim)
 
     def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
         # (batch_size, seq_len * 3 - 1, seq_hidden_dim)
@@ -38,8 +38,8 @@ class PpoBetaPolicyAndValue(nn.Module):
         v = self.value_head(value_x)
 
         policy_x = self.policy_enc(x)
-        alpha = self.alpha_head(policy_x) + 1
-        beta = self.beta_head(policy_x) + 1
+        alpha = self.alpha_head(policy_x).exp() + 1
+        beta = self.beta_head(policy_x).exp() + 1
         return (
             (alpha, beta),
             v,
