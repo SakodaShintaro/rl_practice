@@ -20,7 +20,13 @@ class PpoBetaPolicyAndValue(nn.Module):
         self.alpha_head = nn.Linear(hidden_dim, action_dim)
         self.beta_head = nn.Linear(hidden_dim, action_dim)
 
-    def forward(self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor) -> tuple:
+    def forward(
+        self,
+        r_seq: torch.Tensor,
+        s_seq: torch.Tensor,
+        a_seq: torch.Tensor,
+        action: torch.Tensor | None = None,
+    ) -> tuple:
         # (batch_size, seq_len * 3 - 1, seq_hidden_dim)
         before, after = self.sequential_processor(r_seq, s_seq, a_seq)
 
@@ -35,37 +41,24 @@ class PpoBetaPolicyAndValue(nn.Module):
         x = self.norm(x)
 
         value_x = self.value_enc(x)
-        v = self.value_head(value_x)
+        value = self.value_head(value_x)
 
         policy_x = self.policy_enc(x)
         alpha = self.alpha_head(policy_x).exp() + 1
         beta = self.beta_head(policy_x).exp() + 1
-        return (
-            (alpha, beta),
-            v,
-            {
-                "x": x,
-                "value_x": value_x,
-                "policy_x": policy_x,
-                "error": error,
-                "predicted_s": prediction[:, -1],
-            },
-        )
 
-    def get_action_log_p_and_value(
-        self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor, a: torch.Tensor
-    ) -> tuple:
-        (alpha, beta), v, info = self.forward(r_seq, s_seq, a_seq)
         dist = Beta(alpha, beta)
-        a_logp = dist.log_prob(a).sum(dim=1, keepdim=True)
-        return a_logp, v, info
-
-    @torch.inference_mode()
-    def get_action_and_value(
-        self, r_seq: torch.Tensor, s_seq: torch.Tensor, a_seq: torch.Tensor
-    ) -> tuple:
-        (alpha, beta), v, activation_dict = self.forward(r_seq, s_seq, a_seq)
-        dist = Beta(alpha, beta)
-        action = dist.sample()
+        if action is None:
+            action = dist.sample()
         a_logp = dist.log_prob(action).sum(dim=1)
-        return action, a_logp, v, activation_dict
+
+        return {
+            "action": action,
+            "a_logp": a_logp,
+            "value": value,
+            "x": x,
+            "value_x": value_x,
+            "policy_x": policy_x,
+            "error": error,
+            "predicted_s": prediction[:, -1],
+        }

@@ -98,6 +98,7 @@ class Agent:
         self.s_list = []
         self.a_list = []
 
+    @torch.inference_mode()
     def select_action(self, reward: float, state: np.ndarray) -> tuple:
         reward = torch.from_numpy(np.array(reward)).to(device).unsqueeze(0)
         state = torch.from_numpy(state).to(device).unsqueeze(0)
@@ -123,9 +124,10 @@ class Agent:
         assert curr_s.shape[1] == self.seq_len
         assert curr_a.shape[1] == self.seq_len
 
-        action, a_logp, value, activation_dict = self.net.get_action_and_value(
-            curr_r, curr_s, curr_a
-        )
+        result_dict = self.net(curr_r, curr_s, curr_a)
+        action = result_dict["action"]
+        a_logp = result_dict["a_logp"]
+        value = result_dict["value"]
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
         if len(self.a_list) == self.seq_len:
@@ -134,7 +136,7 @@ class Agent:
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
         value = value.item()
-        return action, a_logp, value, activation_dict
+        return action, a_logp, value, result_dict
 
     def store(self, transition: tuple) -> bool:
         self.buffer[self.counter] = transition
@@ -178,9 +180,9 @@ class Agent:
                 dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=device)
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
 
-                a_logp, value, info = self.net.get_action_log_p_and_value(
-                    r[indices], s[indices], curr_action, a[index]
-                )
+                net_out_dict = self.net(r[indices], s[indices], curr_action, a[index])
+                a_logp = net_out_dict["a_logp"]
+                value = net_out_dict["value"]
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
                 surr1 = ratio * adv[index]
@@ -197,7 +199,7 @@ class Agent:
                 value_loss_clipped = F.smooth_l1_loss(value_clipped, target_v[index])
                 value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-                pred_error = info["error"]
+                pred_error = net_out_dict["error"]
                 pred_error_s = pred_error[:, 3::3]  # 先頭は明らかに予測不可能なので3から
                 pred_error_a = pred_error[:, 1::3]
                 pred_error_r = pred_error[:, 2::3]
@@ -275,7 +277,7 @@ if __name__ == "__main__":
 
         while True:
             global_step += 1
-            action, a_logp, value, activation_dict = agent.select_action(reward, state)
+            action, a_logp, value, net_out_dict = agent.select_action(reward, state)
             state_, reward, done, die, info = env.step(
                 action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
             )
@@ -287,7 +289,7 @@ if __name__ == "__main__":
 
             # render
             ae = agent.net.sequential_processor.state_encoder
-            predicted_s = activation_dict["predicted_s"]
+            predicted_s = net_out_dict["predicted_s"]
             predicted_s = predicted_s.view(1, 4, 12, 12)
             output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
             observation_img = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
@@ -307,7 +309,8 @@ if __name__ == "__main__":
                 "normed_reward": normed_reward,
             }
 
-            for key, value_tensor in activation_dict.items():
+            for key in ["x", "value_x", "policy_x"]:
+                value_tensor = net_out_dict[key]
                 data_dict[f"activation/{key}_norm"] = value_tensor.norm(dim=1).mean().item()
                 data_dict[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
                 data_dict[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
