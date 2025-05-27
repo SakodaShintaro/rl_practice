@@ -258,7 +258,7 @@ if __name__ == "__main__":
     agent = Agent(args.buffer_capacity, args.seq_len)
     env = make_env(video_dir=video_dir)
 
-    wandb.init(project="cleanRL", config=vars(args), name="PPO", monitor_gym=True, save_code=True)
+    wandb.init(project="rl_practice", config=vars(args), name="PPO", save_code=True)
 
     log_episode = []
     log_step = []

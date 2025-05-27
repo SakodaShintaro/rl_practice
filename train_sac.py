@@ -46,7 +46,7 @@ if __name__ == "__main__":
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
-    wandb.init(project="cleanRL", config=vars(args), name="SAC", monitor_gym=True, save_code=True)
+    wandb.init(project="rl_practice", config=vars(args), name="SAC", save_code=True)
 
     # seeding
     random.seed(args.seed)
