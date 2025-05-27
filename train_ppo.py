@@ -14,6 +14,7 @@ from torch import nn, optim
 
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
+from networks.ppo_paligemma_policy_value import PpoPaligemmaPolicyAndValue
 from utils import concat_images
 from wrappers import make_env
 
@@ -26,6 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--seq_len", type=int, default=2)
+    parser.add_argument(
+        "--model_name", type=str, default="default", choices=["default", "paligemma"]
+    )
     return parser.parse_args()
 
 
@@ -72,11 +76,14 @@ class Agent:
     batch_size = 128
     gamma = 0.99
 
-    def __init__(self, buffer_capacity, seq_len) -> None:
+    def __init__(self, buffer_capacity, seq_len, model_name) -> None:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
         self.training_step = 0
-        self.net = PpoBetaPolicyAndValue(3, seq_len).to(device)
+        self.net = {
+            "default": PpoBetaPolicyAndValue(3, seq_len).to(device),
+            "paligemma": PpoPaligemmaPolicyAndValue(3).to(device),
+        }[model_name]
         self.buffer = np.empty(
             self.buffer_capacity,
             dtype=np.dtype(
@@ -255,7 +262,7 @@ if __name__ == "__main__":
     with open(result_dir / "seed.txt", "w") as f:
         f.write(str(seed))
 
-    agent = Agent(args.buffer_capacity, args.seq_len)
+    agent = Agent(args.buffer_capacity, args.seq_len, args.model_name)
     env = make_env(video_dir=video_dir)
 
     wandb.init(project="rl_practice", config=vars(args), name="PPO", save_code=True)
