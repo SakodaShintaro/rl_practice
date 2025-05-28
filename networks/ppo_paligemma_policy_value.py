@@ -49,7 +49,7 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
         input_len = model_inputs["input_ids"].shape[-1]
 
         with torch.no_grad():
-            generation = self.net.generate(
+            output = self.net.forward(
                 **model_inputs,
                 max_new_tokens=100,
                 do_sample=True,
@@ -57,15 +57,11 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
                 output_hidden_states=True,
                 return_dict_in_generate=True,
             )
-            hidden_states = generation["hidden_states"]  # (ステップ数, レイヤー数)の2層tuple
-            last_hidden_state = hidden_states[-1]
-            last_layer = last_hidden_state[-1]  # (1, 1, seq_hidden_dim)
+            hidden_states = output["hidden_states"]  # tuple, len = 27
+            last_hidden_state = hidden_states[-1]  # (1, input_len, seq_hidden_dim)
+            last_layer = last_hidden_state[:, input_len - 1]  # (1, seq_hidden_dim)
 
-            generated_ids = generation["sequences"]
-            generated_ids = generated_ids[0][input_len:]  # (出力トークン数, )
-            decoded_str = self.processor.decode(generated_ids, skip_special_tokens=True)
-
-        x = last_layer[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
+        x = last_layer  # Use the last time step representation (batch_size, seq_hidden_dim)
         x = x.to(torch.float32)  # Convert to float32 for further processing
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
@@ -89,7 +85,6 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
             "x": x,
             "value_x": value_x,
             "policy_x": policy_x,
-            "decoded_str": decoded_str,
         }
 
 

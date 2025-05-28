@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--seq_len", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument(
         "--model_name", type=str, default="default", choices=["default", "paligemma"]
     )
@@ -73,12 +74,12 @@ class Agent:
     clip_param_policy = 0.1
     clip_param_value = 1.0
     ppo_epoch = 10
-    batch_size = 128
     gamma = 0.99
 
-    def __init__(self, buffer_capacity, seq_len, model_name) -> None:
+    def __init__(self, buffer_capacity, seq_len, batch_size, model_name) -> None:
         self.buffer_capacity = buffer_capacity
         self.seq_len = seq_len
+        self.batch_size = batch_size
         self.training_step = 0
         self.net = {
             "default": PpoBetaPolicyAndValue(3, seq_len).to(device),
@@ -208,11 +209,14 @@ class Agent:
                 value_loss_clipped = F.smooth_l1_loss(value_clipped, target_v[index])
                 value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-                pred_error = net_out_dict["error"]
-                pred_error_s = pred_error[:, 3::3]  # 先頭は明らかに予測不可能なので3から
-                pred_error_a = pred_error[:, 1::3]
-                pred_error_r = pred_error[:, 2::3]
-                pred_loss_s = pred_error_s.mean()
+                if "error" in net_out_dict:
+                    pred_error = net_out_dict["error"]
+                    pred_error_s = pred_error[:, 3::3]  # 先頭は明らかに予測不可能なので3から
+                    pred_error_a = pred_error[:, 1::3]
+                    pred_error_r = pred_error[:, 2::3]
+                    pred_loss_s = pred_error_s.mean()
+                else:
+                    pred_loss_s = torch.tensor(0.0, device=device)
 
                 loss = action_loss + 2.0 * value_loss + pred_loss_s
                 sum_action_loss += action_loss.item() * len(index)
@@ -264,7 +268,7 @@ if __name__ == "__main__":
     with open(result_dir / "seed.txt", "w") as f:
         f.write(str(seed))
 
-    agent = Agent(args.buffer_capacity, args.seq_len, args.model_name)
+    agent = Agent(args.buffer_capacity, args.seq_len, args.batch_size, args.model_name)
     env = make_env(video_dir=video_dir)
 
     wandb.init(project="rl_practice", config=vars(args), name="PPO", save_code=True)
@@ -306,7 +310,8 @@ if __name__ == "__main__":
                 reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
                 bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
             elif args.model_name == "paligemma":
-                bgr_array = env.render()
+                rgb_array = env.render()
+                bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
             if args.render:
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
