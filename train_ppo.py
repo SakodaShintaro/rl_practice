@@ -84,6 +84,8 @@ class Agent:
             "default": PpoBetaPolicyAndValue(3, seq_len).to(device),
             "paligemma": PpoPaligemmaPolicyAndValue(3).to(device),
         }[model_name]
+        num_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+        print(f"Number of trainable parameters: {num_params:,}")
         self.buffer = np.empty(
             self.buffer_capacity,
             dtype=np.dtype(
@@ -295,13 +297,16 @@ if __name__ == "__main__":
             reward_list.append(reward)
 
             # render
-            ae = agent.net.sequential_processor.state_encoder
-            predicted_s = net_out_dict["predicted_s"]
-            predicted_s = predicted_s.view(1, 4, 12, 12)
-            output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
-            observation_img = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
-            reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
-            bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+            if args.model_name == "default":
+                ae = agent.net.sequential_processor.state_encoder
+                predicted_s = net_out_dict["predicted_s"]
+                predicted_s = predicted_s.view(1, 4, 12, 12)
+                output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
+                observation_img = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
+                reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+                bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+            elif args.model_name == "paligemma":
+                bgr_array = env.render()
             if args.render:
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
