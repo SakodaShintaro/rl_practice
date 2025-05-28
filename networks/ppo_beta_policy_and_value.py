@@ -50,7 +50,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         dist = Beta(alpha, beta)
         if action is None:
             action = dist.sample()
-        a_logp = dist.log_prob(action).sum(dim=1)
+        a_logp = dist.log_prob(action).sum(dim=1, keepdim=True)
 
         return {
             "action": action,
