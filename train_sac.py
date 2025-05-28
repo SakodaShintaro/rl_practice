@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
+    parser.add_argument("--policy_model", type=str, default="tanh", choices=["tanh", "diffusion"])
     return parser.parse_args()
 
 
@@ -84,7 +85,7 @@ if __name__ == "__main__":
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
         ),
         "diffusion": DiffusionPolicy(state_dim=cnn_dim, action_dim=action_dim, use_normalize=False),
-    }["tanh"]
+    }[args.policy_model]
     qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False)
     qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False)
     actor = actor.to(device)
