@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     wandb.init(project="rl_practice", config=vars(args), name="SAC", save_code=True)
 
-    # seeding (similar to train_ppo.py)
+    # seeding
     seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
     random.seed(seed)
     np.random.seed(seed)
