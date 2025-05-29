@@ -61,6 +61,9 @@ if __name__ == "__main__":
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_SAC"
     result_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = result_dir / "image"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    image_save_interval = 100
     log_step = []
     log_episode = []
 
@@ -121,6 +124,8 @@ if __name__ == "__main__":
     score_list = []
     obs, _ = env.reset(seed=args.seed)
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
+    curr_image_dir = image_dir / f"ep_{episode_id:08d}"
+    curr_image_dir.mkdir(parents=True, exist_ok=True)
     for global_step in range(args.total_timesteps):
         # put action logic here
         obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
@@ -147,12 +152,20 @@ if __name__ == "__main__":
 
         # render
         if args.render:
-            output_dec = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
+            output_dec_display = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
             observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
-            reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+            reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))  # (96, 96, 3)
             bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
             cv2.imshow("CarRacing", bgr_array)
             cv2.waitKey(1)
+
+        # save images for specific episodes
+        if episode_id % image_save_interval == 0 and curr_image_dir is not None:
+            output_dec_display = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
+            observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
+            reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))  # (96, 96, 3)
+            bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+            cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
         if termination or truncation:
             score = info["episode"]["r"]
@@ -178,6 +191,14 @@ if __name__ == "__main__":
                 print(
                     f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
                 )
+
+            # setup image directory for next episode if needed
+            if (episode_id + 1) % image_save_interval == 0:
+                curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
+                curr_image_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                curr_image_dir = None
+
             episode_id += 1
 
             if is_solved:
