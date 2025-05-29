@@ -27,7 +27,7 @@ from wrappers import make_env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(8e4))
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -49,10 +49,12 @@ if __name__ == "__main__":
 
     wandb.init(project="rl_practice", config=vars(args), name="SAC", save_code=True)
 
-    # seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    # seeding (similar to train_ppo.py)
+    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.cuda.set_device(0)
 
@@ -61,6 +63,11 @@ if __name__ == "__main__":
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_SAC"
     result_dir.mkdir(parents=True, exist_ok=True)
+
+    # save seed to file
+    with open(result_dir / "seed.txt", "w") as f:
+        f.write(str(seed))
+
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
     image_save_interval = 100
@@ -69,7 +76,7 @@ if __name__ == "__main__":
 
     # env setup
     env = make_env(result_dir / "video")
-    env.action_space.seed(args.seed)
+    env.action_space.seed(seed)
 
     action_low = env.action_space.low
     action_high = env.action_space.high
@@ -122,7 +129,7 @@ if __name__ == "__main__":
     # start the game
     episode_id = 0
     score_list = []
-    obs, _ = env.reset(seed=args.seed)
+    obs, _ = env.reset(seed=seed)
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = image_dir / f"ep_{episode_id:08d}"
     curr_image_dir.mkdir(parents=True, exist_ok=True)
