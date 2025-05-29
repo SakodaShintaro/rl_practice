@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_size", type=int, default=int(8e4))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--learning_starts", type=int, default=4000)
+    parser.add_argument("--learning_starts", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
