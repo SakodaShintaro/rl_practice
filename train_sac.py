@@ -101,7 +101,7 @@ if __name__ == "__main__":
     actor = actor.to(device)
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
-    lr = 2e-4
+    lr = 1e-4
     q_optimizer = optim.AdamW(
         list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()),
         lr=lr,
