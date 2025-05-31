@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
             # execute the game and log data.
             next_obs, reward, termination, truncation, info = env.step(action)
-            reward = np.clip(reward, -4.0, 4.0)
+            reward /= 10.0
             rb.add(obs, next_obs, action, reward, termination or truncation)
 
             # render
