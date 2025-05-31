@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(8e4))
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--learning_starts", type=int, default=2000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = None
 
-    for episode_id in range(100000):
+    for episode_id in range(10000):
         if (episode_id + 1) % image_save_interval == 0:
             curr_image_dir = image_dir / f"ep_{episode_id:08d}"
             curr_image_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +214,7 @@ if __name__ == "__main__":
             if global_step <= args.learning_starts:
                 continue
 
-            if global_step % 10 != 0:
+            if global_step % 5 != 0:
                 continue
 
             # training.
