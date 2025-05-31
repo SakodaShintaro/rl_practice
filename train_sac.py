@@ -307,7 +307,7 @@ if __name__ == "__main__":
 
         is_solved = recent_average_score > env.spec.reward_threshold
 
-        if episode_id % 10 == 0 or is_solved:
+        if episode_id % 5 == 0 or is_solved:
             print(
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
             )
