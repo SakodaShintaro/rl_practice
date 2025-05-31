@@ -27,13 +27,18 @@ def orthogonal_weight_init(m: nn.Module) -> None:
 
 class SacQ(nn.Module):
     def __init__(
-        self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
+        self,
+        in_channels: int,
+        action_dim: int,
+        hidden_dim: int,
+        out_dim: int,
+        use_normalize: bool = True,
     ) -> None:
         super().__init__()
         mid_dim = in_channels + action_dim
         self.fc1 = nn.Linear(mid_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 1)
+        self.fc3 = nn.Linear(hidden_dim, out_dim)
         self.use_normalize = use_normalize
         self.apply(weights_init_)
 

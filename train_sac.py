@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
     parser.add_argument("--policy_model", type=str, default="tanh", choices=["tanh", "diffusion"])
+    parser.add_argument("--value_dim", type=int, default=1)
     return parser.parse_args()
 
 
@@ -96,8 +97,20 @@ if __name__ == "__main__":
         ),
         "diffusion": DiffusionPolicy(state_dim=cnn_dim, action_dim=action_dim, use_normalize=False),
     }[args.policy_model]
-    qf1 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False)
-    qf2 = SacQ(in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False)
+    qf1 = SacQ(
+        in_channels=cnn_dim,
+        action_dim=action_dim,
+        hidden_dim=512,
+        out_dim=args.value_dim,
+        use_normalize=False,
+    )
+    qf2 = SacQ(
+        in_channels=cnn_dim,
+        action_dim=action_dim,
+        hidden_dim=512,
+        out_dim=args.value_dim,
+        use_normalize=False,
+    )
     actor = actor.to(device)
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
