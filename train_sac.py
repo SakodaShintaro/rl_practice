@@ -225,6 +225,7 @@ if __name__ == "__main__":
 
             state_curr = encoder.encode(data.observations).detach()
             state_curr = state_curr.flatten(start_dim=1)
+            state_norm = state_curr.norm(dim=1)
             pi, log_pi, _ = actor.get_action(state_curr)
             qf1_pi = qf1(state_curr, pi)
             qf2_pi = qf2(state_curr, pi)
@@ -256,6 +257,7 @@ if __name__ == "__main__":
                     "losses/actor_loss": actor_loss.item(),
                     "losses/alpha": alpha,
                     "losses/log_pi": log_pi.mean().item(),
+                    "losses/state_norm": state_norm.mean().item(),
                     "a_logp": selected_log_pi.mean().item(),
                     "losses/alpha_loss": alpha_loss.item(),
                     "charts/elapse_time_sec": elapsed_time,
