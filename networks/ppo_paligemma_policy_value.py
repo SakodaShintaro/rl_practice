@@ -36,13 +36,24 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
         action: torch.Tensor | None = None,
     ) -> tuple:
         device = r_seq.device
-        # Currently, only supports batch size of 1
-        assert r_seq.shape[0] == 1
-        s_seq_np = s_seq.cpu().numpy()
-        s_list = [s_seq_np[0][i] for i in range(s_seq_np.shape[1])]
+        batch_size = r_seq.shape[0]
+        seq_len = s_seq.shape[1]
 
+        # Prepare all images for batch processing
+        s_seq_np = s_seq.cpu().numpy()
+        all_images = []
+        texts = []
+
+        for batch_idx in range(batch_size):
+            s_list = [s_seq_np[batch_idx][i] for i in range(seq_len)]
+            all_images.append(s_list)
+            texts.append(self.prompt)
+
+        # Process all batches at once
         model_inputs = (
-            self.processor(text=self.prompt, images=[s_list], return_tensors="pt", do_rescale=False)
+            self.processor(
+                text=texts, images=all_images, return_tensors="pt", do_rescale=False, padding=True
+            )
             .to(torch.bfloat16)
             .to(device)
         )
@@ -58,10 +69,8 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
                 return_dict_in_generate=True,
             )
             hidden_states = output["hidden_states"]  # tuple, len = 27
-            last_hidden_state = hidden_states[-1]  # (1, input_len, seq_hidden_dim)
-            last_layer = last_hidden_state[:, input_len - 1]  # (1, seq_hidden_dim)
-
-        x = last_layer  # Use the last time step representation (batch_size, seq_hidden_dim)
+            last_hidden_state = hidden_states[-1]  # (batch_size, input_len, seq_hidden_dim)
+            x = last_hidden_state[:, input_len - 1]  # (batch_size, seq_hidden_dim)
         x = x.to(torch.float32)  # Convert to float32 for further processing
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
@@ -76,7 +85,7 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
         dist = Beta(alpha, beta)
         if action is None:
             action = dist.sample()
-        a_logp = dist.log_prob(action).sum(dim=1)
+        a_logp = dist.log_prob(action).sum(dim=-1)
 
         return {
             "action": action,
@@ -89,9 +98,21 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
 
 
 if __name__ == "__main__":
-    model = PpoPaligemmaPolicyAndValue(action_dim=3)
-    r_seq = torch.rand(1, 2, 1)
-    s_seq = torch.rand(1, 2, 3, 96, 96)
-    a_seq = torch.rand(1, 2, 3)
+    device = torch.device("cuda")
+    model = PpoPaligemmaPolicyAndValue(action_dim=3).to(device)
+
+    # Test with batch size 1
+    print("Testing batch size 1:")
+    r_seq = torch.rand(1, 2, 1, device=device)
+    s_seq = torch.rand(1, 2, 3, 96, 96, device=device)
+    a_seq = torch.rand(1, 2, 3, device=device)
     output = model(r_seq, s_seq, a_seq)
-    print(output)
+    print(f"Output shapes: action={output['action'].shape}, value={output['value'].shape}")
+
+    # Test with batch size > 1
+    print("\nTesting batch size 3:")
+    r_seq = torch.rand(3, 2, 1, device=device)
+    s_seq = torch.rand(3, 2, 3, 96, 96, device=device)
+    a_seq = torch.rand(3, 2, 3, device=device)
+    output = model(r_seq, s_seq, a_seq)
+    print(f"Output shapes: action={output['action'].shape}, value={output['value'].shape}")
