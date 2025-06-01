@@ -1,6 +1,7 @@
 # Reference: https://github.com/xtma/pytorch_car_caring
 import argparse
 import os
+import time
 from datetime import datetime
 from distutils.util import strtobool
 from pathlib import Path
@@ -278,6 +279,7 @@ if __name__ == "__main__":
     score_list = []
     global_step = 0
     reward = 0.0
+    start = time.time()
     for i_ep in range(100000):
         state, _ = env.reset()
 
@@ -364,8 +366,16 @@ if __name__ == "__main__":
             coeff *= agent.gamma
 
         if i_ep % args.log_interval == 0 or is_solved:
+            elapsed_time = time.time() - start
+            msec_per_step = 1000.0 * elapsed_time / global_step
             print(
-                f"Ep: {i_ep}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
+                f"Time: {elapsed_time:.2f}s\t"
+                f"Msec/step: {msec_per_step:.1f}\t"
+                f"Ep: {i_ep}\t"
+                f"Step: {global_step}\t"
+                f"Last score: {score:.2f}\t"
+                f"Average score: {recent_average_score:.2f}\t"
+                f"Length: {info['episode']['l']:.2f}"
             )
         data_dict = {
             "global_step": global_step,
