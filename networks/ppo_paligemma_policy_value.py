@@ -110,5 +110,5 @@ if __name__ == "__main__":
 
     for b in range(3):
         output1x3 = model(r_seq[b : b + 1], s_seq[b : b + 1], a_seq[b : b + 1])
-        print(f"{output1x3['action']=}")
-        print(f"{output3x1['action'][b]=}")
+        print(f"{output1x3['value']=}")
+        print(f"{output3x1['value'][b]=}")
