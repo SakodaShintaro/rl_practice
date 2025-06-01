@@ -101,18 +101,14 @@ if __name__ == "__main__":
     device = torch.device("cuda")
     model = PpoPaligemmaPolicyAndValue(action_dim=3).to(device)
 
-    # Test with batch size 1
-    print("Testing batch size 1:")
-    r_seq = torch.rand(1, 2, 1, device=device)
-    s_seq = torch.rand(1, 2, 3, 96, 96, device=device)
-    a_seq = torch.rand(1, 2, 3, device=device)
-    output = model(r_seq, s_seq, a_seq)
-    print(f"Output shapes: action={output['action'].shape}, value={output['value'].shape}")
-
     # Test with batch size > 1
     print("\nTesting batch size 3:")
     r_seq = torch.rand(3, 2, 1, device=device)
     s_seq = torch.rand(3, 2, 3, 96, 96, device=device)
     a_seq = torch.rand(3, 2, 3, device=device)
-    output = model(r_seq, s_seq, a_seq)
-    print(f"Output shapes: action={output['action'].shape}, value={output['value'].shape}")
+    output3x1 = model(r_seq, s_seq, a_seq)
+
+    for b in range(3):
+        output1x3 = model(r_seq[b : b + 1], s_seq[b : b + 1], a_seq[b : b + 1])
+        print(f"{output1x3['action']=}")
+        print(f"{output3x1['action'][b]=}")
