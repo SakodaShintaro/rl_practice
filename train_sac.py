@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
     parser.add_argument("--policy_model", type=str, default="tanh", choices=["tanh", "diffusion"])
-    parser.add_argument("--value_dim", type=int, default=1)
+    parser.add_argument("--value_dim", type=int, default=51)
     return parser.parse_args()
 
 
