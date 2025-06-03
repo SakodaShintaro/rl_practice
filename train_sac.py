@@ -133,6 +133,8 @@ if __name__ == "__main__":
         ).to(device)
 
     # Automatic entropy tuning
+    if args.policy_model == "diffusion":
+        args.fixed_alpha = 0.002
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item() * 2.0
     log_alpha = torch.tensor([-4.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
@@ -265,6 +267,36 @@ if __name__ == "__main__":
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
             actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
+            # DACER2 (https://arxiv.org/abs/2505.23426) loss
+            if args.policy_model == "diffusion":
+                actions = pi.clone().detach()
+                actions.requires_grad = True
+                t = torch.rand((args.batch_size, 1), device=device)
+                c = 0.4
+                d = -1.8
+                w_t = torch.exp(c * t + d)
+
+                def calc_target(q_network, actions):
+                    q_values = q_network(state_curr, actions)
+                    if args.value_dim > 1:
+                        q_values = hl_gauss_loss(q_values).unsqueeze(-1)
+                    q_grad = torch.autograd.grad(
+                        outputs=q_values.sum(),
+                        inputs=actions,
+                        create_graph=True,
+                    )[0]
+                    q_grad_norm = q_grad / (q_grad.norm(dim=1, keepdim=True) + 1e-8)
+                    return w_t * q_grad_norm
+
+                target1 = calc_target(qf1, actions)
+                target2 = calc_target(qf2, actions)
+                target = (target1 + target2) / 2.0
+                noise = torch.randn_like(actions)
+                a_t = (1.0 - t) * noise + t * actions
+                v = actor.forward(a_t, t.squeeze(1), state_curr)
+                dacer_loss = F.mse_loss(v, target)
+                actor_loss += dacer_loss * 0.1
+
             actor_optimizer.zero_grad()
             actor_loss.backward()
             actor_optimizer.step()
@@ -297,6 +329,8 @@ if __name__ == "__main__":
                     "charts/SPS": int(global_step / elapsed_time),
                     "reward": reward,
                 }
+                if args.policy_model == "diffusion":
+                    data_dict["losses/dacer_loss"] = dacer_loss.item()
                 wandb.log(data_dict)
 
                 fixed_data = {
