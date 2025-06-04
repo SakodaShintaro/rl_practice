@@ -11,9 +11,9 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+import wandb
 from torch import nn, optim
 
-import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
 from networks.ppo_paligemma_policy_value import PpoPaligemmaPolicyAndValue
 from networks.ppo_smolvlm_policy_value import PpoSmolVlmPolicyAndValue

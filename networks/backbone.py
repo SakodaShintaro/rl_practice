@@ -1,7 +1,7 @@
-from diffusers.models import AutoencoderKL, AutoencoderTiny
-from transformers import AutoModelForVision2Seq, AutoProcessor
-from torch import nn
 import torch
+from diffusers.models import AutoencoderKL, AutoencoderTiny
+from torch import nn
+from transformers import AutoModelForVision2Seq, AutoProcessor
 
 
 class BaseCNN(nn.Module):
