@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
     action_dim = np.prod(env.action_space.shape)
     encoder = {"ae": AE(), "smolvlm": SmolVLMEncoder()}[args.encoder_model].to(device)
-    cnn_dim = 576 if args.encoder_model == "ae" else 256
+    cnn_dim = encoder.output_dim
     actor = {
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False

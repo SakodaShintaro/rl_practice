@@ -38,6 +38,7 @@ class AE(nn.Module):
     def __init__(self):
         super().__init__()
         self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./pretrained")
+        self.output_dim = 576
 
     def encode(self, x):
         return self.ae.encode(x).latents
@@ -78,6 +79,7 @@ class SmolVLMEncoder(nn.Module):
         rep_dim = 256
         self.linear = nn.Linear(seq_hidden_dim, rep_dim)
         self.norm = nn.RMSNorm(rep_dim, elementwise_affine=False)
+        self.output_dim = rep_dim
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device

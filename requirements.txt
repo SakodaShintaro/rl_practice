@@ -9,3 +9,5 @@ opencv-python
 diffusers
 accelerate
 hl_gauss_pytorch
+wheel
+flash-attn
