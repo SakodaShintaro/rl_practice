@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 import wandb
 from networks.backbone import AE
+from networks.backbone import SmolVLMEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
@@ -38,6 +39,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
+    parser.add_argument(
+        "--encoder_model",
+        type=str,
+        default="ae",
+        choices=["ae", "smolvlm"],
+    )
     parser.add_argument("--policy_model", type=str, default="tanh", choices=["tanh", "diffusion"])
     parser.add_argument("--value_dim", type=int, default=51)
     return parser.parse_args()
@@ -90,8 +97,8 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    encoder = AE().to(device)
-    cnn_dim = 576
+    encoder = {"ae": AE(), "smolvlm": SmolVLMEncoder()}[args.encoder_model].to(device)
+    cnn_dim = 576 if args.encoder_model == "ae" else 256
     actor = {
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
