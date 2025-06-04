@@ -1,7 +1,7 @@
 import torch
 from diffusers.models import AutoencoderKL, AutoencoderTiny
 from torch import nn
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
 
 class BaseCNN(nn.Module):
@@ -65,9 +65,9 @@ class VAE(nn.Module):
 class SmolVLMEncoder(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        model_id = "HuggingFaceTB/SmolVLM-Instruct"
+        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-        self.model = AutoModelForVision2Seq.from_pretrained(
+        self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             _attn_implementation=attn_impl,

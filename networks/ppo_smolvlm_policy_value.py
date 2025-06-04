@@ -1,15 +1,15 @@
 import torch
 from torch import nn
 from torch.distributions import Beta
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
 
 class PpoSmolVlmPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int) -> None:
         super().__init__()
-        model_id = "HuggingFaceTB/SmolVLM-Instruct"
+        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-        self.net = AutoModelForVision2Seq.from_pretrained(
+        self.net = AutoModelForImageTextToText.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
