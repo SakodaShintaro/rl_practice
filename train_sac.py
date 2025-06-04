@@ -285,8 +285,10 @@ if __name__ == "__main__":
                         inputs=actions,
                         create_graph=True,
                     )[0]
-                    q_grad_norm = q_grad / (q_grad.norm(dim=1, keepdim=True) + 1e-8)
-                    return w_t * q_grad_norm
+                    with torch.no_grad():
+                        target = -actions / (1 - t) - t / (1 - t) * q_grad
+                        target /= target.norm(dim=1, keepdim=True) + 1e-8
+                        return w_t * target
 
                 target1 = calc_target(qf1, actions)
                 target2 = calc_target(qf2, actions)
