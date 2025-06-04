@@ -65,11 +65,7 @@ class PpoSmolVlmPolicyAndValue(nn.Module):
         with torch.no_grad():
             output = self.net.forward(
                 **model_inputs,
-                max_new_tokens=100,
-                do_sample=True,
-                output_scores=True,
                 output_hidden_states=True,
-                return_dict_in_generate=True,
             )
             hidden_states = output["hidden_states"]
             last_hidden_state = hidden_states[-1]

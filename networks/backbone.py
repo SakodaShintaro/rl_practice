@@ -100,11 +100,7 @@ class SmolVLMEncoder(nn.Module):
         with torch.no_grad():
             outputs = self.model.forward(
                 **model_inputs,
-                max_new_tokens=100,
-                do_sample=True,
-                output_scores=True,
                 output_hidden_states=True,
-                return_dict_in_generate=True,
             )
             hidden = outputs["hidden_states"][-1]
             x = hidden[:, input_len - 1]

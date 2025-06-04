@@ -11,3 +11,4 @@ accelerate
 hl_gauss_pytorch
 wheel
 flash-attn
+num2words
