@@ -13,11 +13,11 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import wandb
 from hl_gauss_pytorch import HLGaussLoss
 from torch import optim
 from tqdm import tqdm
 
+import wandb
 from networks.backbone import AE, SmolVLMEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
