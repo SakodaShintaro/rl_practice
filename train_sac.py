@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_size", type=int, default=int(8e4))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--learning_starts", type=int, default=2000)
+    parser.add_argument("--learning_starts", type=int, default=4000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
@@ -155,6 +155,7 @@ if __name__ == "__main__":
     obs, _ = env.reset(seed=seed)
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = None
+    step_limit = 200_000
 
     for episode_id in range(10000):
         if (episode_id + 1) % image_save_interval == 0:
@@ -211,12 +212,12 @@ if __name__ == "__main__":
             if termination or truncation:
                 break
 
+            if global_step >= step_limit:
+                break
+
             obs = next_obs
 
             if global_step <= args.learning_starts:
-                continue
-
-            if global_step % 5 != 0:
                 continue
 
             # training.
@@ -297,7 +298,7 @@ if __name__ == "__main__":
                 a_t = (1.0 - t) * noise + t * actions
                 v = actor.forward(a_t, t.squeeze(1), state_curr)
                 dacer_loss = F.mse_loss(v, target)
-                actor_loss += dacer_loss * 0.1
+                actor_loss += dacer_loss * 0.05
 
             actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -343,6 +344,9 @@ if __name__ == "__main__":
                 log_step_df.to_csv(
                     result_dir / "log_step.tsv", sep="\t", index=False, float_format="%.3f"
                 )
+
+        if global_step >= step_limit:
+            break
 
         score = info["episode"]["r"]
         score_list.append(score)
