@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(8e4))
+    parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--learning_starts", type=int, default=4000)
@@ -38,7 +38,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
-    parser.add_argument("--policy_model", type=str, default="tanh", choices=["tanh", "diffusion"])
+    parser.add_argument(
+        "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
+    )
     parser.add_argument("--value_dim", type=int, default=51)
     return parser.parse_args()
 
