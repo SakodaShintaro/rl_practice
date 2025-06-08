@@ -289,7 +289,8 @@ if __name__ == "__main__":
                         create_graph=True,
                     )[0]
                     with torch.no_grad():
-                        target = -actions / (1 - t) - t / (1 - t) * q_grad
+                        # target = -actions / (1 - t) - t / (1 - t) * q_grad
+                        target = (1 - t) / t * q_grad + 1 / t * actions
                         target /= target.norm(dim=1, keepdim=True) + 1e-8
                         return w_t * target
 
