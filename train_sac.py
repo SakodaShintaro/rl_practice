@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 import wandb
 from networks.backbone import AE
+from networks.smolvla_backbone import SmolVLABackbone
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
@@ -41,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
     )
+    parser.add_argument("--encoder", type=str, default="ae", choices=["ae", "smolvla"])
     parser.add_argument("--value_dim", type=int, default=51)
     return parser.parse_args()
 
@@ -92,8 +94,8 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    encoder = AE().to(device)
-    cnn_dim = 576
+    encoder = {"ae": AE(), "smolvla": SmolVLABackbone()}[args.encoder].to(device)
+    cnn_dim = 576 if args.encoder == "ae" else encoder.hidden_dim
     actor = {
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
@@ -174,7 +176,8 @@ if __name__ == "__main__":
             # select action
             obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
             output_enc = encoder.encode(obs_tensor).detach()
-            output_dec = encoder.decode(output_enc).detach()
+            if args.encoder == "ae":
+                output_dec = encoder.decode(output_enc).detach()
             if global_step < args.learning_starts:
                 action = env.action_space.sample()
                 progress_bar.update(1)
@@ -196,19 +199,27 @@ if __name__ == "__main__":
 
             # render
             if args.render:
-                output_dec_display = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
-                observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
-                reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))  # (96, 96, 3)
-                bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+                if args.encoder == "ae":
+                    output_dec_display = output_dec[0].detach().cpu().numpy()
+                    observation_img = np.transpose(obs, (1, 2, 0))
+                    reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))
+                    bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+                else:
+                    rgb_array = env.render()
+                    bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
             # save images for specific episodes
             if episode_id % image_save_interval == 0 and curr_image_dir is not None:
-                output_dec_display = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
-                observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
-                reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))  # (96, 96, 3)
-                bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+                if args.encoder == "ae":
+                    output_dec_display = output_dec[0].detach().cpu().numpy()
+                    observation_img = np.transpose(obs, (1, 2, 0))
+                    reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))
+                    bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+                else:
+                    rgb_array = env.render()
+                    bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:

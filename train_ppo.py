@@ -16,6 +16,7 @@ from torch import nn, optim
 import wandb
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
 from networks.ppo_paligemma_policy_value import PpoPaligemmaPolicyAndValue
+from networks.ppo_smolvla_policy_value import PpoSmolvlaPolicyAndValue
 from utils import concat_images
 from wrappers import make_env
 
@@ -30,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seq_len", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument(
-        "--model_name", type=str, default="default", choices=["default", "paligemma"]
+        "--model_name", type=str, default="default", choices=["default", "paligemma", "smolvla"]
     )
     return parser.parse_args()
 
@@ -85,6 +86,7 @@ class Agent:
         self.net = {
             "default": PpoBetaPolicyAndValue(3, seq_len).to(device),
             "paligemma": PpoPaligemmaPolicyAndValue(3).to(device),
+            "smolvla": PpoSmolvlaPolicyAndValue(3).to(device),
         }[model_name]
         num_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
@@ -311,7 +313,7 @@ if __name__ == "__main__":
                 observation_img = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
                 reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
                 bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
-            elif args.model_name == "paligemma":
+            elif args.model_name in ["paligemma", "smolvla"]:
                 rgb_array = env.render()
                 bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
             if args.render:
