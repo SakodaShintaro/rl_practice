@@ -63,22 +63,27 @@ class VAE(nn.Module):
 
 
 class SmolVLMEncoder(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, device=None) -> None:
         super().__init__()
         model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
             cache_dir="./cache",
+            device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.prompt = "<image> Please drive in the lane."
         seq_hidden_dim = self.model.config.text_config.hidden_size
         rep_dim = 256
-        self.linear = nn.Linear(seq_hidden_dim, rep_dim)
-        self.norm = nn.RMSNorm(rep_dim, elementwise_affine=False)
+        self.linear = nn.Linear(seq_hidden_dim, rep_dim, device=device)
+        self.norm = nn.RMSNorm(rep_dim, elementwise_affine=False, device=device)
         self.output_dim = rep_dim
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
@@ -116,6 +121,7 @@ class SmolVLMEncoder(nn.Module):
 
 if __name__ == "__main__":
     import torch
+
     device = torch.device("cuda")
     x = torch.rand(1, 3, 96, 96, device=device)
 
@@ -135,6 +141,6 @@ if __name__ == "__main__":
     output = model_cnn(x)
     print(output.shape)  # (1, 256)
 
-    model_smolvlm = SmolVLMEncoder().to(device)
+    model_smolvlm = SmolVLMEncoder(device=device)
     output = model_smolvlm.encode(x)
     print(output.shape)  # (1, 256)
