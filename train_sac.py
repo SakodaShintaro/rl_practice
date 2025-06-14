@@ -30,10 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--buffer_size", type=int, default=int(8e4))
+    parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--learning_starts", type=int, default=2000)
+    parser.add_argument("--learning_starts", type=int, default=4000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
@@ -44,7 +44,9 @@ def parse_args() -> argparse.Namespace:
         default="ae",
         choices=["ae", "smolvlm"],
     )
-    parser.add_argument("--policy_model", type=str, default="tanh", choices=["tanh", "diffusion"])
+    parser.add_argument(
+        "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
+    )
     parser.add_argument("--value_dim", type=int, default=51)
     return parser.parse_args()
 
@@ -161,6 +163,7 @@ if __name__ == "__main__":
     obs, _ = env.reset(seed=seed)
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = None
+    step_limit = 200_000
 
     for episode_id in range(10000):
         if (episode_id + 1) % image_save_interval == 0:
@@ -217,12 +220,12 @@ if __name__ == "__main__":
             if termination or truncation:
                 break
 
+            if global_step >= step_limit:
+                break
+
             obs = next_obs
 
             if global_step <= args.learning_starts:
-                continue
-
-            if global_step % 5 != 0:
                 continue
 
             # training.
@@ -291,8 +294,11 @@ if __name__ == "__main__":
                         inputs=actions,
                         create_graph=True,
                     )[0]
-                    q_grad_norm = q_grad / (q_grad.norm(dim=1, keepdim=True) + 1e-8)
-                    return w_t * q_grad_norm
+                    with torch.no_grad():
+                        # target = -actions / (1 - t) - t / (1 - t) * q_grad
+                        target = (1 - t) / t * q_grad + 1 / t * actions
+                        target /= target.norm(dim=1, keepdim=True) + 1e-8
+                        return w_t * target
 
                 target1 = calc_target(qf1, actions)
                 target2 = calc_target(qf2, actions)
@@ -301,7 +307,7 @@ if __name__ == "__main__":
                 a_t = (1.0 - t) * noise + t * actions
                 v = actor.forward(a_t, t.squeeze(1), state_curr)
                 dacer_loss = F.mse_loss(v, target)
-                actor_loss += dacer_loss * 0.1
+                actor_loss += dacer_loss * 0.05
 
             actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -347,6 +353,9 @@ if __name__ == "__main__":
                 log_step_df.to_csv(
                     result_dir / "log_step.tsv", sep="\t", index=False, float_format="%.3f"
                 )
+
+        if global_step >= step_limit:
+            break
 
         score = info["episode"]["r"]
         score_list.append(score)
