@@ -117,27 +117,24 @@ class SmolVLMEncoder(nn.Module):
 if __name__ == "__main__":
     import torch
     device = torch.device("cuda")
+    x = torch.rand(1, 3, 96, 96, device=device)
 
     model_ae = AE().to(device)
-    x = torch.rand(1, 3, 96, 96, device=device)
     output_enc = model_ae.encode(x)
     print(output_enc.shape)  # (1, 4, 12, 12)
     output_dec = model_ae.decode(output_enc)
     print(output_dec.shape)  # (1, 3, 96, 96)
 
     model_vae = VAE().to(device)
-    x = torch.rand(1, 3, 96, 96, device=device)
     output_enc = model_vae.encode(x)
     print(output_enc.shape)  # (1, 4, 12, 12)
     output_dec = model_vae.decode(output_enc)
     print(output_dec.shape)  # (1, 3, 96, 96)
 
     model_cnn = BaseCNN(in_channels=3).to(device)
-    x = torch.rand(1, 3, 96, 96, device=device)
     output = model_cnn(x)
     print(output.shape)  # (1, 256)
 
     model_smolvlm = SmolVLMEncoder().to(device)
-    x = torch.rand(1, 3, 96, 96, device=device)
     output = model_smolvlm.encode(x)
     print(output.shape)  # (1, 256)
