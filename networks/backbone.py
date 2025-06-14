@@ -80,10 +80,7 @@ class SmolVLMEncoder(nn.Module):
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.prompt = "<image> Please drive in the lane."
-        seq_hidden_dim = self.model.config.text_config.hidden_size
         self.output_dim = 576
-        self.linear = nn.Linear(seq_hidden_dim, self.output_dim, device=device)
-        self.norm = nn.RMSNorm(self.output_dim, elementwise_affine=False, device=device)
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
@@ -109,13 +106,7 @@ class SmolVLMEncoder(nn.Module):
             hidden = outputs["hidden_states"][-1]
             x = hidden[:, input_len - 1]
         x = x.to(torch.float32)
-        x = self.linear(x)
-        x = self.norm(x)
         return x
-
-    def decode(self, latents: torch.Tensor) -> torch.Tensor:
-        batch_size = latents.shape[0]
-        return torch.zeros(batch_size, 3, 96, 96, device=latents.device)
 
 
 if __name__ == "__main__":
