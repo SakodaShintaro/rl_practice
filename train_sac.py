@@ -18,7 +18,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from networks.backbone import AE
+from networks.backbone import AE, SmolVLMEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from replay_buffer import ReplayBuffer
@@ -32,12 +32,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
     parser.add_argument("--render", type=strtobool, default="True")
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
+    parser.add_argument(
+        "--encoder_model",
+        type=str,
+        choices=["ae", "smolvlm"],
+    )
     parser.add_argument(
         "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
     )
@@ -92,8 +97,8 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    encoder = AE().to(device)
-    cnn_dim = 576
+    encoder = {"ae": AE(), "smolvlm": SmolVLMEncoder()}[args.encoder_model].to(device)
+    cnn_dim = encoder.output_dim
     actor = {
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
@@ -173,12 +178,11 @@ if __name__ == "__main__":
 
             # select action
             obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
-            output_enc = encoder.encode(obs_tensor).detach()
-            output_dec = encoder.decode(output_enc).detach()
             if global_step < args.learning_starts:
                 action = env.action_space.sample()
                 progress_bar.update(1)
             else:
+                output_enc = encoder.encode(obs_tensor).detach()
                 output_enc = output_enc.flatten(start_dim=1)
                 action, selected_log_pi, _ = actor.get_action(output_enc)
                 action = action[0].detach().cpu().numpy()
@@ -196,19 +200,13 @@ if __name__ == "__main__":
 
             # render
             if args.render:
-                output_dec_display = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
-                observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
-                reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))  # (96, 96, 3)
-                bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+                bgr_array = env.render()
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
             # save images for specific episodes
             if episode_id % image_save_interval == 0 and curr_image_dir is not None:
-                output_dec_display = output_dec[0].detach().cpu().numpy()  # (3, 96, 96)
-                observation_img = np.transpose(obs, (1, 2, 0))  # (96, 96, 3)
-                reconstructed_img = np.transpose(output_dec_display, (1, 2, 0))  # (96, 96, 3)
-                bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
+                bgr_array = env.render()
                 cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:
