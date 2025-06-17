@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
         "--encoder_model",
         type=str,
         choices=["ae", "smolvlm"],
+        required=True,
     )
     parser.add_argument(
         "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
