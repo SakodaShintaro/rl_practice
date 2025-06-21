@@ -18,9 +18,9 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from networks.backbone import AE, SmolVLMEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
+from networks.sequence_processor import SequenceProcessor
 from replay_buffer import ReplayBuffer
 from utils import concat_images
 from wrappers import make_env
@@ -98,8 +98,9 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    encoder = {"ae": AE(), "smolvlm": SmolVLMEncoder()}[args.encoder_model].to(device)
-    cnn_dim = encoder.output_dim
+    seq_len = 2
+    sequence_processor = SequenceProcessor(seq_len=seq_len).to(device)
+    cnn_dim = sequence_processor.hidden_dim
     actor = {
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
@@ -125,7 +126,7 @@ if __name__ == "__main__":
     qf2 = qf2.to(device)
     lr = 1e-4
     optimizer = optim.AdamW(
-        list(encoder.parameters())
+        list(sequence_processor.parameters())
         + list(qf1.parameters())
         + list(qf2.parameters())
         + list(actor.parameters()),
@@ -149,7 +150,6 @@ if __name__ == "__main__":
     a_optimizer = optim.Adam([log_alpha], lr=lr)
     print(f"{target_entropy=}")
 
-    seq_len = 2
     rb = ReplayBuffer(
         args.buffer_size,
         seq_len,
@@ -176,6 +176,10 @@ if __name__ == "__main__":
         reward_list = []
         first_value = None
 
+        input_reward_list = [torch.zeros((1, 1), device=device) for _ in range(seq_len)]
+        input_obs_list = [torch.zeros((1, 3, 96, 96), device=device) for _ in range(seq_len)]
+        input_action_list = [torch.zeros((1, action_dim), device=device) for _ in range(seq_len)]
+
         while True:
             global_step += 1
 
@@ -185,21 +189,35 @@ if __name__ == "__main__":
                 action = env.action_space.sample()
                 progress_bar.update(1)
             else:
-                output_enc = encoder.encode(obs_tensor).detach()
-                output_enc = output_enc.flatten(start_dim=1)
-                action, selected_log_pi, _ = actor.get_action(output_enc)
-                action = action[0].detach().cpu().numpy()
-                action = action * action_scale + action_bias
+                with torch.inference_mode():
+                    input_obs_list.append(obs_tensor)
+                    input_obs_list.pop(0)
+                    input_reward_tensor = torch.stack(input_reward_list, dim=1)
+                    input_obs_tensor = torch.stack(input_obs_list, dim=1)
+                    input_action_tensor = torch.stack(input_action_list, dim=1)
+                    seq_before, seq_after = sequence_processor(
+                        input_reward_tensor, input_obs_tensor, input_action_tensor
+                    )
+                    output_enc = seq_before[:, -1]
+                    action, selected_log_pi, _ = actor.get_action(output_enc)
+                    action = action[0].detach().cpu().numpy()
+                    action = action * action_scale + action_bias
 
-                action_noise = env.action_space.sample()
-                c = args.action_noise
-                action = (1 - c) * action + c * action_noise
-                action = np.clip(action, action_low, action_high)
+                    action_noise = env.action_space.sample()
+                    c = args.action_noise
+                    action = (1 - c) * action + c * action_noise
+                    action = np.clip(action, action_low, action_high)
+
+                    input_action_list.append(torch.Tensor(action).to(device).unsqueeze(0))
+                    input_action_list.pop(0)
 
             # execute the game and log data.
             next_obs, reward, termination, truncation, info = env.step(action)
             reward /= 10.0
             rb.add(obs, action, reward, termination or truncation)
+
+            input_reward_list.append(torch.Tensor([[reward]]).to(device))
+            input_reward_list.pop(0)
 
             # render
             if args.render:
@@ -227,9 +245,11 @@ if __name__ == "__main__":
 
             # training.
             data = rb.sample(args.batch_size)
+            seq_before, seq_after = sequence_processor(
+                data.rewards, data.observations, data.actions
+            )
             with torch.no_grad():
-                state_next = encoder.encode(data.observations[:, -1])
-                state_next = state_next.flatten(start_dim=1)
+                state_next = seq_before[:, -1].detach()
                 next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
                 qf1_next_target = qf1(state_next, next_state_actions)
                 qf2_next_target = qf2(state_next, next_state_actions)
@@ -242,8 +262,7 @@ if __name__ == "__main__":
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = encoder.encode(data.observations[:, -2]).detach()
-            state_curr = state_curr.flatten(start_dim=1)
+            state_curr = seq_before[:, -2].detach()
             state_norm = state_curr.norm(dim=1)
 
             qf1_a_values = qf1(state_curr, data.actions[:, -2])
