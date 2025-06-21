@@ -202,12 +202,14 @@ if __name__ == "__main__":
             # render
             if args.render:
                 bgr_array = env.render()
+                bgr_array = cv2.cvtColor(bgr_array, cv2.COLOR_RGB2BGR)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
             # save images for specific episodes
             if episode_id % image_save_interval == 0 and curr_image_dir is not None:
                 bgr_array = env.render()
+                bgr_array = cv2.cvtColor(bgr_array, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:
