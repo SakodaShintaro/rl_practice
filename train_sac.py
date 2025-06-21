@@ -331,7 +331,7 @@ if __name__ == "__main__":
                     "a_logp": selected_log_pi.mean().item(),
                     "losses/alpha_loss": alpha_loss.item(),
                     "charts/elapse_time_sec": elapsed_time,
-                    "charts/SPS": int(global_step / elapsed_time),
+                    "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
                 }
                 if args.policy_model == "diffusion":
