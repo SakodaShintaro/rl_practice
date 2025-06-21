@@ -17,11 +17,13 @@ class ReplayBuffer:
     def __init__(
         self,
         size: int,
+        seq_len: int,
         obs_shape: np.ndarray,
         action_shape: np.ndarray,
         device: torch.device,
     ) -> None:
         self.size = size
+        self.seq_len = seq_len
         self.action_shape = action_shape
         self.device = device
 
@@ -52,11 +54,29 @@ class ReplayBuffer:
         self.full = self.full or self.idx == 0
 
     def sample(self, batch_size: int) -> ReplayBufferData:
-        idx = np.random.randint(0, self.size if self.full else self.idx, size=batch_size)
+        curr_size = self.size if self.full else self.idx
+        assert curr_size >= self.seq_len, "Not enough data to sample a sequence."
+        indices = np.random.randint(0, curr_size - self.seq_len, size=batch_size)
+        observations = []
+        next_observations = []
+        actions = []
+        rewards = []
+        dones = []
+        for idx in indices:
+            observations.append(self.observations[idx : idx + self.seq_len])
+            next_observations.append(self.next_observations[idx : idx + self.seq_len])
+            actions.append(self.actions[idx : idx + self.seq_len])
+            rewards.append(self.rewards[idx : idx + self.seq_len])
+            dones.append(self.dones[idx : idx + self.seq_len])
+        observations = np.stack(observations)
+        next_observations = np.stack(next_observations)
+        actions = np.stack(actions)
+        rewards = np.stack(rewards)
+        dones = np.stack(dones)
         return ReplayBufferData(
-            torch.Tensor(self.observations[idx]).to(self.device),
-            torch.Tensor(self.next_observations[idx]).to(self.device),
-            torch.Tensor(self.actions[idx]).to(self.device),
-            torch.Tensor(self.rewards[idx]).to(self.device),
-            torch.Tensor(self.dones[idx]).to(self.device),
+            torch.tensor(observations).to(self.device),
+            torch.tensor(next_observations).to(self.device),
+            torch.tensor(actions).to(self.device),
+            torch.tensor(rewards).to(self.device),
+            torch.tensor(dones).to(self.device),
         )

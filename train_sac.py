@@ -149,8 +149,10 @@ if __name__ == "__main__":
     a_optimizer = optim.Adam([log_alpha], lr=lr)
     print(f"{target_entropy=}")
 
+    seq_len = 2
     rb = ReplayBuffer(
         args.buffer_size,
+        seq_len,
         env.observation_space.shape,
         env.action_space.shape,
         device,
@@ -226,7 +228,7 @@ if __name__ == "__main__":
             # training.
             data = rb.sample(args.batch_size)
             with torch.no_grad():
-                state_next = encoder.encode(data.next_observations)
+                state_next = encoder.encode(data.next_observations[:, -1])
                 state_next = state_next.flatten(start_dim=1)
                 next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
                 qf1_next_target = qf1(state_next, next_state_actions)
@@ -235,17 +237,17 @@ if __name__ == "__main__":
                     qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
                     qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
                 min_q = torch.min(qf1_next_target, qf2_next_target)
-                min_qf_next_target = min_q - alpha * next_state_log_pi
-                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (
-                    min_qf_next_target
-                ).view(-1)
+                min_qf_next_target = (min_q - alpha * next_state_log_pi).view(-1)
+                curr_reward = data.rewards[:, -1].flatten()
+                curr_continue = 1 - data.dones[:, -1].flatten()
+                next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = encoder.encode(data.observations).detach()
+            state_curr = encoder.encode(data.observations[:, -1]).detach()
             state_curr = state_curr.flatten(start_dim=1)
             state_norm = state_curr.norm(dim=1)
 
-            qf1_a_values = qf1(state_curr, data.actions)
-            qf2_a_values = qf2(state_curr, data.actions)
+            qf1_a_values = qf1(state_curr, data.actions[:, -1])
+            qf2_a_values = qf2(state_curr, data.actions[:, -1])
             if args.value_dim == 1:
                 qf1_a_values = qf1_a_values.view(-1)
                 qf2_a_values = qf2_a_values.view(-1)
