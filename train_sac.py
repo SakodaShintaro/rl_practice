@@ -124,13 +124,13 @@ if __name__ == "__main__":
     qf1 = qf1.to(device)
     qf2 = qf2.to(device)
     lr = 1e-4
-    q_optimizer = optim.AdamW(
-        list(encoder.parameters()) + list(qf1.parameters()) + list(qf2.parameters()),
+    optimizer = optim.AdamW(
+        list(encoder.parameters())
+        + list(qf1.parameters())
+        + list(qf2.parameters())
+        + list(actor.parameters()),
         lr=lr,
         weight_decay=1e-5,
-    )
-    actor_optimizer = optim.AdamW(
-        list(encoder.parameters()) + list(actor.parameters()), lr=lr, weight_decay=1e-5
     )
     if args.value_dim > 1:
         hl_gauss_loss = HLGaussLoss(
@@ -240,6 +240,8 @@ if __name__ == "__main__":
 
             state_curr = encoder.encode(data.observations).detach()
             state_curr = state_curr.flatten(start_dim=1)
+            state_norm = state_curr.norm(dim=1)
+
             qf1_a_values = qf1(state_curr, data.actions)
             qf2_a_values = qf2(state_curr, data.actions)
             if args.value_dim == 1:
@@ -252,14 +254,6 @@ if __name__ == "__main__":
                 qf2_loss = hl_gauss_loss(qf2_a_values, next_q_value)
             qf_loss = qf1_loss + qf2_loss
 
-            # optimize the model
-            q_optimizer.zero_grad()
-            qf_loss.backward()
-            q_optimizer.step()
-
-            state_curr = encoder.encode(data.observations).detach()
-            state_curr = state_curr.flatten(start_dim=1)
-            state_norm = state_curr.norm(dim=1)
             pi, log_pi, _ = actor.get_action(state_curr)
             qf1_pi = qf1(state_curr, pi)
             qf2_pi = qf2(state_curr, pi)
@@ -302,9 +296,16 @@ if __name__ == "__main__":
                 dacer_loss = F.mse_loss(v, target)
                 actor_loss += dacer_loss * 0.05
 
-            actor_optimizer.zero_grad()
+            # optimize the model
+            optimizer.zero_grad()
             actor_loss.backward()
-            actor_optimizer.step()
+            # reset q
+            for param in qf1.parameters():
+                param.grad = None
+            for param in qf2.parameters():
+                param.grad = None
+            qf_loss.backward()
+            optimizer.step()
 
             alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
 
