@@ -262,7 +262,7 @@ if __name__ == "__main__":
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = seq_before[:, -2].detach()
+            state_curr = seq_before[:, -4].detach()
             state_norm = state_curr.norm(dim=1)
 
             qf1_a_values = qf1(state_curr, data.actions[:, -2])
