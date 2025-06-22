@@ -259,6 +259,10 @@ if __name__ == "__main__":
             qf_loss = qf1_loss + qf2_loss
 
             pi, log_pi, _ = actor.get_action(state_curr)
+            for param in qf1.parameters():
+                param.requires_grad_(False)
+            for param in qf2.parameters():
+                param.requires_grad_(False)
             qf1_pi = qf1(state_curr, pi)
             qf2_pi = qf2(state_curr, pi)
             if args.value_dim > 1:
@@ -266,6 +270,10 @@ if __name__ == "__main__":
                 qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
             actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+            for param in qf1.parameters():
+                param.requires_grad_(True)
+            for param in qf2.parameters():
+                param.requires_grad_(True)
 
             # DACER2 (https://arxiv.org/abs/2505.23426) loss
             if args.policy_model == "diffusion":
@@ -301,14 +309,9 @@ if __name__ == "__main__":
                 actor_loss += dacer_loss * 0.05
 
             # optimize the model
+            loss = actor_loss + qf_loss
             optimizer.zero_grad()
-            actor_loss.backward()
-            # reset q
-            for param in qf1.parameters():
-                param.grad = None
-            for param in qf2.parameters():
-                param.grad = None
-            qf_loss.backward()
+            loss.backward()
             optimizer.step()
 
             alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
