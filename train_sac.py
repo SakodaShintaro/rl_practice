@@ -198,7 +198,7 @@ if __name__ == "__main__":
                     seq_before, seq_after = sequence_processor(
                         input_reward_tensor, input_obs_tensor, input_action_tensor
                     )
-                    output_enc = seq_before[:, -1]
+                    output_enc = seq_after[:, -1]
                     action, selected_log_pi, _ = actor.get_action(output_enc)
                     action = action[0].detach().cpu().numpy()
                     action = action * action_scale + action_bias
@@ -249,7 +249,7 @@ if __name__ == "__main__":
                 data.rewards, data.observations, data.actions
             )
             with torch.no_grad():
-                state_next = seq_before[:, -1].detach()
+                state_next = seq_after[:, -1].detach()
                 next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
                 qf1_next_target = qf1(state_next, next_state_actions)
                 qf2_next_target = qf2(state_next, next_state_actions)
@@ -262,7 +262,7 @@ if __name__ == "__main__":
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = seq_before[:, -4].detach()
+            state_curr = seq_after[:, -4]
             state_norm = state_curr.norm(dim=1)
 
             qf1_a_values = qf1(state_curr, data.actions[:, -2])
