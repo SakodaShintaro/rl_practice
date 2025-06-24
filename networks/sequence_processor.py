@@ -81,10 +81,10 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         x = src
-        x = x + self._sa_block(
-            self.norm1(x), attn_mask=causal_mask, key_padding_mask=None, is_causal=True
-        )
-        x = x + self._ff_block(self.norm2(x))
+        # x = x + self._sa_block(
+        #     self.norm1(x), attn_mask=causal_mask, key_padding_mask=None, is_causal=True
+        # )
+        # x = x + self._ff_block(self.norm2(x))
         return x
 
     # self-attention block
@@ -135,7 +135,9 @@ class SequenceProcessor(nn.Module):
         self.action_encoder = nn.Linear(3, self.hidden_dim)
 
         # Positional Encoding
-        self.pos_embedding = nn.Parameter(torch.randn(1, seq_len * 3 - 1, self.hidden_dim))
+        self.pos_embedding = nn.Parameter(
+            torch.zeros(1, seq_len * 3 - 1, self.hidden_dim), requires_grad=False
+        )
 
         # Transformer Encoder
         encoder_layer = TransformerEncoderLayer(

@@ -18,6 +18,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
+from metrics.gradient_norm import compute_gradient_norm
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from networks.sequence_processor import SequenceProcessor
@@ -157,6 +158,15 @@ if __name__ == "__main__":
         env.action_space.shape,
         device,
     )
+
+    # Initialize gradient norm targets
+    gradient_norm_targets = {
+        "actor": actor,
+        "qf1": qf1,
+        "qf2": qf2,
+        "sequence_processor": sequence_processor,
+    }
+
     start_time = time.time()
 
     # start the game
@@ -331,6 +341,13 @@ if __name__ == "__main__":
             loss = actor_loss + qf_loss
             optimizer.zero_grad()
             loss.backward()
+
+            # Track gradient norms before optimizer step
+            grad_metrics = {
+                key: compute_gradient_norm(model)
+                for key, model in gradient_norm_targets.items()
+            }
+
             optimizer.step()
 
             alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
@@ -361,6 +378,11 @@ if __name__ == "__main__":
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
                 }
+
+                # Add gradient norm metrics
+                for key, value in grad_metrics.items():
+                    data_dict[f"gradients/{key}"] = value
+
                 if args.policy_model == "diffusion":
                     data_dict["losses/dacer_loss"] = dacer_loss.item()
                 wandb.log(data_dict)
