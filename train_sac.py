@@ -160,7 +160,16 @@ if __name__ == "__main__":
     )
 
     # Initialize gradient norm targets
-    gradient_norm_targets = {
+    total_model = torch.nn.ModuleList(
+        [
+            sequence_processor,
+            actor,
+            qf1,
+            qf2,
+        ]
+    )
+    monitoring_targets = {
+        "total": total_model,
         "actor": actor,
         "qf1": qf1,
         "qf2": qf2,
@@ -342,12 +351,15 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             loss.backward()
 
+            # Clip gradients
+            torch.nn.utils.clip_grad_norm_(total_model.parameters(), max_norm=100.0)
+
             # Compute gradient and parameter norms
             grad_metrics = {
-                key: compute_gradient_norm(model) for key, model in gradient_norm_targets.items()
+                key: compute_gradient_norm(model) for key, model in monitoring_targets.items()
             }
             param_metrics = {
-                key: compute_parameter_norm(model) for key, model in gradient_norm_targets.items()
+                key: compute_parameter_norm(model) for key, model in monitoring_targets.items()
             }
 
             optimizer.step()
