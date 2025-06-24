@@ -18,7 +18,7 @@ from torch import optim
 from tqdm import tqdm
 
 import wandb
-from metrics.gradient_norm import compute_gradient_norm
+from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from networks.sequence_processor import SequenceProcessor
@@ -342,10 +342,12 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             loss.backward()
 
-            # Track gradient norms before optimizer step
+            # Compute gradient and parameter norms
             grad_metrics = {
-                key: compute_gradient_norm(model)
-                for key, model in gradient_norm_targets.items()
+                key: compute_gradient_norm(model) for key, model in gradient_norm_targets.items()
+            }
+            param_metrics = {
+                key: compute_parameter_norm(model) for key, model in gradient_norm_targets.items()
             }
 
             optimizer.step()
@@ -382,6 +384,10 @@ if __name__ == "__main__":
                 # Add gradient norm metrics
                 for key, value in grad_metrics.items():
                     data_dict[f"gradients/{key}"] = value
+
+                # Add parameter norm metrics
+                for key, value in param_metrics.items():
+                    data_dict[f"parameters/{key}"] = value
 
                 if args.policy_model == "diffusion":
                     data_dict["losses/dacer_loss"] = dacer_loss.item()
