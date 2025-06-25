@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 import wandb
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
+from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from networks.sequence_processor import SequenceProcessor
@@ -185,6 +186,12 @@ if __name__ == "__main__":
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = None
     step_limit = 200_000
+    metrics_computers = {
+        "state": StatisticalMetricsComputer(),
+        "qf1": StatisticalMetricsComputer(),
+        "qf2": StatisticalMetricsComputer(),
+        "actor": StatisticalMetricsComputer(),
+    }
 
     for episode_id in range(10000):
         if (episode_id + 1) % image_save_interval == 0:
@@ -322,6 +329,13 @@ if __name__ == "__main__":
             for param in qf2.parameters():
                 param.requires_grad_(True)
 
+            # Compute srank for key activations (using intermediate layer outputs)
+            feature_dict = {
+                "state": state_curr,
+                "qf1": qf1_pi_output_dict["activation"],
+                "qf2": qf2_pi_output_dict["activation"],
+            }
+
             # DACER2 (https://arxiv.org/abs/2505.23426) loss
             if args.policy_model == "diffusion":
                 actions = pi.clone().detach()
@@ -356,6 +370,8 @@ if __name__ == "__main__":
                 v = actor_output_dict["output"]
                 dacer_loss = F.mse_loss(v, target)
                 actor_loss += dacer_loss * 0.05
+
+                feature_dict["actor"] = actor_output_dict["activation"]
 
             # optimize the model
             loss = actor_loss + qf_loss
@@ -411,6 +427,12 @@ if __name__ == "__main__":
                 # Add parameter norm metrics
                 for key, value in param_metrics.items():
                     data_dict[f"parameters/{key}"] = value
+
+                # Trigger statistical metrics computation
+                for feature_name, feature in feature_dict.items():
+                    result_dict = metrics_computers[feature_name](feature)
+                    for key, value in result_dict.items():
+                        data_dict[f"{key}/{feature_name}"] = value
 
                 if args.policy_model == "diffusion":
                     data_dict["losses/dacer_loss"] = dacer_loss.item()

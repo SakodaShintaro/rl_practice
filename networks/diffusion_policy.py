@@ -71,14 +71,12 @@ class DiffusionPolicy(nn.Module):
         a = torch.cat([a, t, state], 1)
 
         a = F.relu(self.fc1(a))
-        result_dict["fc1"] = a
-
         a = F.relu(self.fc2(a))
-        result_dict["fc2"] = a
+        result_dict["activation"] = a
 
         if self.use_normalize:
             a = a / torch.norm(a, dim=1).view((-1, 1))
-            result_dict["fc2_normalized"] = a
+            result_dict["activation"] = a
 
         a = self.fc3(a)
         result_dict["output"] = a

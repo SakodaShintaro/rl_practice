@@ -43,19 +43,16 @@ class SacQ(nn.Module):
         self.apply(weights_init_)
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
-        x = torch.cat([x, a], dim=1)
-
         result_dict = {}
 
+        x = torch.cat([x, a], dim=1)
         x1 = F.relu(self.fc1(x))
-        result_dict["fc1"] = x1
-
         x2 = F.relu(self.fc2(x1))
-        result_dict["fc2"] = x2
+        result_dict["activation"] = x2
 
         if self.use_normalize:
             x2 = x2 / torch.norm(x2, dim=1).view((-1, 1))
-            result_dict["fc2_normalized"] = x2
+            result_dict["activation"] = x2
 
         output = self.fc3(x2)
         result_dict["output"] = output
@@ -83,14 +80,12 @@ class SacTanhPolicy(nn.Module):
         result_dict = {}
 
         x1 = F.relu(self.fc1(x))
-        result_dict["fc1"] = x1
-
         x2 = F.relu(self.fc2(x1))
-        result_dict["fc2"] = x2
+        result_dict["activation"] = x2
 
         if self.use_normalize:
             x2 = x2 / torch.norm(x2, dim=1).view((-1, 1))
-            result_dict["fc2_normalized"] = x2
+            result_dict["activation"] = x2
 
         mean = self.fc_mean(x2)
         log_std = self.fc_logstd(x2)
