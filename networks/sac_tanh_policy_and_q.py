@@ -42,14 +42,25 @@ class SacQ(nn.Module):
         self.use_normalize = use_normalize
         self.apply(weights_init_)
 
-    def forward(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
         x = torch.cat([x, a], dim=1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+
+        result_dict = {}
+
+        x1 = F.relu(self.fc1(x))
+        result_dict["fc1"] = x1
+
+        x2 = F.relu(self.fc2(x1))
+        result_dict["fc2"] = x2
+
         if self.use_normalize:
-            x = x / torch.norm(x, dim=1).view((-1, 1))
-        x = self.fc3(x)
-        return x
+            x2 = x2 / torch.norm(x2, dim=1).view((-1, 1))
+            result_dict["fc2_normalized"] = x2
+
+        output = self.fc3(x2)
+        result_dict["output"] = output
+
+        return result_dict
 
 
 LOG_STD_MAX = 2
@@ -68,22 +79,35 @@ class SacTanhPolicy(nn.Module):
         self.use_normalize = use_normalize
         self.apply(weights_init_)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        result_dict = {}
+
+        x1 = F.relu(self.fc1(x))
+        result_dict["fc1"] = x1
+
+        x2 = F.relu(self.fc2(x1))
+        result_dict["fc2"] = x2
+
         if self.use_normalize:
-            x = x / torch.norm(x, dim=1).view((-1, 1))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
+            x2 = x2 / torch.norm(x2, dim=1).view((-1, 1))
+            result_dict["fc2_normalized"] = x2
+
+        mean = self.fc_mean(x2)
+        log_std = self.fc_logstd(x2)
         log_std = torch.tanh(log_std)
         log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
             log_std + 1
         )  # From SpinUp / Denis Yarats
 
-        return mean, log_std
+        result_dict["mean"] = mean
+        result_dict["log_std"] = log_std
 
-    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean, log_std = self(x)
+        return result_dict
+
+    def get_action(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        result_dict = self(x)
+        mean = result_dict["mean"]
+        log_std = result_dict["log_std"]
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))

@@ -270,8 +270,10 @@ if __name__ == "__main__":
             with torch.no_grad():
                 state_next = seq_after[:, -1].detach()
                 next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
-                qf1_next_target = qf1(state_next, next_state_actions)
-                qf2_next_target = qf2(state_next, next_state_actions)
+                qf1_next_output_dict = qf1(state_next, next_state_actions)
+                qf2_next_output_dict = qf2(state_next, next_state_actions)
+                qf1_next_target = qf1_next_output_dict["output"]
+                qf2_next_target = qf2_next_output_dict["output"]
                 if args.value_dim > 1:
                     qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
                     qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
@@ -284,8 +286,13 @@ if __name__ == "__main__":
             state_curr = seq_after[:, -4]
             state_norm = state_curr.norm(dim=1)
 
-            qf1_a_values = qf1(state_curr, data.actions[:, -2])
-            qf2_a_values = qf2(state_curr, data.actions[:, -2])
+            # Get Q-values and activations for Srank computation
+            qf1_output_dict = qf1(state_curr, data.actions[:, -2])
+            qf2_output_dict = qf2(state_curr, data.actions[:, -2])
+
+            qf1_a_values = qf1_output_dict["output"]
+            qf2_a_values = qf2_output_dict["output"]
+
             if args.value_dim == 1:
                 qf1_a_values = qf1_a_values.view(-1)
                 qf2_a_values = qf2_a_values.view(-1)
@@ -301,8 +308,10 @@ if __name__ == "__main__":
                 param.requires_grad_(False)
             for param in qf2.parameters():
                 param.requires_grad_(False)
-            qf1_pi = qf1(state_curr, pi)
-            qf2_pi = qf2(state_curr, pi)
+            qf1_pi_output_dict = qf1(state_curr, pi)
+            qf2_pi_output_dict = qf2(state_curr, pi)
+            qf1_pi = qf1_pi_output_dict["output"]
+            qf2_pi = qf2_pi_output_dict["output"]
             if args.value_dim > 1:
                 qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
                 qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
@@ -323,7 +332,8 @@ if __name__ == "__main__":
                 w_t = torch.exp(c * t + d)
 
                 def calc_target(q_network, actions):
-                    q_values = q_network(state_curr, actions)
+                    q_output_dict = q_network(state_curr, actions)
+                    q_values = q_output_dict["output"]
                     if args.value_dim > 1:
                         q_values = hl_gauss_loss(q_values).unsqueeze(-1)
                     q_grad = torch.autograd.grad(
@@ -342,7 +352,8 @@ if __name__ == "__main__":
                 target = (target1 + target2) / 2.0
                 noise = torch.randn_like(actions)
                 a_t = (1.0 - t) * noise + t * actions
-                v = actor.forward(a_t, t.squeeze(1), state_curr)
+                actor_output_dict = actor.forward(a_t, t.squeeze(1), state_curr)
+                v = actor_output_dict["output"]
                 dacer_loss = F.mse_loss(v, target)
                 actor_loss += dacer_loss * 0.05
 

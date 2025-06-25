@@ -65,17 +65,26 @@ class DiffusionPolicy(nn.Module):
         self.step_num = 5
         self.t_embedder = TimestepEmbedder(time_embedding_size)
 
-    def forward(self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    def forward(self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor) -> dict[str, torch.Tensor]:
+        result_dict = {}
         t = self.t_embedder(t)
         a = torch.cat([a, t, state], 1)
+
         a = F.relu(self.fc1(a))
+        result_dict["fc1"] = a
+
         a = F.relu(self.fc2(a))
+        result_dict["fc2"] = a
+
         if self.use_normalize:
             a = a / torch.norm(a, dim=1).view((-1, 1))
-        a = self.fc3(a)
-        return a
+            result_dict["fc2_normalized"] = a
 
-    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        a = self.fc3(a)
+        result_dict["output"] = a
+        return result_dict
+
+    def get_action(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         bs = x.size(0)
         normal = torch.distributions.Normal(
             torch.zeros((bs, self.action_dim), device=x.device),
@@ -87,7 +96,8 @@ class DiffusionPolicy(nn.Module):
         curr_time = torch.zeros((bs), device=x.device)
 
         for _ in range(self.step_num):
-            v = self.forward(action, curr_time, x)
+            tmp_dict = self.forward(action, curr_time, x)
+            v = tmp_dict["output"]
             action = action + dt * v
             curr_time += dt
 
