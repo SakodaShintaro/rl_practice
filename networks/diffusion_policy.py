@@ -1,9 +1,10 @@
 import math
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+from .sparse_utils import apply_one_shot_pruning
 
 
 class TimestepEmbedder(nn.Module):
@@ -53,6 +54,7 @@ class DiffusionPolicy(nn.Module):
         state_dim: int,
         action_dim: int,
         use_normalize: bool = False,
+        sparsity: float = 0.0,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
@@ -64,6 +66,9 @@ class DiffusionPolicy(nn.Module):
         self.action_dim = action_dim
         self.step_num = 5
         self.t_embedder = TimestepEmbedder(time_embedding_size)
+        self.sparse_mask = (
+            None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
+        )
 
     def forward(self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor) -> dict[str, torch.Tensor]:
         result_dict = {}

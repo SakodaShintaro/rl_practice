@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .sparse_utils import apply_one_shot_pruning
+
 
 def weights_init_(m):
     """
@@ -33,6 +35,7 @@ class SacQ(nn.Module):
         hidden_dim: int,
         out_dim: int,
         use_normalize: bool = True,
+        sparsity: float = 0.0,
     ) -> None:
         super().__init__()
         mid_dim = in_channels + action_dim
@@ -41,6 +44,10 @@ class SacQ(nn.Module):
         self.fc3 = nn.Linear(hidden_dim, out_dim)
         self.use_normalize = use_normalize
         self.apply(weights_init_)
+
+        self.sparse_mask = (
+            None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
+        )
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
         result_dict = {}
@@ -66,7 +73,12 @@ LOG_STD_MIN = -5
 
 class SacTanhPolicy(nn.Module):
     def __init__(
-        self, in_channels: int, action_dim: int, hidden_dim: int, use_normalize: bool = True
+        self,
+        in_channels: int,
+        action_dim: int,
+        hidden_dim: int,
+        use_normalize: bool = True,
+        sparsity: float = 0.0,
     ) -> None:
         super().__init__()
         self.fc1 = nn.Linear(in_channels, hidden_dim)
@@ -75,6 +87,10 @@ class SacTanhPolicy(nn.Module):
         self.fc_logstd = nn.Linear(hidden_dim, action_dim)
         self.use_normalize = use_normalize
         self.apply(weights_init_)
+
+        self.sparse_mask = (
+            None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
+        )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         result_dict = {}

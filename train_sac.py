@@ -23,6 +23,7 @@ from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from networks.sequence_processor import SequenceProcessor
+from networks.sparse_utils import apply_masks_during_training
 from replay_buffer import ReplayBuffer
 from utils import concat_images
 from wrappers import make_env
@@ -50,6 +51,7 @@ def parse_args() -> argparse.Namespace:
         "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
     )
     parser.add_argument("--value_dim", type=int, default=51)
+    parser.add_argument("--sparsity", type=float, default=0.1)
     return parser.parse_args()
 
 
@@ -105,9 +107,15 @@ if __name__ == "__main__":
     cnn_dim = sequence_processor.hidden_dim
     actor = {
         "tanh": SacTanhPolicy(
-            in_channels=cnn_dim, action_dim=action_dim, hidden_dim=512, use_normalize=False
+            in_channels=cnn_dim,
+            action_dim=action_dim,
+            hidden_dim=512,
+            use_normalize=False,
+            sparsity=args.sparsity,
         ),
-        "diffusion": DiffusionPolicy(state_dim=cnn_dim, action_dim=action_dim, use_normalize=False),
+        "diffusion": DiffusionPolicy(
+            state_dim=cnn_dim, action_dim=action_dim, use_normalize=False, sparsity=args.sparsity
+        ),
     }[args.policy_model]
     qf1 = SacQ(
         in_channels=cnn_dim,
@@ -115,6 +123,7 @@ if __name__ == "__main__":
         hidden_dim=512,
         out_dim=args.value_dim,
         use_normalize=False,
+        sparsity=args.sparsity,
     )
     qf2 = SacQ(
         in_channels=cnn_dim,
@@ -122,6 +131,7 @@ if __name__ == "__main__":
         hidden_dim=512,
         out_dim=args.value_dim,
         use_normalize=False,
+        sparsity=args.sparsity,
     )
     actor = actor.to(device)
     qf1 = qf1.to(device)
@@ -390,6 +400,11 @@ if __name__ == "__main__":
             }
 
             optimizer.step()
+
+            # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
+            apply_masks_during_training(actor)
+            apply_masks_during_training(qf1)
+            apply_masks_during_training(qf2)
 
             alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
 
