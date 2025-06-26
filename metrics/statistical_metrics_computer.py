@@ -72,11 +72,11 @@ class StatisticalMetricsComputer:
         # 各ニューロンの活性化の絶対値の平均を計算
         neuron_activations = torch.mean(torch.abs(features), dim=0)  # (feature_dim,)
 
-        # 全ニューロンの活性化の合計
-        total_activation = torch.sum(neuron_activations)
+        # 平均化
+        mean_activation = torch.mean(neuron_activations)
 
         # 各ニューロンの活性化スコアを計算 (正規化)
-        neuron_scores = neuron_activations / (total_activation + 1e-8)
+        neuron_scores = neuron_activations / (mean_activation + 1e-8)
 
         # 閾値以下のニューロンを休眠ニューロンとして数える
         dormant_threshold = 0.025
