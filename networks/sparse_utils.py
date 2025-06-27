@@ -7,34 +7,6 @@ import torch
 import torch.nn as nn
 
 
-def calculate_erdos_renyi_sparsity(
-    layer_shape: tuple, overall_sparsity: float, is_conv: bool = False
-) -> float:
-    """
-    Calculate layer-wise sparsity using Erdős-Rényi initialization
-
-    Args:
-        layer_shape: Shape of the layer (input_dim, output_dim) for FC or (out_ch, in_ch, h, w) for conv
-        overall_sparsity: Overall target sparsity level
-        is_conv: Whether this is a convolutional layer
-
-    Returns:
-        Layer-specific sparsity ratio
-    """
-    if is_conv:
-        # For conv layers: shape is (out_channels, in_channels, height, width)
-        n_out, n_in, h, w = layer_shape
-        # Erdős-Rényi formula for conv: 1 - (n_in + n_out + w*h) / (n_in * n_out * w * h)
-        sparsity = 1.0 - (n_in + n_out + w * h) / (n_in * n_out * w * h)
-    else:
-        # For FC layers: shape is (output_dim, input_dim)
-        n_out, n_in = layer_shape
-        # Erdős-Rényi formula for FC: 1 - (n_in + n_out) / (n_in * n_out)
-        sparsity = 1.0 - (n_in + n_out) / (n_in * n_out)
-
-    return max(0.0, min(sparsity, 0.99))  # Clamp between 0 and 0.99
-
-
 def create_random_mask(shape: tuple, sparsity: float, device: torch.device) -> torch.Tensor:
     """
     Create a random binary mask for pruning
@@ -58,6 +30,41 @@ def create_random_mask(shape: tuple, sparsity: float, device: torch.device) -> t
     return mask
 
 
+def create_sparse_init_mask(shape: tuple, sparsity: float, device: torch.device) -> torch.Tensor:
+    """
+    Create a SparseInit mask that zeros out complete input dimensions.
+    Based on Algorithm 1 from "Streaming Deep Reinforcement Learning Finally Works"
+
+    Args:
+        shape: Shape of the tensor (output_dim, input_dim) for FC layers
+        sparsity: Sparsity level (0.0 to 1.0) - proportion of input dimensions to zero out
+        device: Device to create mask on
+
+    Returns:
+        Binary mask tensor
+    """
+    assert len(shape) == 2, f"SparseInit only supports 2D tensors, got shape {shape}"
+
+    _, input_dim = shape
+    fan_in = input_dim
+
+    # n ← s × fan_in (number of input dimensions to zero out)
+    n_zero_inputs = int(sparsity * fan_in)
+
+    # Create permutation set P of size fan_in
+    input_perm = torch.randperm(fan_in, device=device)
+
+    # Index set I of size n (subset of P) - input dimensions to zero out
+    zero_input_indices = input_perm[:n_zero_inputs]
+
+    # Create mask (1 for kept weights, 0 for zeroed weights)
+    mask = torch.ones(shape, device=device, dtype=torch.float32)
+    # Wi,j ← 0, ∀i ∈ I, ∀j (zero out selected input dimensions)
+    mask[:, zero_input_indices] = 0
+
+    return mask
+
+
 def apply_one_shot_pruning(
     module: nn.Module,
     overall_sparsity: float = 0.9,
@@ -74,7 +81,7 @@ def apply_one_shot_pruning(
     Returns:
         SparseMask object containing all layer masks
     """
-    use_erdos_renyi = False
+    use_sparse_init = True
     if device is None:
         device = next(module.parameters()).device
 
@@ -84,16 +91,13 @@ def apply_one_shot_pruning(
         if "weight" in name and param.dim() >= 2:  # Only prune weight parameters with 2+ dimensions
             shape = param.shape
 
-            if use_erdos_renyi:
-                # Determine if this is a conv layer based on dimensions
-                is_conv = param.dim() == 4
-                layer_sparsity = calculate_erdos_renyi_sparsity(shape, overall_sparsity, is_conv)
+            if use_sparse_init:
+                # Use SparseInit - structured sparsity by input dimensions
+                mask = create_sparse_init_mask(shape, overall_sparsity, device)
             else:
                 # Use uniform sparsity
-                layer_sparsity = overall_sparsity
+                mask = create_random_mask(shape, overall_sparsity, device)
 
-            # Create and apply mask
-            mask = create_random_mask(shape, layer_sparsity, device)
             masks[name] = mask
 
             # Apply mask immediately
@@ -102,7 +106,7 @@ def apply_one_shot_pruning(
             # Calculate actual sparsity
             actual_sparsity = (mask == 0).float().mean().item()
             print(
-                f"Layer {name}: target sparsity={layer_sparsity:.3f}, actual sparsity={actual_sparsity:.3f}"
+                f"Layer {name}: target sparsity={overall_sparsity:.3f}, actual sparsity={actual_sparsity:.3f}"
             )
 
     return masks
