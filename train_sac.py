@@ -4,7 +4,6 @@ import os
 import random
 import time
 from datetime import datetime
-from distutils.util import strtobool
 from pathlib import Path
 
 import cv2
@@ -37,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
-    parser.add_argument("--render", type=strtobool, default="True")
+    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
@@ -51,7 +50,8 @@ def parse_args() -> argparse.Namespace:
         "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
     )
     parser.add_argument("--value_dim", type=int, default=51)
-    parser.add_argument("--sparsity", type=float, default=0.1)
+    parser.add_argument("--sparsity", type=float, default=0.0)
+    parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     return parser.parse_args()
 
 
@@ -402,9 +402,10 @@ if __name__ == "__main__":
             optimizer.step()
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
-            apply_masks_during_training(actor)
-            apply_masks_during_training(qf1)
-            apply_masks_during_training(qf2)
+            if args.apply_masks_during_training:
+                apply_masks_during_training(actor)
+                apply_masks_during_training(qf1)
+                apply_masks_during_training(qf2)
 
             alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
 
