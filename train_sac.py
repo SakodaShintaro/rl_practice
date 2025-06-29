@@ -119,14 +119,12 @@ if __name__ == "__main__":
             in_channels=cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
-            use_normalize=False,
             sparsity=args.sparsity,
         ),
         "diffusion": DiffusionPolicy(
             state_dim=cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
-            use_normalize=False,
             sparsity=args.sparsity,
         ),
     }[args.policy_model]
@@ -135,7 +133,6 @@ if __name__ == "__main__":
         action_dim=action_dim,
         hidden_dim=args.critic_hidden_dim,
         out_dim=args.value_dim,
-        use_normalize=False,
         sparsity=args.sparsity,
     )
     qf2 = SacQ(
@@ -143,7 +140,6 @@ if __name__ == "__main__":
         action_dim=action_dim,
         hidden_dim=args.critic_hidden_dim,
         out_dim=args.value_dim,
-        use_normalize=False,
         sparsity=args.sparsity,
     )
     actor = actor.to(device)

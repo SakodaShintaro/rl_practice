@@ -35,8 +35,7 @@ class SacQ(nn.Module):
         action_dim: int,
         hidden_dim: int,
         out_dim: int,
-        use_normalize: bool = True,
-        sparsity: float = 0.0,
+        sparsity: float,
     ) -> None:
         super().__init__()
         mid_dim = in_channels + action_dim
@@ -77,8 +76,7 @@ class SacTanhPolicy(nn.Module):
         in_channels: int,
         action_dim: int,
         hidden_dim: int,
-        use_normalize: bool = True,
-        sparsity: float = 0.0,
+        sparsity: float,
     ) -> None:
         super().__init__()
         self.fc1 = nn.Linear(in_channels, hidden_dim)

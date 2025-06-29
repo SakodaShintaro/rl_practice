@@ -1,7 +1,6 @@
 import math
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from .simba_block import SimbaBlock
@@ -55,8 +54,7 @@ class DiffusionPolicy(nn.Module):
         state_dim: int,
         action_dim: int,
         hidden_dim: int,
-        use_normalize: bool = False,
-        sparsity: float = 0.0,
+        sparsity: float,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
