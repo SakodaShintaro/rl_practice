@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .simba_block import SimbaBlock
 from .sparse_utils import apply_one_shot_pruning
 
 
@@ -59,9 +60,9 @@ class DiffusionPolicy(nn.Module):
     ) -> None:
         super().__init__()
         time_embedding_size = 256
-        self.fc1 = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, action_dim)
+        self.fc_in = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
+        self.fc_mid = SimbaBlock(hidden_dim)
+        self.fc_out = nn.Linear(hidden_dim, action_dim)
         self.use_normalize = use_normalize
         self.action_dim = action_dim
         self.step_num = 5
@@ -72,19 +73,20 @@ class DiffusionPolicy(nn.Module):
 
     def forward(self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor) -> dict[str, torch.Tensor]:
         result_dict = {}
-        t = self.t_embedder(t)
-        a = torch.cat([a, t, state], 1)
 
-        a = F.relu(self.fc1(a))
-        a = F.relu(self.fc2(a))
-        result_dict["activation"] = a
+        t = self.t_embedder(t)
+        x = torch.cat([a, t, state], 1)
+        x = self.fc_in(x)
+
+        x = self.fc_mid(x)
 
         if self.use_normalize:
-            a = a / torch.norm(a, dim=1).view((-1, 1))
-            result_dict["activation"] = a
+            x = x / torch.norm(x, dim=1).view((-1, 1))
 
-        a = self.fc3(a)
-        result_dict["output"] = a
+        result_dict["activation"] = x
+
+        x = self.fc_out(x)
+        result_dict["output"] = x
         return result_dict
 
     def get_action(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -109,7 +111,7 @@ class DiffusionPolicy(nn.Module):
         # nanがあったら終了
         if torch.isnan(action).any():
             print(f"{action=}")
-            print(f"{self.fc1.weight=}")
+            print(f"{self.fc_in.weight=}")
             import sys
 
             sys.exit(1)

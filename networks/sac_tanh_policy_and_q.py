@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .simba_block import SimbaBlock
 from .sparse_utils import apply_one_shot_pruning
 
 
@@ -39,9 +40,9 @@ class SacQ(nn.Module):
     ) -> None:
         super().__init__()
         mid_dim = in_channels + action_dim
-        self.fc1 = nn.Linear(mid_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, out_dim)
+        self.fc_in = nn.Linear(mid_dim, hidden_dim)
+        self.fc_mid = SimbaBlock(hidden_dim)
+        self.fc_out = nn.Linear(hidden_dim, out_dim)
         self.use_normalize = use_normalize
         self.apply(weights_init_)
 
@@ -53,15 +54,16 @@ class SacQ(nn.Module):
         result_dict = {}
 
         x = torch.cat([x, a], dim=1)
-        x1 = F.relu(self.fc1(x))
-        x2 = F.relu(self.fc2(x1))
-        result_dict["activation"] = x2
+        x = self.fc_in(x)
+
+        x = self.fc_mid(x)
 
         if self.use_normalize:
-            x2 = x2 / torch.norm(x2, dim=1).view((-1, 1))
-            result_dict["activation"] = x2
+            x = x / torch.norm(x, dim=1).view((-1, 1))
 
-        output = self.fc3(x2)
+        result_dict["activation"] = x
+
+        output = self.fc_out(x)
         result_dict["output"] = output
 
         return result_dict
