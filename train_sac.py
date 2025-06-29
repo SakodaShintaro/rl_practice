@@ -42,7 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
+    parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
+    parser.add_argument("--critic_block_num", type=int, default=1)
     parser.add_argument(
         "--encoder_model",
         type=str,
@@ -119,12 +121,14 @@ if __name__ == "__main__":
             in_channels=cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
             sparsity=args.sparsity,
         ),
         "diffusion": DiffusionPolicy(
             state_dim=cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
             sparsity=args.sparsity,
         ),
     }[args.policy_model]
@@ -132,6 +136,7 @@ if __name__ == "__main__":
         in_channels=cnn_dim,
         action_dim=action_dim,
         hidden_dim=args.critic_hidden_dim,
+        block_num=args.critic_block_num,
         out_dim=args.value_dim,
         sparsity=args.sparsity,
     )
@@ -139,6 +144,7 @@ if __name__ == "__main__":
         in_channels=cnn_dim,
         action_dim=action_dim,
         hidden_dim=args.critic_hidden_dim,
+        block_num=args.critic_block_num,
         out_dim=args.value_dim,
         sparsity=args.sparsity,
     )

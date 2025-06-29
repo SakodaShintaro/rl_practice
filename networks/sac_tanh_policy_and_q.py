@@ -34,13 +34,14 @@ class SacQ(nn.Module):
         in_channels: int,
         action_dim: int,
         hidden_dim: int,
+        block_num: int,
         out_dim: int,
         sparsity: float,
     ) -> None:
         super().__init__()
         mid_dim = in_channels + action_dim
         self.fc_in = nn.Linear(mid_dim, hidden_dim)
-        self.fc_mid = SimbaBlock(hidden_dim)
+        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, out_dim)
         self.apply(weights_init_)
@@ -76,11 +77,12 @@ class SacTanhPolicy(nn.Module):
         in_channels: int,
         action_dim: int,
         hidden_dim: int,
+        block_num: int,
         sparsity: float,
     ) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(in_channels, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_in = nn.Linear(in_channels, hidden_dim)
+        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_mean = nn.Linear(hidden_dim, action_dim)
         self.fc_logstd = nn.Linear(hidden_dim, action_dim)
@@ -93,13 +95,15 @@ class SacTanhPolicy(nn.Module):
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         result_dict = {}
 
-        x1 = F.relu(self.fc1(x))
-        x2 = F.relu(self.fc2(x1))
-        x2 = self.norm(x2)
-        result_dict["activation"] = x2
+        x = self.fc_in(x)
 
-        mean = self.fc_mean(x2)
-        log_std = self.fc_logstd(x2)
+        x = self.fc_mid(x)
+        x = self.norm(x)
+
+        result_dict["activation"] = x
+
+        mean = self.fc_mean(x)
+        log_std = self.fc_logstd(x)
         log_std = torch.tanh(log_std)
         log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
             log_std + 1

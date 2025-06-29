@@ -54,12 +54,13 @@ class DiffusionPolicy(nn.Module):
         state_dim: int,
         action_dim: int,
         hidden_dim: int,
+        block_num: int,
         sparsity: float,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
         self.fc_in = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
-        self.fc_mid = SimbaBlock(hidden_dim)
+        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
@@ -69,7 +70,9 @@ class DiffusionPolicy(nn.Module):
             None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
         )
 
-    def forward(self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
         result_dict = {}
 
         t = self.t_embedder(t)
