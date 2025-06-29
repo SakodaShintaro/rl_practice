@@ -23,6 +23,7 @@ from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from networks.sequence_processor import SequenceProcessor
 from networks.sparse_utils import apply_masks_during_training
+from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
 from utils import concat_images
 from wrappers import make_env
@@ -54,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value_dim", type=int, default=51)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--use_weight_projection", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
@@ -197,6 +199,14 @@ if __name__ == "__main__":
         "qf2": qf2,
         "sequence_processor": sequence_processor,
     }
+
+    # Initialize weight projection if enabled
+    weight_projection_norms = {}
+    if args.use_weight_projection:
+        weight_projection_norms["sequence_processor"] = get_initial_norms(sequence_processor)
+        weight_projection_norms["actor"] = get_initial_norms(actor)
+        weight_projection_norms["qf1"] = get_initial_norms(qf1)
+        weight_projection_norms["qf2"] = get_initial_norms(qf2)
 
     start_time = time.time()
 
@@ -411,6 +421,13 @@ if __name__ == "__main__":
             }
 
             optimizer.step()
+
+            # Apply weight projection after optimizer step
+            if args.use_weight_projection:
+                weight_project(sequence_processor, weight_projection_norms["sequence_processor"])
+                weight_project(actor, weight_projection_norms["actor"])
+                weight_project(qf1, weight_projection_norms["qf1"])
+                weight_project(qf2, weight_projection_norms["qf2"])
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
             if args.apply_masks_during_training:
