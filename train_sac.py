@@ -54,11 +54,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value_dim", type=int, default=51)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.debug:
+        args.off_wandb = True
+        args.learning_starts = 10
+        args.render = 0
 
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
