@@ -40,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
+    parser.add_argument("--actor_hidden_dim", type=int, default=512)
+    parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument(
         "--encoder_model",
         type=str,
@@ -109,18 +111,22 @@ if __name__ == "__main__":
         "tanh": SacTanhPolicy(
             in_channels=cnn_dim,
             action_dim=action_dim,
-            hidden_dim=512,
+            hidden_dim=args.actor_hidden_dim,
             use_normalize=False,
             sparsity=args.sparsity,
         ),
         "diffusion": DiffusionPolicy(
-            state_dim=cnn_dim, action_dim=action_dim, use_normalize=False, sparsity=args.sparsity
+            state_dim=cnn_dim,
+            action_dim=action_dim,
+            hidden_dim=args.actor_hidden_dim,
+            use_normalize=False,
+            sparsity=args.sparsity,
         ),
     }[args.policy_model]
     qf1 = SacQ(
         in_channels=cnn_dim,
         action_dim=action_dim,
-        hidden_dim=512,
+        hidden_dim=args.critic_hidden_dim,
         out_dim=args.value_dim,
         use_normalize=False,
         sparsity=args.sparsity,
@@ -128,7 +134,7 @@ if __name__ == "__main__":
     qf2 = SacQ(
         in_channels=cnn_dim,
         action_dim=action_dim,
-        hidden_dim=512,
+        hidden_dim=args.critic_hidden_dim,
         out_dim=args.value_dim,
         use_normalize=False,
         sparsity=args.sparsity,

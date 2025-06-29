@@ -53,12 +53,12 @@ class DiffusionPolicy(nn.Module):
         self,
         state_dim: int,
         action_dim: int,
+        hidden_dim: int,
         use_normalize: bool = False,
         sparsity: float = 0.0,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
-        hidden_dim = 256
         self.fc1 = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, action_dim)
