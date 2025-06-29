@@ -62,8 +62,8 @@ class DiffusionPolicy(nn.Module):
         time_embedding_size = 256
         self.fc_in = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
         self.fc_mid = SimbaBlock(hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, action_dim)
-        self.use_normalize = use_normalize
         self.action_dim = action_dim
         self.step_num = 5
         self.t_embedder = TimestepEmbedder(time_embedding_size)
@@ -79,9 +79,7 @@ class DiffusionPolicy(nn.Module):
         x = self.fc_in(x)
 
         x = self.fc_mid(x)
-
-        if self.use_normalize:
-            x = x / torch.norm(x, dim=1).view((-1, 1))
+        x = self.norm(x)
 
         result_dict["activation"] = x
 

@@ -42,8 +42,8 @@ class SacQ(nn.Module):
         mid_dim = in_channels + action_dim
         self.fc_in = nn.Linear(mid_dim, hidden_dim)
         self.fc_mid = SimbaBlock(hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, out_dim)
-        self.use_normalize = use_normalize
         self.apply(weights_init_)
 
         self.sparse_mask = (
@@ -57,9 +57,7 @@ class SacQ(nn.Module):
         x = self.fc_in(x)
 
         x = self.fc_mid(x)
-
-        if self.use_normalize:
-            x = x / torch.norm(x, dim=1).view((-1, 1))
+        x = self.norm(x)
 
         result_dict["activation"] = x
 
@@ -85,9 +83,9 @@ class SacTanhPolicy(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(in_channels, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_mean = nn.Linear(hidden_dim, action_dim)
         self.fc_logstd = nn.Linear(hidden_dim, action_dim)
-        self.use_normalize = use_normalize
         self.apply(weights_init_)
 
         self.sparse_mask = (
@@ -99,11 +97,8 @@ class SacTanhPolicy(nn.Module):
 
         x1 = F.relu(self.fc1(x))
         x2 = F.relu(self.fc2(x1))
+        x2 = self.norm(x2)
         result_dict["activation"] = x2
-
-        if self.use_normalize:
-            x2 = x2 / torch.norm(x2, dim=1).view((-1, 1))
-            result_dict["activation"] = x2
 
         mean = self.fc_mean(x2)
         log_std = self.fc_logstd(x2)
