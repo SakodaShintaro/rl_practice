@@ -95,6 +95,7 @@ class DiffusionPolicy(nn.Module):
             torch.ones((bs, self.action_dim), device=x.device),
         )
         action = normal.sample().to(x.device)
+        action = torch.clamp(action, -3.0, 3.0)
         dt = 1.0 / self.step_num
 
         curr_time = torch.zeros((bs), device=x.device)

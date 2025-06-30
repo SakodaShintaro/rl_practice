@@ -398,6 +398,7 @@ if __name__ == "__main__":
                 target2 = calc_target(qf2, actions)
                 target = (target1 + target2) / 2.0
                 noise = torch.randn_like(actions)
+                noise = torch.clamp(noise, -3.0, 3.0)
                 a_t = (1.0 - t) * noise + t * actions
                 actor_output_dict = actor.forward(a_t, t.squeeze(1), state_curr)
                 v = actor_output_dict["output"]
