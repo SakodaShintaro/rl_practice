@@ -136,7 +136,7 @@ class SequenceProcessor(nn.Module):
 
         # Positional Encoding
         self.pos_embedding = nn.Parameter(
-            torch.zeros(1, seq_len * 3 - 1, self.hidden_dim), requires_grad=False
+            torch.zeros(1, seq_len * 3 - 1, self.hidden_dim), requires_grad=True
         )
 
         # Transformer Encoder

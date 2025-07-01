@@ -179,7 +179,7 @@ if __name__ == "__main__":
 
     rb = ReplayBuffer(
         args.buffer_size,
-        seq_len,
+        seq_len + 1,
         env.observation_space.shape,
         env.action_space.shape,
         device,
@@ -304,11 +304,17 @@ if __name__ == "__main__":
 
             # training.
             data = rb.sample(args.batch_size)
-            seq_before, seq_after = sequence_processor(
-                data.rewards, data.observations, data.actions
+            # Current state: sequence 0:N-1 (r0, s0, a0, r1, s1)
+            seq_before_curr, seq_after_curr = sequence_processor(
+                data.rewards[:, :-1], data.observations[:, :-1], data.actions[:, :-1]
             )
+
             with torch.no_grad():
-                state_next = seq_after[:, -1].detach()
+                # Next state: sequence 1:N (r1, s1, a1, r2, s2)
+                seq_before_next, seq_after_next = sequence_processor(
+                    data.rewards[:, 1:], data.observations[:, 1:], data.actions[:, 1:]
+                )
+                state_next = seq_after_next[:, -1]
                 next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
                 qf1_next_output_dict = qf1(state_next, next_state_actions)
                 qf2_next_output_dict = qf2(state_next, next_state_actions)
@@ -323,7 +329,7 @@ if __name__ == "__main__":
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = seq_after[:, -4]
+            state_curr = seq_after_curr[:, -1]
             state_norm = state_curr.norm(dim=1)
 
             # Get Q-values and activations for Srank computation
