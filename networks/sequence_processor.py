@@ -45,13 +45,16 @@ class TransformerEncoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
-        layer_norm_eps: float = 1e-5
-        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm1 = LayerNorm(d_model, elementwise_affine=False, **factory_kwargs)
+        self.norm2_prev = LayerNorm(d_model, elementwise_affine=False, **factory_kwargs)
+        self.norm2_post = LayerNorm(d_model, elementwise_affine=True, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.activation_relu_or_gelu = 1
         self.activation = F.relu
+
+        torch.nn.init.zeros_(self.norm2_post.weight)
+        torch.nn.init.zeros_(self.norm2_post.bias)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -84,7 +87,7 @@ class TransformerEncoderLayer(Module):
         # x = x + self._sa_block(
         #     self.norm1(x), attn_mask=causal_mask, key_padding_mask=None, is_causal=True
         # )
-        # x = x + self._ff_block(self.norm2(x))
+        # x = x + self.norm2_post(self._ff_block(self.norm2_prev(x)))
         return x
 
     # self-attention block
