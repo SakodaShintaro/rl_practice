@@ -114,7 +114,10 @@ if __name__ == "__main__":
 
     action_dim = np.prod(env.action_space.shape)
     seq_len = 2
-    sequence_processor = SequenceProcessor(seq_len=seq_len).to(device)
+    sequence_processor = SequenceProcessor(
+        seq_len=seq_len,
+        sparsity=args.sparsity,
+    ).to(device)
     cnn_dim = sequence_processor.hidden_dim
     actor = {
         "tanh": SacTanhPolicy(
@@ -441,6 +444,7 @@ if __name__ == "__main__":
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
             if args.apply_masks_during_training:
+                apply_masks_during_training(sequence_processor)
                 apply_masks_during_training(actor)
                 apply_masks_during_training(qf1)
                 apply_masks_during_training(qf2)

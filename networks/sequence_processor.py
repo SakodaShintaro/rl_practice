@@ -7,6 +7,7 @@ from torch.nn import Dropout, LayerNorm, Linear, Module, MultiheadAttention
 
 from .backbone import AE, BaseCNN
 from .diffusion_policy import TimestepEmbedder
+from .sparse_utils import apply_one_shot_pruning
 
 """
 報酬 r_t
@@ -116,7 +117,7 @@ class TransformerEncoderLayer(Module):
 
 
 class SequenceProcessor(nn.Module):
-    def __init__(self, seq_len: int):
+    def __init__(self, seq_len: int, sparsity: float):
         super().__init__()
         self.seq_len = seq_len
 
@@ -149,6 +150,12 @@ class SequenceProcessor(nn.Module):
             dim_feedforward=self.hidden_dim * 4,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
+
+        self.sparse_mask = (
+            None
+            if sparsity == 0.0
+            else apply_one_shot_pruning(self.transformer_encoder, overall_sparsity=sparsity)
+        )
 
     def forward(
         self, rewards: torch.Tensor, states: torch.Tensor, actions: torch.Tensor
