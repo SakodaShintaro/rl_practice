@@ -379,7 +379,8 @@ if __name__ == "__main__":
             if args.policy_model == "diffusion":
                 actions = pi.clone().detach()
                 actions.requires_grad = True
-                t = torch.rand((args.batch_size, 1), device=device)
+                eps = 1e-4
+                t = (torch.rand((args.batch_size, 1), device=device)) * (1 - eps) + eps
                 c = 0.4
                 d = -1.8
                 w_t = torch.exp(c * t + d)
