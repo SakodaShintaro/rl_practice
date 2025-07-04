@@ -55,6 +55,44 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+class Network(nn.Module):
+    def __init__(self, num_bins: int, sparsity: float):
+        super(Network, self).__init__()
+        self.sparsity = sparsity
+        cnn_dim = 4 * 12 * 12
+        self.encoder_image = AE()
+        self.encoder_reward = TimestepEmbedder(cnn_dim)
+        self.encoder_action = nn.Linear(action_dim, cnn_dim)
+        self.sequence_processor = SequenceProcessor(
+            seq_len=seq_len,
+            hidden_dim=cnn_dim,
+            sparsity=args.sparsity,
+        )
+        self.actor = DiffusionPolicy(
+            state_dim=cnn_dim,
+            action_dim=action_dim,
+            hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
+            sparsity=args.sparsity,
+        )
+        self.qf1 = SacQ(
+            in_channels=cnn_dim,
+            action_dim=action_dim,
+            hidden_dim=args.critic_hidden_dim,
+            block_num=args.critic_block_num,
+            num_bins=num_bins,
+            sparsity=args.sparsity,
+        )
+        self.qf2 = SacQ(
+            in_channels=cnn_dim,
+            action_dim=action_dim,
+            hidden_dim=args.critic_hidden_dim,
+            block_num=args.critic_block_num,
+            num_bins=num_bins,
+            sparsity=args.sparsity,
+        )
+
+
 if __name__ == "__main__":
     args = parse_args()
     if args.debug:
@@ -109,47 +147,9 @@ if __name__ == "__main__":
     action_dim = np.prod(env.action_space.shape)
     seq_len = 2
     num_bins = 51
-    encoder_image = AE().to(device)
-    cnn_dim = 4 * 12 * 12
-    encoder_reward = TimestepEmbedder(cnn_dim).to(device)
-    encoder_action = nn.Linear(3, cnn_dim).to(device)  # Assuming action is 3D vector
-    sequence_processor = SequenceProcessor(
-        seq_len=seq_len,
-        hidden_dim=cnn_dim,
-        sparsity=args.sparsity,
-    ).to(device)
-    actor = DiffusionPolicy(
-        state_dim=cnn_dim,
-        action_dim=action_dim,
-        hidden_dim=args.actor_hidden_dim,
-        block_num=args.actor_block_num,
-        sparsity=args.sparsity,
-    ).to(device)
-    qf1 = SacQ(
-        in_channels=cnn_dim,
-        action_dim=action_dim,
-        hidden_dim=args.critic_hidden_dim,
-        block_num=args.critic_block_num,
-        num_bins=num_bins,
-        sparsity=args.sparsity,
-    ).to(device)
-    qf2 = SacQ(
-        in_channels=cnn_dim,
-        action_dim=action_dim,
-        hidden_dim=args.critic_hidden_dim,
-        block_num=args.critic_block_num,
-        num_bins=num_bins,
-        sparsity=args.sparsity,
-    ).to(device)
+    network = Network(num_bins=num_bins, sparsity=args.sparsity).to(device)
     lr = 1e-4
-    optimizer = optim.AdamW(
-        list(sequence_processor.parameters())
-        + list(qf1.parameters())
-        + list(qf2.parameters())
-        + list(actor.parameters()),
-        lr=lr,
-        weight_decay=1e-5,
-    )
+    optimizer = optim.AdamW(network.parameters(), lr=lr, weight_decay=1e-5)
     hl_gauss_loss = HLGaussLoss(
         min_value=-30,
         max_value=+30,
@@ -174,29 +174,23 @@ if __name__ == "__main__":
     )
 
     # Initialize gradient norm targets
-    total_model = torch.nn.ModuleList(
-        [
-            sequence_processor,
-            actor,
-            qf1,
-            qf2,
-        ]
-    )
     monitoring_targets = {
-        "total": total_model,
-        "actor": actor,
-        "qf1": qf1,
-        "qf2": qf2,
-        "sequence_processor": sequence_processor,
+        "total": network,
+        "sequence_processor": network.sequence_processor,
+        "actor": network.actor,
+        "qf1": network.qf1,
+        "qf2": network.qf2,
     }
 
     # Initialize weight projection if enabled
     weight_projection_norms = {}
     if args.use_weight_projection:
-        weight_projection_norms["sequence_processor"] = get_initial_norms(sequence_processor)
-        weight_projection_norms["actor"] = get_initial_norms(actor)
-        weight_projection_norms["qf1"] = get_initial_norms(qf1)
-        weight_projection_norms["qf2"] = get_initial_norms(qf2)
+        weight_projection_norms["sequence_processor"] = get_initial_norms(
+            network.sequence_processor
+        )
+        weight_projection_norms["actor"] = get_initial_norms(network.actor)
+        weight_projection_norms["qf1"] = get_initial_norms(network.qf1)
+        weight_projection_norms["qf2"] = get_initial_norms(network.qf2)
 
     start_time = time.time()
 
@@ -242,8 +236,8 @@ if __name__ == "__main__":
                     input_reward_tensor = torch.stack(input_reward_list, dim=1)
                     input_obs_tensor = torch.stack(input_obs_list, dim=1)
                     input_action_tensor = torch.stack(input_action_list, dim=1)
-                    output_enc = encoder_image.encode(obs_tensor)
-                    action, selected_log_pi, _ = actor.get_action(output_enc)
+                    output_enc = network.encoder_image.encode(obs_tensor)
+                    action, selected_log_pi, _ = network.actor.get_action(output_enc)
                     action = action[0].detach().cpu().numpy()
                     action = action * action_scale + action_bias
 
@@ -291,11 +285,10 @@ if __name__ == "__main__":
             data = rb.sample(args.batch_size)
 
             with torch.no_grad():
-                # Next state: sequence 1:N (r1, s1, a1, r2, s2)
-                state_next = encoder_image.encode(data.observations[:, -1])
-                next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
-                qf1_next_output_dict = qf1(state_next, next_state_actions)
-                qf2_next_output_dict = qf2(state_next, next_state_actions)
+                state_next = network.encoder_image.encode(data.observations[:, -1])
+                next_state_actions, next_state_log_pi, _ = network.actor.get_action(state_next)
+                qf1_next_output_dict = network.qf1(state_next, next_state_actions)
+                qf2_next_output_dict = network.qf2(state_next, next_state_actions)
                 qf1_next_target = qf1_next_output_dict["output"]
                 qf2_next_target = qf2_next_output_dict["output"]
                 qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
@@ -306,12 +299,12 @@ if __name__ == "__main__":
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = encoder_image.encode(data.observations[:, -2])
+            state_curr = network.encoder_image.encode(data.observations[:, -2])
             state_norm = state_curr.norm(dim=1)
 
             # Get Q-values and activations for Srank computation
-            qf1_output_dict = qf1(state_curr, data.actions[:, -2])
-            qf2_output_dict = qf2(state_curr, data.actions[:, -2])
+            qf1_output_dict = network.qf1(state_curr, data.actions[:, -2])
+            qf2_output_dict = network.qf2(state_curr, data.actions[:, -2])
 
             qf1_a_values = qf1_output_dict["output"]
             qf2_a_values = qf2_output_dict["output"]
@@ -320,22 +313,22 @@ if __name__ == "__main__":
             qf2_loss = hl_gauss_loss(qf2_a_values, next_q_value)
             qf_loss = qf1_loss + qf2_loss
 
-            pi, log_pi, _ = actor.get_action(state_curr)
-            for param in qf1.parameters():
+            pi, log_pi, _ = network.actor.get_action(state_curr)
+            for param in network.qf1.parameters():
                 param.requires_grad_(False)
-            for param in qf2.parameters():
+            for param in network.qf2.parameters():
                 param.requires_grad_(False)
-            qf1_pi_output_dict = qf1(state_curr, pi)
-            qf2_pi_output_dict = qf2(state_curr, pi)
+            qf1_pi_output_dict = network.qf1(state_curr, pi)
+            qf2_pi_output_dict = network.qf2(state_curr, pi)
             qf1_pi = qf1_pi_output_dict["output"]
             qf2_pi = qf2_pi_output_dict["output"]
             qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
             qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
             actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
-            for param in qf1.parameters():
+            for param in network.qf1.parameters():
                 param.requires_grad_(True)
-            for param in qf2.parameters():
+            for param in network.qf2.parameters():
                 param.requires_grad_(True)
 
             # Compute srank for key activations (using intermediate layer outputs)
@@ -369,13 +362,13 @@ if __name__ == "__main__":
                     target /= target.norm(dim=1, keepdim=True) + 1e-8
                     return w_t * target
 
-            target1 = calc_target(qf1, actions)
-            target2 = calc_target(qf2, actions)
+            target1 = calc_target(network.qf1, actions)
+            target2 = calc_target(network.qf2, actions)
             target = (target1 + target2) / 2.0
             noise = torch.randn_like(actions)
             noise = torch.clamp(noise, -3.0, 3.0)
             a_t = (1.0 - t) * noise + t * actions
-            actor_output_dict = actor.forward(a_t, t.squeeze(1), state_curr)
+            actor_output_dict = network.actor.forward(a_t, t.squeeze(1), state_curr)
             v = actor_output_dict["output"]
             dacer_loss = F.mse_loss(v, target)
             actor_loss += dacer_loss * 0.05
@@ -388,7 +381,7 @@ if __name__ == "__main__":
             loss.backward()
 
             # Clip gradients
-            torch.nn.utils.clip_grad_norm_(total_model.parameters(), max_norm=100.0)
+            torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=10.0)
 
             # Compute gradient and parameter norms
             grad_metrics = {
@@ -402,17 +395,19 @@ if __name__ == "__main__":
 
             # Apply weight projection after optimizer step
             if args.use_weight_projection:
-                weight_project(sequence_processor, weight_projection_norms["sequence_processor"])
-                weight_project(actor, weight_projection_norms["actor"])
-                weight_project(qf1, weight_projection_norms["qf1"])
-                weight_project(qf2, weight_projection_norms["qf2"])
+                weight_project(
+                    network.sequence_processor, weight_projection_norms["sequence_processor"]
+                )
+                weight_project(network.actor, weight_projection_norms["actor"])
+                weight_project(network.qf1, weight_projection_norms["qf1"])
+                weight_project(network.qf2, weight_projection_norms["qf2"])
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
             if args.apply_masks_during_training:
-                apply_masks_during_training(sequence_processor)
-                apply_masks_during_training(actor)
-                apply_masks_during_training(qf1)
-                apply_masks_during_training(qf2)
+                apply_masks_during_training(network.sequence_processor)
+                apply_masks_during_training(network.actor)
+                apply_masks_during_training(network.qf1)
+                apply_masks_during_training(network.qf2)
 
             alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
 
