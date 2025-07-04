@@ -20,7 +20,7 @@ import wandb
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.diffusion_policy import DiffusionPolicy
-from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
+from networks.sac_tanh_policy_and_q import SacQ
 from networks.sequence_processor import SequenceProcessor
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
@@ -50,9 +50,6 @@ def parse_args() -> argparse.Namespace:
         type=str,
         choices=["ae", "smolvlm"],
         default="ae",
-    )
-    parser.add_argument(
-        "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
     )
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
@@ -119,22 +116,13 @@ if __name__ == "__main__":
         sparsity=args.sparsity,
     ).to(device)
     cnn_dim = sequence_processor.hidden_dim
-    actor = {
-        "tanh": SacTanhPolicy(
-            in_channels=cnn_dim,
-            action_dim=action_dim,
-            hidden_dim=args.actor_hidden_dim,
-            block_num=args.actor_block_num,
-            sparsity=args.sparsity,
-        ),
-        "diffusion": DiffusionPolicy(
-            state_dim=cnn_dim,
-            action_dim=action_dim,
-            hidden_dim=args.actor_hidden_dim,
-            block_num=args.actor_block_num,
-            sparsity=args.sparsity,
-        ),
-    }[args.policy_model]
+    actor = DiffusionPolicy(
+        state_dim=cnn_dim,
+        action_dim=action_dim,
+        hidden_dim=args.actor_hidden_dim,
+        block_num=args.actor_block_num,
+        sparsity=args.sparsity,
+    )
     qf1 = SacQ(
         in_channels=cnn_dim,
         action_dim=action_dim,
@@ -171,8 +159,7 @@ if __name__ == "__main__":
     ).to(device)
 
     # Automatic entropy tuning
-    if args.policy_model == "diffusion":
-        args.fixed_alpha = 0.002
+    args.fixed_alpha = 0.002
     target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item() * 2.0
     log_alpha = torch.tensor([-4.0], requires_grad=True, device=device)
     alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
@@ -370,42 +357,41 @@ if __name__ == "__main__":
             }
 
             # DACER2 (https://arxiv.org/abs/2505.23426) loss
-            if args.policy_model == "diffusion":
-                actions = pi.clone().detach()
-                actions.requires_grad = True
-                eps = 1e-4
-                t = (torch.rand((args.batch_size, 1), device=device)) * (1 - eps) + eps
-                c = 0.4
-                d = -1.8
-                w_t = torch.exp(c * t + d)
+            actions = pi.clone().detach()
+            actions.requires_grad = True
+            eps = 1e-4
+            t = (torch.rand((args.batch_size, 1), device=device)) * (1 - eps) + eps
+            c = 0.4
+            d = -1.8
+            w_t = torch.exp(c * t + d)
 
-                def calc_target(q_network, actions):
-                    q_output_dict = q_network(state_curr, actions)
-                    q_values = q_output_dict["output"]
-                    q_values = hl_gauss_loss(q_values).unsqueeze(-1)
-                    q_grad = torch.autograd.grad(
-                        outputs=q_values.sum(),
-                        inputs=actions,
-                        create_graph=True,
-                    )[0]
-                    with torch.no_grad():
-                        # target = -actions / (1 - t) - t / (1 - t) * q_grad
-                        target = (1 - t) / t * q_grad + 1 / t * actions
-                        target /= target.norm(dim=1, keepdim=True) + 1e-8
-                        return w_t * target
+            def calc_target(q_network, actions):
+                q_output_dict = q_network(state_curr, actions)
+                q_values = q_output_dict["output"]
+                q_values = hl_gauss_loss(q_values).unsqueeze(-1)
+                q_grad = torch.autograd.grad(
+                    outputs=q_values.sum(),
+                    inputs=actions,
+                    create_graph=True,
+                )[0]
+                with torch.no_grad():
+                    # target = -actions / (1 - t) - t / (1 - t) * q_grad
+                    target = (1 - t) / t * q_grad + 1 / t * actions
+                    target /= target.norm(dim=1, keepdim=True) + 1e-8
+                    return w_t * target
 
-                target1 = calc_target(qf1, actions)
-                target2 = calc_target(qf2, actions)
-                target = (target1 + target2) / 2.0
-                noise = torch.randn_like(actions)
-                noise = torch.clamp(noise, -3.0, 3.0)
-                a_t = (1.0 - t) * noise + t * actions
-                actor_output_dict = actor.forward(a_t, t.squeeze(1), state_curr)
-                v = actor_output_dict["output"]
-                dacer_loss = F.mse_loss(v, target)
-                actor_loss += dacer_loss * 0.05
+            target1 = calc_target(qf1, actions)
+            target2 = calc_target(qf2, actions)
+            target = (target1 + target2) / 2.0
+            noise = torch.randn_like(actions)
+            noise = torch.clamp(noise, -3.0, 3.0)
+            a_t = (1.0 - t) * noise + t * actions
+            actor_output_dict = actor.forward(a_t, t.squeeze(1), state_curr)
+            v = actor_output_dict["output"]
+            dacer_loss = F.mse_loss(v, target)
+            actor_loss += dacer_loss * 0.05
 
-                feature_dict["actor"] = actor_output_dict["activation"]
+            feature_dict["actor"] = actor_output_dict["activation"]
 
             # optimize the model
             loss = actor_loss + qf_loss
@@ -482,8 +468,7 @@ if __name__ == "__main__":
                     for key, value in result_dict.items():
                         data_dict[f"{key}/{feature_name}"] = value
 
-                if args.policy_model == "diffusion":
-                    data_dict["losses/dacer_loss"] = dacer_loss.item()
+                data_dict["losses/dacer_loss"] = dacer_loss.item()
                 wandb.log(data_dict)
 
                 fixed_data = {
