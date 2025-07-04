@@ -291,7 +291,6 @@ if __name__ == "__main__":
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
             state_curr = network.encoder_image.encode(data.observations[:, -2])
-            state_norm = state_curr.norm(dim=1)
 
             # Get Q-values and activations for Srank computation
             qf1_output_dict = network.qf1(state_curr, data.actions[:, -2])
@@ -321,13 +320,6 @@ if __name__ == "__main__":
                 param.requires_grad_(True)
             for param in network.qf2.parameters():
                 param.requires_grad_(True)
-
-            # Compute srank for key activations (using intermediate layer outputs)
-            feature_dict = {
-                "state": state_curr,
-                "qf1": qf1_pi_output_dict["activation"],
-                "qf2": qf2_pi_output_dict["activation"],
-            }
 
             # DACER2 (https://arxiv.org/abs/2505.23426) loss
             actions = pi.clone().detach()
@@ -364,7 +356,13 @@ if __name__ == "__main__":
             dacer_loss = F.mse_loss(v, target)
             actor_loss += dacer_loss * 0.05
 
-            feature_dict["actor"] = actor_output_dict["activation"]
+            # Compute srank for key activations (using intermediate layer outputs)
+            feature_dict = {
+                "state": state_curr,
+                "actor": actor_output_dict["activation"],
+                "qf1": qf1_pi_output_dict["activation"],
+                "qf2": qf2_pi_output_dict["activation"],
+            }
 
             # optimize the model
             loss = actor_loss + qf_loss
@@ -416,7 +414,6 @@ if __name__ == "__main__":
                     "losses/next_q_value": next_q_value.mean().item(),
                     "losses/actor_loss": actor_loss.item(),
                     "losses/log_pi": log_pi.mean().item(),
-                    "losses/state_norm": state_norm.mean().item(),
                     "a_logp": selected_log_pi.mean().item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
