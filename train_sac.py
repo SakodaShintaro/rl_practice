@@ -11,6 +11,7 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 from torch import optim
@@ -19,7 +20,8 @@ from tqdm import tqdm
 import wandb
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.diffusion_policy import DiffusionPolicy
+from networks.backbone import AE
+from networks.diffusion_policy import DiffusionPolicy, TimestepEmbedder
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sequence_processor import SequenceProcessor
 from networks.sparse_utils import apply_masks_during_training
@@ -107,18 +109,22 @@ if __name__ == "__main__":
     action_dim = np.prod(env.action_space.shape)
     seq_len = 2
     num_bins = 51
+    encoder_image = AE().to(device)
+    cnn_dim = 4 * 12 * 12
+    encoder_reward = TimestepEmbedder(cnn_dim).to(device)
+    encoder_action = nn.Linear(3, cnn_dim).to(device)  # Assuming action is 3D vector
     sequence_processor = SequenceProcessor(
         seq_len=seq_len,
+        hidden_dim=cnn_dim,
         sparsity=args.sparsity,
     ).to(device)
-    cnn_dim = sequence_processor.hidden_dim
     actor = DiffusionPolicy(
         state_dim=cnn_dim,
         action_dim=action_dim,
         hidden_dim=args.actor_hidden_dim,
         block_num=args.actor_block_num,
         sparsity=args.sparsity,
-    )
+    ).to(device)
     qf1 = SacQ(
         in_channels=cnn_dim,
         action_dim=action_dim,
@@ -126,7 +132,7 @@ if __name__ == "__main__":
         block_num=args.critic_block_num,
         num_bins=num_bins,
         sparsity=args.sparsity,
-    )
+    ).to(device)
     qf2 = SacQ(
         in_channels=cnn_dim,
         action_dim=action_dim,
@@ -134,10 +140,7 @@ if __name__ == "__main__":
         block_num=args.critic_block_num,
         num_bins=num_bins,
         sparsity=args.sparsity,
-    )
-    actor = actor.to(device)
-    qf1 = qf1.to(device)
-    qf2 = qf2.to(device)
+    ).to(device)
     lr = 1e-4
     optimizer = optim.AdamW(
         list(sequence_processor.parameters())
@@ -239,10 +242,7 @@ if __name__ == "__main__":
                     input_reward_tensor = torch.stack(input_reward_list, dim=1)
                     input_obs_tensor = torch.stack(input_obs_list, dim=1)
                     input_action_tensor = torch.stack(input_action_list, dim=1)
-                    seq_before, seq_after = sequence_processor(
-                        input_reward_tensor, input_obs_tensor, input_action_tensor
-                    )
-                    output_enc = seq_after[:, -1]
+                    output_enc = encoder_image.encode(obs_tensor)
                     action, selected_log_pi, _ = actor.get_action(output_enc)
                     action = action[0].detach().cpu().numpy()
                     action = action * action_scale + action_bias
@@ -289,17 +289,10 @@ if __name__ == "__main__":
 
             # training.
             data = rb.sample(args.batch_size)
-            # Current state: sequence 0:N-1 (r0, s0, a0, r1, s1)
-            seq_before_curr, seq_after_curr = sequence_processor(
-                data.rewards[:, :-1], data.observations[:, :-1], data.actions[:, :-1]
-            )
 
             with torch.no_grad():
                 # Next state: sequence 1:N (r1, s1, a1, r2, s2)
-                seq_before_next, seq_after_next = sequence_processor(
-                    data.rewards[:, 1:], data.observations[:, 1:], data.actions[:, 1:]
-                )
-                state_next = seq_after_next[:, -1]
+                state_next = encoder_image.encode(data.observations[:, -1])
                 next_state_actions, next_state_log_pi, _ = actor.get_action(state_next)
                 qf1_next_output_dict = qf1(state_next, next_state_actions)
                 qf2_next_output_dict = qf2(state_next, next_state_actions)
@@ -313,7 +306,7 @@ if __name__ == "__main__":
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
 
-            state_curr = seq_after_curr[:, -1]
+            state_curr = encoder_image.encode(data.observations[:, -2])
             state_norm = state_curr.norm(dim=1)
 
             # Get Q-values and activations for Srank computation

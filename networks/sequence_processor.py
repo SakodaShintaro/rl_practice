@@ -117,26 +117,10 @@ class TransformerEncoderLayer(Module):
 
 
 class SequenceProcessor(nn.Module):
-    def __init__(self, seq_len: int, sparsity: float):
+    def __init__(self, seq_len: int, hidden_dim: int, sparsity: float):
         super().__init__()
         self.seq_len = seq_len
-
-        # 状態(画像)エンコーダー
-        self.encoder_model = "ae"
-        if self.encoder_model == "base_cnn":
-            self.state_encoder = BaseCNN(in_channels=3)
-            self.hidden_dim = 256
-        elif self.encoder_model == "ae":
-            self.state_encoder = AE()
-            self.hidden_dim = 4 * 12 * 12
-        else:
-            raise ValueError()
-
-        # 報酬エンコーダー
-        self.reward_encoder = TimestepEmbedder(self.hidden_dim)
-
-        # 行動エンコーダー
-        self.action_encoder = nn.Linear(3, self.hidden_dim)
+        self.hidden_dim = hidden_dim
 
         # Positional Encoding
         self.pos_embedding = nn.Parameter(
@@ -179,14 +163,9 @@ class SequenceProcessor(nn.Module):
 
         # 状態(画像)をエンコード (batch_size * seq_len, C, H, W) -> (batch_size * seq_len, state_embed_dim)
         states = states.reshape(-1, *states.shape[2:])
-        if self.encoder_model == "base_cnn":
-            state_embeds = self.state_encoder(states)  # (batch_size * seq_len, 256)
-        elif self.encoder_model == "ae":
-            with torch.no_grad():
-                # (batch_size * seq_len, 4, 12, 12)
-                state_embeds = self.state_encoder.encode(states)
-            state_embeds = state_embeds.view(batch_size, self.seq_len, -1)
-
+        with torch.no_grad():
+            # (batch_size * seq_len, 4, 12, 12)
+            state_embeds = self.state_encoder.encode(states)
         state_embeds = state_embeds.view(batch_size, self.seq_len, self.hidden_dim)
 
         # 行動をエンコード (batch_size, seq_len, action_dim) -> (batch_size, seq_len, hidden_dim)

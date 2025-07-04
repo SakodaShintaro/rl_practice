@@ -40,10 +40,13 @@ class AE(nn.Module):
         self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./pretrained")
         self.output_dim = 576
 
+    @torch.no_grad()
     def encode(self, x):
-        return self.ae.encode(x).latents
+        return self.ae.encode(x).latents.flatten(1)
 
+    @torch.no_grad()
     def decode(self, x):
+        x = x.view(x.size(0), 4, 12, 12)
         return self.ae.decode(x).sample
 
 
