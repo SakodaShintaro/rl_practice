@@ -42,7 +42,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning_starts", type=int, default=4000)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument("--fixed_alpha", type=float, default=None)
     parser.add_argument("--action_noise", type=float, default=0.0)
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
@@ -157,13 +156,7 @@ if __name__ == "__main__":
         clamp_to_range=True,
     ).to(device)
 
-    # Automatic entropy tuning
-    args.fixed_alpha = 0.002
-    target_entropy = -torch.prod(torch.Tensor(env.action_space.shape).to(device)).item() * 2.0
-    log_alpha = torch.tensor([-4.0], requires_grad=True, device=device)
-    alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
-    a_optimizer = optim.Adam([log_alpha], lr=lr)
-    print(f"{target_entropy=}")
+    ALPHA = 0.002
 
     rb = ReplayBuffer(
         args.buffer_size,
@@ -294,7 +287,7 @@ if __name__ == "__main__":
                 qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
                 qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
                 min_q = torch.min(qf1_next_target, qf2_next_target)
-                min_qf_next_target = (min_q - alpha * next_state_log_pi).view(-1)
+                min_qf_next_target = (min_q - ALPHA * next_state_log_pi).view(-1)
                 curr_reward = data.rewards[:, -2].flatten()
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
@@ -325,7 +318,7 @@ if __name__ == "__main__":
             qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
             qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
-            actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+            actor_loss = ((ALPHA * log_pi) - min_qf_pi).mean()
             for param in network.qf1.parameters():
                 param.requires_grad_(True)
             for param in network.qf2.parameters():
@@ -409,13 +402,6 @@ if __name__ == "__main__":
                 apply_masks_during_training(network.qf1)
                 apply_masks_during_training(network.qf2)
 
-            alpha_loss = (-log_alpha.exp() * (log_pi.detach() + target_entropy)).mean()
-
-            a_optimizer.zero_grad()
-            alpha_loss.backward()
-            a_optimizer.step()
-            alpha = log_alpha.exp().item() if args.fixed_alpha is None else args.fixed_alpha
-
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time
                 data_dict = {
@@ -428,11 +414,9 @@ if __name__ == "__main__":
                     "losses/min_qf_next_target": min_qf_next_target.mean().item(),
                     "losses/next_q_value": next_q_value.mean().item(),
                     "losses/actor_loss": actor_loss.item(),
-                    "losses/alpha": alpha,
                     "losses/log_pi": log_pi.mean().item(),
                     "losses/state_norm": state_norm.mean().item(),
                     "a_logp": selected_log_pi.mean().item(),
-                    "losses/alpha_loss": alpha_loss.item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
