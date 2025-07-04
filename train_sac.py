@@ -156,8 +156,6 @@ if __name__ == "__main__":
         clamp_to_range=True,
     ).to(device)
 
-    ALPHA = 0.002
-
     rb = ReplayBuffer(
         args.buffer_size,
         seq_len + 1,
@@ -287,7 +285,7 @@ if __name__ == "__main__":
                 qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
                 qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
                 min_q = torch.min(qf1_next_target, qf2_next_target)
-                min_qf_next_target = (min_q - ALPHA * next_state_log_pi).view(-1)
+                min_qf_next_target = min_q.view(-1)
                 curr_reward = data.rewards[:, -2].flatten()
                 curr_continue = 1 - data.dones[:, -2].flatten()
                 next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
@@ -318,7 +316,7 @@ if __name__ == "__main__":
             qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
             qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
-            actor_loss = ((ALPHA * log_pi) - min_qf_pi).mean()
+            actor_loss = -min_qf_pi.mean()
             for param in network.qf1.parameters():
                 param.requires_grad_(True)
             for param in network.qf2.parameters():
