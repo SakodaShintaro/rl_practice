@@ -35,7 +35,7 @@ class SacQ(nn.Module):
         action_dim: int,
         hidden_dim: int,
         block_num: int,
-        out_dim: int,
+        num_bins: int,
         sparsity: float,
     ) -> None:
         super().__init__()
@@ -43,7 +43,7 @@ class SacQ(nn.Module):
         self.fc_in = nn.Linear(mid_dim, hidden_dim)
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.fc_out = nn.Linear(hidden_dim, out_dim)
+        self.fc_out = nn.Linear(hidden_dim, num_bins)
         self.apply(weights_init_)
 
         self.sparse_mask = (

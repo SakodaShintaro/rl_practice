@@ -54,7 +54,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--policy_model", type=str, default="diffusion", choices=["tanh", "diffusion"]
     )
-    parser.add_argument("--value_dim", type=int, default=51)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
@@ -114,6 +113,7 @@ if __name__ == "__main__":
 
     action_dim = np.prod(env.action_space.shape)
     seq_len = 2
+    num_bins = 51
     sequence_processor = SequenceProcessor(
         seq_len=seq_len,
         sparsity=args.sparsity,
@@ -140,7 +140,7 @@ if __name__ == "__main__":
         action_dim=action_dim,
         hidden_dim=args.critic_hidden_dim,
         block_num=args.critic_block_num,
-        out_dim=args.value_dim,
+        num_bins=num_bins,
         sparsity=args.sparsity,
     )
     qf2 = SacQ(
@@ -148,7 +148,7 @@ if __name__ == "__main__":
         action_dim=action_dim,
         hidden_dim=args.critic_hidden_dim,
         block_num=args.critic_block_num,
-        out_dim=args.value_dim,
+        num_bins=num_bins,
         sparsity=args.sparsity,
     )
     actor = actor.to(device)
@@ -163,13 +163,12 @@ if __name__ == "__main__":
         lr=lr,
         weight_decay=1e-5,
     )
-    if args.value_dim > 1:
-        hl_gauss_loss = HLGaussLoss(
-            min_value=-30,
-            max_value=+30,
-            num_bins=args.value_dim,
-            clamp_to_range=True,
-        ).to(device)
+    hl_gauss_loss = HLGaussLoss(
+        min_value=-30,
+        max_value=+30,
+        num_bins=num_bins,
+        clamp_to_range=True,
+    ).to(device)
 
     # Automatic entropy tuning
     if args.policy_model == "diffusion":
@@ -323,9 +322,8 @@ if __name__ == "__main__":
                 qf2_next_output_dict = qf2(state_next, next_state_actions)
                 qf1_next_target = qf1_next_output_dict["output"]
                 qf2_next_target = qf2_next_output_dict["output"]
-                if args.value_dim > 1:
-                    qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
-                    qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
+                qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
+                qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
                 min_q = torch.min(qf1_next_target, qf2_next_target)
                 min_qf_next_target = (min_q - alpha * next_state_log_pi).view(-1)
                 curr_reward = data.rewards[:, -2].flatten()
@@ -342,14 +340,8 @@ if __name__ == "__main__":
             qf1_a_values = qf1_output_dict["output"]
             qf2_a_values = qf2_output_dict["output"]
 
-            if args.value_dim == 1:
-                qf1_a_values = qf1_a_values.view(-1)
-                qf2_a_values = qf2_a_values.view(-1)
-                qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-                qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            else:
-                qf1_loss = hl_gauss_loss(qf1_a_values, next_q_value)
-                qf2_loss = hl_gauss_loss(qf2_a_values, next_q_value)
+            qf1_loss = hl_gauss_loss(qf1_a_values, next_q_value)
+            qf2_loss = hl_gauss_loss(qf2_a_values, next_q_value)
             qf_loss = qf1_loss + qf2_loss
 
             pi, log_pi, _ = actor.get_action(state_curr)
@@ -361,9 +353,8 @@ if __name__ == "__main__":
             qf2_pi_output_dict = qf2(state_curr, pi)
             qf1_pi = qf1_pi_output_dict["output"]
             qf2_pi = qf2_pi_output_dict["output"]
-            if args.value_dim > 1:
-                qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
-                qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
+            qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
+            qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
             actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
             for param in qf1.parameters():
@@ -391,8 +382,7 @@ if __name__ == "__main__":
                 def calc_target(q_network, actions):
                     q_output_dict = q_network(state_curr, actions)
                     q_values = q_output_dict["output"]
-                    if args.value_dim > 1:
-                        q_values = hl_gauss_loss(q_values).unsqueeze(-1)
+                    q_values = hl_gauss_loss(q_values).unsqueeze(-1)
                     q_grad = torch.autograd.grad(
                         outputs=q_values.sum(),
                         inputs=actions,
