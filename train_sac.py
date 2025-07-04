@@ -46,12 +46,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
-    parser.add_argument(
-        "--encoder_model",
-        type=str,
-        choices=["ae", "smolvlm"],
-        default="ae",
-    )
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
