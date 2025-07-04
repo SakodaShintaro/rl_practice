@@ -31,6 +31,7 @@ from wrappers import make_env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("exp_name", type=str)
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
@@ -68,7 +69,8 @@ if __name__ == "__main__":
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
-    wandb.init(project="rl_practice", config=vars(args), name="SAC", save_code=True)
+    exp_name = f"SAC_{args.exp_name}"
+    wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
 
     # seeding
     seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
@@ -82,7 +84,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_SAC"
+    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
     result_dir.mkdir(parents=True, exist_ok=True)
 
     # save seed to file
