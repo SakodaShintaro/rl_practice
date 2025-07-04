@@ -3,7 +3,7 @@ import math
 import torch
 from torch import nn
 
-from .simba_block import SimbaBlock
+from .blocks import SimbaBlock
 from .sparse_utils import apply_one_shot_pruning
 
 
