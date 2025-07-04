@@ -383,6 +383,9 @@ if __name__ == "__main__":
             param_metrics = {
                 key: compute_parameter_norm(model) for key, model in monitoring_targets.items()
             }
+            activation_norms = {
+                key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
+            }
 
             optimizer.step()
 
@@ -429,6 +432,10 @@ if __name__ == "__main__":
                 # Add parameter norm metrics
                 for key, value in param_metrics.items():
                     data_dict[f"parameters/{key}"] = value
+
+                # Add activation norms
+                for key, value in activation_norms.items():
+                    data_dict[f"activation_norms/{key}"] = value
 
                 # Trigger statistical metrics computation
                 for feature_name, feature in feature_dict.items():
