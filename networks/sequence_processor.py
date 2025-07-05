@@ -46,7 +46,8 @@ class TransformerEncoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
-        self.norm1 = LayerNorm(d_model, elementwise_affine=False, **factory_kwargs)
+        self.norm1_prev = LayerNorm(d_model, elementwise_affine=False, **factory_kwargs)
+        self.norm1_post = LayerNorm(d_model, elementwise_affine=True, **factory_kwargs)
         self.norm2_prev = LayerNorm(d_model, elementwise_affine=False, **factory_kwargs)
         self.norm2_post = LayerNorm(d_model, elementwise_affine=True, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
@@ -85,10 +86,12 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         x = src
-        # x = x + self._sa_block(
-        #     self.norm1(x), attn_mask=causal_mask, key_padding_mask=None, is_causal=True
-        # )
-        # x = x + self.norm2_post(self._ff_block(self.norm2_prev(x)))
+        x = x + self.norm1_post(
+            self._sa_block(
+                self.norm1_prev(x), attn_mask=causal_mask, key_padding_mask=None, is_causal=True
+            )
+        )
+        x = x + self.norm2_post(self._ff_block(self.norm2_prev(x)))
         return x
 
     # self-attention block
