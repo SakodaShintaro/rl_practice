@@ -179,7 +179,7 @@ if __name__ == "__main__":
 
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
-    image_save_interval = 100
+    image_save_interval = 1
     log_step = []
     log_episode = []
 
@@ -254,6 +254,10 @@ if __name__ == "__main__":
     progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = None
     step_limit = 200_000
+
+    # Initialize dummy prediction images
+    current_obs_uint8 = np.zeros((96, 96, 3), dtype=np.uint8)
+    pred_obs_uint8 = np.zeros((96, 96, 3), dtype=np.uint8)
     metrics_computers = {
         "state": StatisticalMetricsComputer(),
         "qf1": StatisticalMetricsComputer(),
@@ -326,18 +330,15 @@ if __name__ == "__main__":
                             last_action_token
                         )
 
-                        # Visualize prediction
+                        # Prepare prediction visualization for later display
                         pred_state = pred_state_reward[:, : network.cnn_dim]
                         pred_obs = network.encoder_image.decode(pred_state)
                         pred_obs_np = pred_obs[0].detach().cpu().numpy().transpose(1, 2, 0)
                         current_obs_np = obs_tensor[0].detach().cpu().numpy().transpose(1, 2, 0)
-                        # Create a dummy main image for visualization
-                        main_img = (np.zeros((400, 600, 3), dtype=np.float32) * 255).astype(
-                            np.uint8
-                        )
-                        current_obs_uint8 = (current_obs_np * 255).astype(np.uint8)
+
+                        # Store prediction data for visualization
                         pred_obs_uint8 = (np.clip(pred_obs_np, 0, 1) * 255).astype(np.uint8)
-                        comparison_img = concat_images(main_img, current_obs_uint8, pred_obs_uint8)
+                        current_obs_uint8 = (current_obs_np * 255).astype(np.uint8)
 
                     input_action_list.append(torch.Tensor(action).to(device).unsqueeze(0))
                     input_action_list.pop(0)
@@ -352,15 +353,13 @@ if __name__ == "__main__":
 
             # render
             if args.render:
-                bgr_array = env.render()
-                bgr_array = cv2.cvtColor(bgr_array, cv2.COLOR_RGB2BGR)
+                bgr_array = concat_images(env.render(), current_obs_uint8, pred_obs_uint8)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
             # save images for specific episodes
             if episode_id % image_save_interval == 0 and curr_image_dir is not None:
-                bgr_array = env.render()
-                bgr_array = cv2.cvtColor(bgr_array, cv2.COLOR_RGB2BGR)
+                bgr_array = concat_images(env.render(), current_obs_uint8, pred_obs_uint8)
                 cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:
