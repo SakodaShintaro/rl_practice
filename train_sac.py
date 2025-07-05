@@ -23,7 +23,7 @@ from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import AE
 from networks.diffusion_policy import (
     DiffusionPolicy,
-    DiffusionStateRewardPredictor,
+    DiffusionStatePredictor,
     TimestepEmbedder,
 )
 from networks.sac_tanh_policy_and_q import SacQ
@@ -60,7 +60,7 @@ def create_sequence_tokens(observations, rewards, actions, network):
     sequence_tensor = stacked_tokens.view(batch_size, seq_len * 2, network.token_dim)
     sequence_tensor = sequence_tensor[:, :-1]  # Remove last token
 
-    return sequence_tensor
+    return sequence_tensor, states
 
 
 def predict_next_state(
@@ -75,7 +75,7 @@ def predict_next_state(
     seq_action_tensor = torch.stack(seq_action_list, dim=1)
 
     # Create sequence tokens using shared function
-    sequence_tensor = create_sequence_tokens(
+    sequence_tensor, _ = create_sequence_tokens(
         seq_obs_tensor, seq_reward_tensor, seq_action_tensor, network
     )
 
@@ -83,10 +83,9 @@ def predict_next_state(
     processed_sequence = network.sequence_processor(sequence_tensor)
     # The last token should be an action token (odd index), use it to predict next state+reward
     last_action_token = processed_sequence[:, -1]
-    pred_state_reward, _, _ = network.state_reward_predictor.get_state_reward(last_action_token)
+    pred_state, _, _ = network.state_predictor.get_state(last_action_token)
 
     # Compare prediction with actual next observation
-    pred_state = pred_state_reward[:, : network.cnn_dim]
     pred_obs = network.encoder_image.decode(pred_state)
     pred_obs_np = pred_obs[0].detach().cpu().numpy().transpose(1, 2, 0)
 
@@ -165,13 +164,14 @@ class Network(nn.Module):
             num_bins=num_bins,
             sparsity=args.sparsity,
         )
-        self.state_reward_predictor = DiffusionStateRewardPredictor(
+        self.state_predictor = DiffusionStatePredictor(
             input_dim=self.token_dim,
             state_dim=self.cnn_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
+        self.reward_predictor = nn.Linear(self.token_dim, 1)
         self.action_predictor = DiffusionPolicy(
             state_dim=self.token_dim,
             action_dim=action_dim,
@@ -301,7 +301,7 @@ class Network(nn.Module):
         return total_actor_loss, activations_dict, info_dict
 
     def compute_sequence_loss(self, data):
-        sequence_tensor = create_sequence_tokens(
+        sequence_tensor, encoded_states = create_sequence_tokens(
             data.observations, data.rewards, data.actions, self
         )
 
@@ -312,71 +312,92 @@ class Network(nn.Module):
             0, seq_len_tokens, 2, device=processed_sequence.device
         )
         action_positions = torch.arange(1, seq_len_tokens, 2, device=processed_sequence.device)
-        seq_loss = 0.0
-        reward_pred_loss = 0.0
 
-        # Action prediction from state+reward tokens
+        # 各損失
+        action_loss = 0.0
+        state_loss = 0.0
+        reward_loss = 0.0
+
+        #####################
+        # Action prediction #
+        #####################
         valid_state_positions = state_reward_positions[state_reward_positions < seq_len_tokens - 1]
         state_reward_tokens = processed_sequence[:, valid_state_positions]
         batch_size, n_positions, _ = state_reward_tokens.shape
 
         flat_tokens = state_reward_tokens.view(batch_size * n_positions, self.token_dim)
-        pred_actions, _, _ = self.action_predictor.get_action(flat_tokens)
-
-        pred_actions = pred_actions.view(batch_size, n_positions, self.action_dim)
         target_actions = data.actions[:, valid_state_positions // 2]
+        target_actions_flat = target_actions.view(batch_size * n_positions, self.action_dim)
 
-        seq_loss += F.mse_loss(pred_actions, target_actions)
+        # Flow Matching for action prediction
+        x_0 = torch.randn_like(target_actions_flat)
+        t = torch.rand(size=(target_actions_flat.shape[0], 1), device=target_actions_flat.device)
 
-        # State+reward prediction from action tokens
+        # Sample from interpolation path
+        x_t = (1.0 - t) * x_0 + t * target_actions_flat
+
+        # Predict velocity using forward pass with x_t and t
+        pred_actions_dict = self.action_predictor.forward(x_t, t.squeeze(1), flat_tokens)
+        pred_actions = pred_actions_dict["output"]
+
+        # Conditional vector field
+        u_t = target_actions_flat - x_0
+
+        # Flow Matching loss
+        action_loss = F.mse_loss(pred_actions, u_t)
+
+        ###########################
+        # State+reward prediction #
+        ###########################
         valid_action_positions = action_positions[action_positions < seq_len_tokens - 1]
         action_tokens = processed_sequence[:, valid_action_positions]
         batch_size, n_positions, _ = action_tokens.shape
 
         flat_tokens = action_tokens.view(batch_size * n_positions, self.token_dim)
-        pred_state_rewards, _, _ = self.state_reward_predictor.get_state_reward(flat_tokens)
-
-        pred_state_rewards = pred_state_rewards.view(batch_size, n_positions, self.cnn_dim + 1)
 
         state_indices = (valid_action_positions + 1) // 2
-        current_states = self.encoder_image.encode(
-            data.observations[:, state_indices].view(
-                batch_size * n_positions, *data.observations.shape[2:]
-            )
-        )
-        current_states = current_states.view(batch_size, n_positions, self.cnn_dim)
+        current_states = encoded_states[:, state_indices]
         current_rewards = data.rewards[:, state_indices]
 
-        # 差分予測: 前ステップからの変化を予測
-        prev_state_indices = state_indices - 1
-        prev_state_indices = torch.clamp(prev_state_indices, 0, data.observations.shape[1] - 1)
+        # 現在のstateとrewardを予測
+        target_states_flat = current_states.view(batch_size * n_positions, self.cnn_dim)
+        target_rewards_flat = current_rewards.view(batch_size * n_positions, 1)
 
-        prev_states = self.encoder_image.encode(
-            data.observations[:, prev_state_indices].view(
-                batch_size * n_positions, *data.observations.shape[2:]
-            )
+        # State prediction using Flow Matching (拡散)
+        x_0_state = torch.randn_like(target_states_flat)
+        t_state = torch.rand(
+            size=(target_states_flat.shape[0], 1), device=target_states_flat.device
         )
-        prev_states = prev_states.view(batch_size, n_positions, self.cnn_dim)
-        prev_rewards = data.rewards[:, prev_state_indices]
 
-        # 実際の差分を計算
-        target_state_diff = current_states - prev_states
-        target_reward_diff = current_rewards - prev_rewards
-        target_diffs = torch.cat([target_state_diff, target_reward_diff], dim=-1)
+        # Sample from interpolation path for state
+        x_t_state = (1.0 - t_state) * x_0_state + t_state * target_states_flat
 
-        # 差分予測の損失
-        diff_loss = F.mse_loss(pred_state_rewards, target_diffs)
-        seq_loss += diff_loss
+        # Predict velocity for state using forward pass
+        pred_state_dict = self.state_predictor.forward(x_t_state, t_state.squeeze(1), flat_tokens)
+        pred_states_flat = pred_state_dict["output"]
 
-        # 報酬予測の個別損失を計算
-        pred_reward_diff = pred_state_rewards[:, :, self.cnn_dim :]
-        reward_pred_loss = F.mse_loss(pred_reward_diff, target_reward_diff)
+        # Conditional vector field for state
+        u_t_state = target_states_flat - x_0_state
+
+        # Flow Matching loss for state
+        state_loss = F.mse_loss(pred_states_flat, u_t_state)
+
+        # Reward prediction using simple Linear regression
+        pred_rewards_flat = self.reward_predictor(flat_tokens)
+
+        # Simple MSE loss for reward prediction
+        reward_loss = F.mse_loss(pred_rewards_flat, target_rewards_flat)
+
+        # Total sequence loss
+        seq_loss = action_loss + state_loss + reward_loss
 
         activations_dict = {}
 
         info_dict = {
             "seq_loss": seq_loss.item(),
-            "reward_pred_loss": reward_pred_loss.item(),
+            "action_loss": action_loss.item(),
+            "state_loss": state_loss.item(),
+            "reward_loss": reward_loss.item(),
         }
 
         return seq_loss, activations_dict, info_dict
@@ -456,7 +477,8 @@ if __name__ == "__main__":
         "qf1": network.qf1,
         "qf2": network.qf2,
         "action_predictor": network.action_predictor,
-        "state_reward_predictor": network.state_reward_predictor,
+        "state_predictor": network.state_predictor,
+        "reward_predictor": network.reward_predictor,
     }
 
     # Initialize weight projection if enabled
@@ -469,9 +491,8 @@ if __name__ == "__main__":
         weight_projection_norms["qf1"] = get_initial_norms(network.qf1)
         weight_projection_norms["qf2"] = get_initial_norms(network.qf2)
         weight_projection_norms["action_predictor"] = get_initial_norms(network.action_predictor)
-        weight_projection_norms["state_reward_predictor"] = get_initial_norms(
-            network.state_reward_predictor
-        )
+        weight_projection_norms["state_predictor"] = get_initial_norms(network.state_predictor)
+        weight_projection_norms["reward_predictor"] = get_initial_norms(network.reward_predictor)
 
     start_time = time.time()
 
@@ -626,9 +647,9 @@ if __name__ == "__main__":
                 weight_project(
                     network.action_predictor, weight_projection_norms["action_predictor"]
                 )
+                weight_project(network.state_predictor, weight_projection_norms["state_predictor"])
                 weight_project(
-                    network.state_reward_predictor,
-                    weight_projection_norms["state_reward_predictor"],
+                    network.reward_predictor, weight_projection_norms["reward_predictor"]
                 )
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
@@ -638,7 +659,8 @@ if __name__ == "__main__":
                 apply_masks_during_training(network.qf1)
                 apply_masks_during_training(network.qf2)
                 apply_masks_during_training(network.action_predictor)
-                apply_masks_during_training(network.state_reward_predictor)
+                apply_masks_during_training(network.state_predictor)
+                apply_masks_during_training(network.reward_predictor)
 
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time

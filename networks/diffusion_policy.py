@@ -120,7 +120,7 @@ class DiffusionPolicy(nn.Module):
         return action, dummy, dummy
 
 
-class DiffusionStateRewardPredictor(nn.Module):
+class DiffusionStatePredictor(nn.Module):
     def __init__(
         self,
         input_dim: int,
@@ -131,10 +131,10 @@ class DiffusionStateRewardPredictor(nn.Module):
     ) -> None:
         super().__init__()
         time_embedding_size = 256
-        self.fc_in = nn.Linear(input_dim + state_dim + 1 + time_embedding_size, hidden_dim)
+        self.fc_in = nn.Linear(input_dim + state_dim + time_embedding_size, hidden_dim)
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.fc_out = nn.Linear(hidden_dim, state_dim + 1)
+        self.fc_out = nn.Linear(hidden_dim, state_dim)
         self.state_dim = state_dim
         self.step_num = 5
         self.t_embedder = TimestepEmbedder(time_embedding_size)
@@ -160,11 +160,13 @@ class DiffusionStateRewardPredictor(nn.Module):
         result_dict["output"] = x
         return result_dict
 
-    def get_state_reward(self, input_token: torch.Tensor) -> dict[str, torch.Tensor]:
+    def get_state(
+        self, input_token: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         bs = input_token.size(0)
         normal = torch.distributions.Normal(
-            torch.zeros((bs, self.state_dim + 1), device=input_token.device),
-            torch.ones((bs, self.state_dim + 1), device=input_token.device),
+            torch.zeros((bs, self.state_dim), device=input_token.device),
+            torch.ones((bs, self.state_dim), device=input_token.device),
         )
         target = normal.sample().to(input_token.device)
         target = torch.clamp(target, -3.0, 3.0)
