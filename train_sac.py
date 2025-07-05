@@ -40,24 +40,24 @@ def create_sequence_tokens(observations, rewards, actions, network):
     batch_size, seq_len = observations.shape[:2]
 
     # Encode all states at once
-    all_states = observations.view(batch_size * seq_len, *observations.shape[2:])
-    all_state_encs = network.encoder_image.encode(all_states)
-    all_state_encs = all_state_encs.view(batch_size, seq_len, network.cnn_dim)
+    states = observations.view(batch_size * seq_len, *observations.shape[2:])
+    states = network.encoder_image.encode(states)
+    states = states.view(batch_size, seq_len, network.cnn_dim)
 
     # Encode all rewards at once
-    all_reward_encs = network.encoder_reward(rewards.view(batch_size * seq_len))
-    all_reward_encs = all_reward_encs.view(batch_size, seq_len, network.reward_dim)
+    rewards = network.encoder_reward(rewards.view(batch_size * seq_len))
+    rewards = rewards.view(batch_size, seq_len, network.reward_dim)
 
     # Encode all actions at once
-    all_actions = actions.view(batch_size * seq_len, actions.shape[-1])
-    all_action_encs = network.encoder_action(all_actions)
-    all_action_encs = all_action_encs.view(batch_size, seq_len, network.token_dim)
+    actions = actions.view(batch_size * seq_len, actions.shape[-1])
+    actions = network.encoder_action(actions)
+    actions = actions.view(batch_size, seq_len, network.token_dim)
 
     # Create state+reward tokens
-    state_reward_tokens = torch.cat([all_state_encs, all_reward_encs], dim=-1)
+    state_reward_tokens = torch.cat([states, rewards], dim=-1)
 
     # Stack and interleave tokens
-    stacked_tokens = torch.stack([state_reward_tokens, all_action_encs], dim=2)
+    stacked_tokens = torch.stack([state_reward_tokens, actions], dim=2)
     sequence_tensor = stacked_tokens.view(batch_size, seq_len * 2, network.token_dim)
     sequence_tensor = sequence_tensor[:, :-1]  # Remove last token
 
