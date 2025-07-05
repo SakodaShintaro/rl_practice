@@ -38,30 +38,27 @@ from wrappers import make_env
 def create_sequence_tokens(observations, rewards, actions, network, device):
     """Create interleaved sequence tokens from observations, rewards, and actions"""
     batch_size, seq_len = observations.shape[:2]
-    cnn_dim = network.cnn_dim  # 576
-    reward_dim = 32
-    token_dim = cnn_dim + reward_dim  # 608
 
     # Encode all states at once
     all_states = observations.view(batch_size * seq_len, *observations.shape[2:])
     all_state_encs = network.encoder_image.encode(all_states)
-    all_state_encs = all_state_encs.view(batch_size, seq_len, cnn_dim)
+    all_state_encs = all_state_encs.view(batch_size, seq_len, network.cnn_dim)
 
     # Encode all rewards at once
     all_reward_encs = network.encoder_reward(rewards.view(batch_size * seq_len))
-    all_reward_encs = all_reward_encs.view(batch_size, seq_len, reward_dim)
+    all_reward_encs = all_reward_encs.view(batch_size, seq_len, network.reward_dim)
 
     # Encode all actions at once
     all_actions = actions.view(batch_size * seq_len, actions.shape[-1])
     all_action_encs = network.encoder_action(all_actions)
-    all_action_encs = all_action_encs.view(batch_size, seq_len, token_dim)
+    all_action_encs = all_action_encs.view(batch_size, seq_len, network.token_dim)
 
     # Create state+reward tokens
     state_reward_tokens = torch.cat([all_state_encs, all_reward_encs], dim=-1)
 
     # Stack and interleave tokens
     stacked_tokens = torch.stack([state_reward_tokens, all_action_encs], dim=2)
-    sequence_tensor = stacked_tokens.view(batch_size, seq_len * 2, token_dim)
+    sequence_tensor = stacked_tokens.view(batch_size, seq_len * 2, network.token_dim)
     sequence_tensor = sequence_tensor[:, :-1]  # Remove last token
 
     return sequence_tensor
@@ -134,7 +131,9 @@ class Network(nn.Module):
         cnn_dim = 4 * 12 * 12  # 576
         self.cnn_dim = cnn_dim
         reward_dim = 32
+        self.reward_dim = reward_dim
         token_dim = cnn_dim + reward_dim  # 608
+        self.token_dim = token_dim
         self.encoder_image = AE()
         self.encoder_reward = TimestepEmbedder(reward_dim)
         self.encoder_action = nn.Linear(action_dim, token_dim)
@@ -471,11 +470,6 @@ if __name__ == "__main__":
             actor_loss += dacer_loss * 0.05
 
             # Sequence modeling loss
-            # Get dimensions
-            cnn_dim = network.cnn_dim
-            reward_dim = 32
-            token_dim = cnn_dim + reward_dim
-
             # Create sequence tokens using shared function
             sequence_tensor = create_sequence_tokens(
                 data.observations, data.rewards, data.actions, network, device
@@ -506,7 +500,9 @@ if __name__ == "__main__":
                     batch_size, n_positions, _ = state_reward_tokens.shape
 
                     # Flatten for batch processing
-                    flat_tokens = state_reward_tokens.view(batch_size * n_positions, token_dim)
+                    flat_tokens = state_reward_tokens.view(
+                        batch_size * n_positions, network.token_dim
+                    )
                     pred_actions, _, _ = network.action_predictor.get_action(flat_tokens)
 
                     # Reshape back and get target actions
@@ -527,14 +523,14 @@ if __name__ == "__main__":
                     batch_size, n_positions, _ = action_tokens.shape
 
                     # Flatten for batch processing
-                    flat_tokens = action_tokens.view(batch_size * n_positions, token_dim)
+                    flat_tokens = action_tokens.view(batch_size * n_positions, network.token_dim)
                     pred_state_rewards, _, _ = network.state_reward_predictor.get_state_reward(
                         flat_tokens
                     )
 
                     # Reshape back and get target state+rewards
                     pred_state_rewards = pred_state_rewards.view(
-                        batch_size, n_positions, cnn_dim + 1
+                        batch_size, n_positions, network.cnn_dim + 1
                     )
 
                     # Build target state+rewards
@@ -544,7 +540,7 @@ if __name__ == "__main__":
                             batch_size * n_positions, *data.observations.shape[2:]
                         )
                     )
-                    target_states = target_states.view(batch_size, n_positions, cnn_dim)
+                    target_states = target_states.view(batch_size, n_positions, network.cnn_dim)
                     target_rewards = data.rewards[:, state_indices]
                     target_state_rewards = torch.cat([target_states, target_rewards], dim=-1)
 
