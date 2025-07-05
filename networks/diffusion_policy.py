@@ -118,3 +118,72 @@ class DiffusionPolicy(nn.Module):
 
         dummy = torch.zeros((bs, 1), device=x.device)
         return action, dummy, dummy
+
+
+class DiffusionStateRewardPredictor(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        state_dim: int,
+        hidden_dim: int,
+        block_num: int,
+        sparsity: float,
+    ) -> None:
+        super().__init__()
+        time_embedding_size = 256
+        self.fc_in = nn.Linear(input_dim + state_dim + 1 + time_embedding_size, hidden_dim)
+        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.fc_out = nn.Linear(hidden_dim, state_dim + 1)
+        self.state_dim = state_dim
+        self.step_num = 5
+        self.t_embedder = TimestepEmbedder(time_embedding_size)
+        self.sparse_mask = (
+            None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
+        )
+
+    def forward(
+        self, target: torch.Tensor, t: torch.Tensor, input_token: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        result_dict = {}
+
+        t = self.t_embedder(t)
+        x = torch.cat([target, t, input_token], 1)
+        x = self.fc_in(x)
+
+        x = self.fc_mid(x)
+        x = self.norm(x)
+
+        result_dict["activation"] = x
+
+        x = self.fc_out(x)
+        result_dict["output"] = x
+        return result_dict
+
+    def get_state_reward(self, input_token: torch.Tensor) -> dict[str, torch.Tensor]:
+        bs = input_token.size(0)
+        normal = torch.distributions.Normal(
+            torch.zeros((bs, self.state_dim + 1), device=input_token.device),
+            torch.ones((bs, self.state_dim + 1), device=input_token.device),
+        )
+        target = normal.sample().to(input_token.device)
+        target = torch.clamp(target, -3.0, 3.0)
+        dt = 1.0 / self.step_num
+
+        curr_time = torch.zeros((bs), device=input_token.device)
+
+        for _ in range(self.step_num):
+            tmp_dict = self.forward(target, curr_time, input_token)
+            v = tmp_dict["output"]
+            target = target + dt * v
+            curr_time += dt
+
+        if torch.isnan(target).any():
+            print(f"{target=}")
+            print(f"{self.fc_in.weight=}")
+            import sys
+
+            sys.exit(1)
+
+        dummy = torch.zeros((bs, 1), device=input_token.device)
+        return target, dummy, dummy
