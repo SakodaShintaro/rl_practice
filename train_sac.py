@@ -313,52 +313,70 @@ class Network(nn.Module):
         )
         action_positions = torch.arange(1, seq_len_tokens, 2, device=processed_sequence.device)
         seq_loss = 0.0
+        reward_pred_loss = 0.0
 
-        if len(state_reward_positions) > 0 and len(action_positions) > 0:
-            valid_state_positions = state_reward_positions[
-                state_reward_positions < seq_len_tokens - 1
-            ]
-            if len(valid_state_positions) > 0:
-                state_reward_tokens = processed_sequence[:, valid_state_positions]
-                batch_size, n_positions, _ = state_reward_tokens.shape
+        # Action prediction from state+reward tokens
+        valid_state_positions = state_reward_positions[state_reward_positions < seq_len_tokens - 1]
+        state_reward_tokens = processed_sequence[:, valid_state_positions]
+        batch_size, n_positions, _ = state_reward_tokens.shape
 
-                flat_tokens = state_reward_tokens.view(batch_size * n_positions, self.token_dim)
-                pred_actions, _, _ = self.action_predictor.get_action(flat_tokens)
+        flat_tokens = state_reward_tokens.view(batch_size * n_positions, self.token_dim)
+        pred_actions, _, _ = self.action_predictor.get_action(flat_tokens)
 
-                pred_actions = pred_actions.view(batch_size, n_positions, self.action_dim)
-                target_actions = data.actions[:, valid_state_positions // 2]
+        pred_actions = pred_actions.view(batch_size, n_positions, self.action_dim)
+        target_actions = data.actions[:, valid_state_positions // 2]
 
-                seq_loss += F.mse_loss(pred_actions, target_actions)
+        seq_loss += F.mse_loss(pred_actions, target_actions)
 
-        if len(action_positions) > 0:
-            valid_action_positions = action_positions[action_positions < seq_len_tokens - 1]
-            if len(valid_action_positions) > 0:
-                action_tokens = processed_sequence[:, valid_action_positions]
-                batch_size, n_positions, _ = action_tokens.shape
+        # State+reward prediction from action tokens
+        valid_action_positions = action_positions[action_positions < seq_len_tokens - 1]
+        action_tokens = processed_sequence[:, valid_action_positions]
+        batch_size, n_positions, _ = action_tokens.shape
 
-                flat_tokens = action_tokens.view(batch_size * n_positions, self.token_dim)
-                pred_state_rewards, _, _ = self.state_reward_predictor.get_state_reward(flat_tokens)
+        flat_tokens = action_tokens.view(batch_size * n_positions, self.token_dim)
+        pred_state_rewards, _, _ = self.state_reward_predictor.get_state_reward(flat_tokens)
 
-                pred_state_rewards = pred_state_rewards.view(
-                    batch_size, n_positions, self.cnn_dim + 1
-                )
+        pred_state_rewards = pred_state_rewards.view(batch_size, n_positions, self.cnn_dim + 1)
 
-                state_indices = (valid_action_positions + 1) // 2
-                target_states = self.encoder_image.encode(
-                    data.observations[:, state_indices].view(
-                        batch_size * n_positions, *data.observations.shape[2:]
-                    )
-                )
-                target_states = target_states.view(batch_size, n_positions, self.cnn_dim)
-                target_rewards = data.rewards[:, state_indices]
-                target_state_rewards = torch.cat([target_states, target_rewards], dim=-1)
+        state_indices = (valid_action_positions + 1) // 2
+        current_states = self.encoder_image.encode(
+            data.observations[:, state_indices].view(
+                batch_size * n_positions, *data.observations.shape[2:]
+            )
+        )
+        current_states = current_states.view(batch_size, n_positions, self.cnn_dim)
+        current_rewards = data.rewards[:, state_indices]
 
-                seq_loss += F.mse_loss(pred_state_rewards, target_state_rewards)
+        # 差分予測: 前ステップからの変化を予測
+        prev_state_indices = state_indices - 1
+        prev_state_indices = torch.clamp(prev_state_indices, 0, data.observations.shape[1] - 1)
+
+        prev_states = self.encoder_image.encode(
+            data.observations[:, prev_state_indices].view(
+                batch_size * n_positions, *data.observations.shape[2:]
+            )
+        )
+        prev_states = prev_states.view(batch_size, n_positions, self.cnn_dim)
+        prev_rewards = data.rewards[:, prev_state_indices]
+
+        # 実際の差分を計算
+        target_state_diff = current_states - prev_states
+        target_reward_diff = current_rewards - prev_rewards
+        target_diffs = torch.cat([target_state_diff, target_reward_diff], dim=-1)
+
+        # 差分予測の損失
+        diff_loss = F.mse_loss(pred_state_rewards, target_diffs)
+        seq_loss += diff_loss
+
+        # 報酬予測の個別損失を計算
+        pred_reward_diff = pred_state_rewards[:, :, self.cnn_dim :]
+        reward_pred_loss = F.mse_loss(pred_reward_diff, target_reward_diff)
 
         activations_dict = {}
 
         info_dict = {
-            "seq_loss": seq_loss.item() if isinstance(seq_loss, torch.Tensor) else seq_loss,
+            "seq_loss": seq_loss.item(),
+            "reward_pred_loss": reward_pred_loss.item(),
         }
 
         return seq_loss, activations_dict, info_dict
