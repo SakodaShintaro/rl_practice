@@ -67,6 +67,43 @@ def create_sequence_tokens(observations, rewards, actions, network, device):
     return sequence_tensor
 
 
+def predict_next_state(
+    input_obs_list, input_reward_list, input_action_list, action, next_obs, network, device, seq_len
+):
+    """Predict next state and prepare visualization images"""
+    # Prepare sequence data
+    seq_obs_tensor = torch.stack(input_obs_list, dim=1)
+    seq_reward_tensor = torch.stack(input_reward_list, dim=1)
+    current_action_tensor = torch.Tensor(action).to(device).unsqueeze(0)
+    seq_action_list = input_action_list[-seq_len + 1 :] + [current_action_tensor]
+    seq_action_tensor = torch.stack(seq_action_list, dim=1)
+
+    # Create sequence tokens using shared function
+    sequence_tensor = create_sequence_tokens(
+        seq_obs_tensor, seq_reward_tensor, seq_action_tensor, network, device
+    )
+
+    # Process and predict
+    processed_sequence = network.sequence_processor(sequence_tensor)
+    # The last token should be an action token (odd index), use it to predict next state+reward
+    last_action_token = processed_sequence[:, -1]
+    pred_state_reward, _, _ = network.state_reward_predictor.get_state_reward(last_action_token)
+
+    # Compare prediction with actual next observation
+    pred_state = pred_state_reward[:, : network.cnn_dim]
+    pred_obs = network.encoder_image.decode(pred_state)
+    pred_obs_np = pred_obs[0].detach().cpu().numpy().transpose(1, 2, 0)
+
+    # Store prediction data for visualization
+    # concat_images expects [0, 1] range, will multiply by 255 internally
+    pred_obs_float = np.clip(pred_obs_np, 0, 1)
+
+    # Convert next_obs to [0, 1] format to match pred_obs_float
+    current_obs_float = next_obs.transpose(1, 2, 0)
+
+    return current_obs_float, pred_obs_float
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
@@ -179,7 +216,7 @@ if __name__ == "__main__":
 
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
-    image_save_interval = 1
+    image_save_interval = 100
     log_step = []
     log_episode = []
 
@@ -256,8 +293,8 @@ if __name__ == "__main__":
     step_limit = 200_000
 
     # Initialize dummy prediction images
-    current_obs_uint8 = np.zeros((96, 96, 3), dtype=np.uint8)
-    pred_obs_uint8 = np.zeros((96, 96, 3), dtype=np.uint8)
+    curr_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
+    pred_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
     metrics_computers = {
         "state": StatisticalMetricsComputer(),
         "qf1": StatisticalMetricsComputer(),
@@ -303,43 +340,6 @@ if __name__ == "__main__":
                     action = (1 - c) * action + c * action_noise
                     action = np.clip(action, action_low, action_high)
 
-                    # Sequence processing for next state and reward prediction
-                    if global_step > args.learning_starts:
-                        # Prepare sequence data (use seq_len to match observations/rewards)
-                        seq_obs_tensor = torch.stack(input_obs_list, dim=1)
-                        seq_reward_tensor = torch.stack(input_reward_list, dim=1)
-                        current_action_tensor = torch.Tensor(action).to(device).unsqueeze(0)
-                        seq_action_list = input_action_list[-seq_len + 1 :] + [
-                            current_action_tensor
-                        ]
-                        seq_action_tensor = torch.stack(seq_action_list, dim=1)
-
-                        # Create sequence tokens using shared function
-                        sequence_tensor = create_sequence_tokens(
-                            seq_obs_tensor,
-                            seq_reward_tensor,
-                            seq_action_tensor,
-                            network,
-                            device,
-                        )
-
-                        # Process and predict
-                        processed_sequence = network.sequence_processor(sequence_tensor)
-                        last_action_token = processed_sequence[:, -1]
-                        pred_state_reward, _, _ = network.state_reward_predictor.get_state_reward(
-                            last_action_token
-                        )
-
-                        # Prepare prediction visualization for later display
-                        pred_state = pred_state_reward[:, : network.cnn_dim]
-                        pred_obs = network.encoder_image.decode(pred_state)
-                        pred_obs_np = pred_obs[0].detach().cpu().numpy().transpose(1, 2, 0)
-                        current_obs_np = obs_tensor[0].detach().cpu().numpy().transpose(1, 2, 0)
-
-                        # Store prediction data for visualization
-                        pred_obs_uint8 = (np.clip(pred_obs_np, 0, 1) * 255).astype(np.uint8)
-                        current_obs_uint8 = (current_obs_np * 255).astype(np.uint8)
-
                     input_action_list.append(torch.Tensor(action).to(device).unsqueeze(0))
                     input_action_list.pop(0)
 
@@ -351,15 +351,28 @@ if __name__ == "__main__":
             input_reward_list.append(torch.Tensor([[reward]]).to(device))
             input_reward_list.pop(0)
 
+            # Sequence processing for next state prediction (after getting next_obs)
+            if global_step > args.learning_starts:
+                curr_obs_float, pred_obs_float = predict_next_state(
+                    input_obs_list,
+                    input_reward_list,
+                    input_action_list,
+                    action,
+                    next_obs,
+                    network,
+                    device,
+                    seq_len,
+                )
+
             # render
             if args.render:
-                bgr_array = concat_images(env.render(), current_obs_uint8, pred_obs_uint8)
+                bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
             # save images for specific episodes
             if episode_id % image_save_interval == 0 and curr_image_dir is not None:
-                bgr_array = concat_images(env.render(), current_obs_uint8, pred_obs_uint8)
+                bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
                 cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:
