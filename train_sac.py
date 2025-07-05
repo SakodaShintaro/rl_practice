@@ -35,7 +35,7 @@ from utils import concat_images
 from wrappers import make_env
 
 
-def create_sequence_tokens(observations, rewards, actions, network, device):
+def create_sequence_tokens(observations, rewards, actions, network):
     """Create interleaved sequence tokens from observations, rewards, and actions"""
     batch_size, seq_len = observations.shape[:2]
 
@@ -77,7 +77,7 @@ def predict_next_state(
 
     # Create sequence tokens using shared function
     sequence_tensor = create_sequence_tokens(
-        seq_obs_tensor, seq_reward_tensor, seq_action_tensor, network, device
+        seq_obs_tensor, seq_reward_tensor, seq_action_tensor, network
     )
 
     # Process and predict
@@ -472,7 +472,7 @@ if __name__ == "__main__":
             # Sequence modeling loss
             # Create sequence tokens using shared function
             sequence_tensor = create_sequence_tokens(
-                data.observations, data.rewards, data.actions, network, device
+                data.observations, data.rewards, data.actions, network
             )
 
             # Process through sequence processor
