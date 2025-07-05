@@ -106,7 +106,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
-    parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -124,32 +123,34 @@ def parse_args() -> argparse.Namespace:
 
 
 class Network(nn.Module):
-    def __init__(self, num_bins: int, sparsity: float, action_dim: int, seq_len: int):
+    def __init__(self, sparsity: float, action_dim: int, seq_len: int):
         super(Network, self).__init__()
+        num_bins = 51
+        self.gamma = 0.99
         self.sparsity = sparsity
-        cnn_dim = 4 * 12 * 12  # 576
-        self.cnn_dim = cnn_dim
-        reward_dim = 32
-        self.reward_dim = reward_dim
-        token_dim = cnn_dim + reward_dim  # 608
-        self.token_dim = token_dim
+
+        self.action_dim = action_dim
+        self.cnn_dim = 4 * 12 * 12  # 576
+        self.reward_dim = 32
+        self.token_dim = self.cnn_dim + self.reward_dim  # 608
+
         self.encoder_image = AE()
-        self.encoder_reward = TimestepEmbedder(reward_dim)
-        self.encoder_action = nn.Linear(action_dim, token_dim)
+        self.encoder_reward = TimestepEmbedder(self.reward_dim)
+        self.encoder_action = nn.Linear(action_dim, self.token_dim)
         self.sequence_processor = SequenceProcessor(
             seq_len=seq_len,
-            hidden_dim=token_dim,
+            hidden_dim=self.token_dim,
             sparsity=args.sparsity,
         )
         self.actor = DiffusionPolicy(
-            state_dim=cnn_dim,
+            state_dim=self.cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
         self.qf1 = SacQ(
-            in_channels=cnn_dim,
+            in_channels=self.cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -157,7 +158,7 @@ class Network(nn.Module):
             sparsity=args.sparsity,
         )
         self.qf2 = SacQ(
-            in_channels=cnn_dim,
+            in_channels=self.cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -165,19 +166,202 @@ class Network(nn.Module):
             sparsity=args.sparsity,
         )
         self.state_reward_predictor = DiffusionStateRewardPredictor(
-            input_dim=token_dim,
-            state_dim=cnn_dim,
+            input_dim=self.token_dim,
+            state_dim=self.cnn_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
         self.action_predictor = DiffusionPolicy(
-            state_dim=token_dim,
+            state_dim=self.token_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
+
+        self.hl_gauss_loss = HLGaussLoss(
+            min_value=-30,
+            max_value=+30,
+            num_bins=num_bins,
+            clamp_to_range=True,
+        )
+
+    def compute_critic_loss(self, data, state_curr):
+        with torch.no_grad():
+            state_next = self.encoder_image.encode(data.observations[:, -1])
+            next_state_actions, _, _ = self.actor.get_action(state_next)
+            qf1_next_output_dict = self.qf1(state_next, next_state_actions)
+            qf2_next_output_dict = self.qf2(state_next, next_state_actions)
+            qf1_next_target = qf1_next_output_dict["output"]
+            qf2_next_target = qf2_next_output_dict["output"]
+            qf1_next_target = self.hl_gauss_loss(qf1_next_target).unsqueeze(-1)
+            qf2_next_target = self.hl_gauss_loss(qf2_next_target).unsqueeze(-1)
+            min_q = torch.min(qf1_next_target, qf2_next_target)
+            min_qf_next_target = min_q.view(-1)
+            curr_reward = data.rewards[:, -2].flatten()
+            curr_continue = 1 - data.dones[:, -2].flatten()
+            next_q_value = curr_reward + curr_continue * self.gamma * min_qf_next_target
+
+        qf1_output_dict = self.qf1(state_curr, data.actions[:, -2])
+        qf2_output_dict = self.qf2(state_curr, data.actions[:, -2])
+
+        qf1_a_values = qf1_output_dict["output"]
+        qf2_a_values = qf2_output_dict["output"]
+
+        qf1_loss = self.hl_gauss_loss(qf1_a_values, next_q_value)
+        qf2_loss = self.hl_gauss_loss(qf2_a_values, next_q_value)
+        qf_loss = qf1_loss + qf2_loss
+
+        activations_dict = {}
+
+        info_dict = {
+            "qf1_loss": qf1_loss.item(),
+            "qf2_loss": qf2_loss.item(),
+            "qf1_values": qf1_a_values.mean().item(),
+            "qf2_values": qf2_a_values.mean().item(),
+            "min_qf_next_target": min_qf_next_target.mean().item(),
+            "next_q_value": next_q_value.mean().item(),
+        }
+
+        return qf_loss, activations_dict, info_dict
+
+    def compute_actor_loss(self, state_curr):
+        pi, log_pi, _ = self.actor.get_action(state_curr)
+
+        for param in self.qf1.parameters():
+            param.requires_grad_(False)
+        for param in self.qf2.parameters():
+            param.requires_grad_(False)
+
+        qf1_pi_output_dict = self.qf1(state_curr, pi)
+        qf2_pi_output_dict = self.qf2(state_curr, pi)
+        qf1_pi = qf1_pi_output_dict["output"]
+        qf2_pi = qf2_pi_output_dict["output"]
+        qf1_pi = self.hl_gauss_loss(qf1_pi).unsqueeze(-1)
+        qf2_pi = self.hl_gauss_loss(qf2_pi).unsqueeze(-1)
+        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+        actor_loss = -min_qf_pi.mean()
+
+        for param in self.qf1.parameters():
+            param.requires_grad_(True)
+        for param in self.qf2.parameters():
+            param.requires_grad_(True)
+
+        # DACER2 loss (https://arxiv.org/abs/2505.23426)
+        actions = pi.clone().detach()
+        actions.requires_grad = True
+        eps = 1e-4
+        device = pi.device
+        batch_size = pi.shape[0]
+        t = (torch.rand((batch_size, 1), device=device)) * (1 - eps) + eps
+        c = 0.4
+        d = -1.8
+        w_t = torch.exp(c * t + d)
+
+        def calc_target(q_network, actions):
+            q_output_dict = q_network(state_curr, actions)
+            q_values = q_output_dict["output"]
+            q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
+            q_grad = torch.autograd.grad(
+                outputs=q_values.sum(),
+                inputs=actions,
+                create_graph=True,
+            )[0]
+            with torch.no_grad():
+                target = (1 - t) / t * q_grad + 1 / t * actions
+                target /= target.norm(dim=1, keepdim=True) + 1e-8
+                return w_t * target
+
+        target1 = calc_target(self.qf1, actions)
+        target2 = calc_target(self.qf2, actions)
+        target = (target1 + target2) / 2.0
+        noise = torch.randn_like(actions)
+        noise = torch.clamp(noise, -3.0, 3.0)
+        a_t = (1.0 - t) * noise + t * actions
+        actor_output_dict = self.actor.forward(a_t, t.squeeze(1), state_curr)
+        v = actor_output_dict["output"]
+        dacer_loss = F.mse_loss(v, target)
+
+        # Combine actor losses
+        total_actor_loss = actor_loss + dacer_loss * 0.05
+
+        activations_dict = {
+            "actor": actor_output_dict["activation"],
+            "qf1": qf1_pi_output_dict["activation"],
+            "qf2": qf2_pi_output_dict["activation"],
+        }
+
+        info_dict = {
+            "actor_loss": actor_loss.item(),
+            "dacer_loss": dacer_loss.item(),
+            "log_pi": log_pi.mean().item(),
+        }
+
+        return total_actor_loss, activations_dict, info_dict
+
+    def compute_sequence_loss(self, data):
+        sequence_tensor = create_sequence_tokens(
+            data.observations, data.rewards, data.actions, self
+        )
+
+        processed_sequence = self.sequence_processor(sequence_tensor)
+        seq_len_tokens = processed_sequence.shape[1]
+
+        state_reward_positions = torch.arange(
+            0, seq_len_tokens, 2, device=processed_sequence.device
+        )
+        action_positions = torch.arange(1, seq_len_tokens, 2, device=processed_sequence.device)
+        seq_loss = 0.0
+
+        if len(state_reward_positions) > 0 and len(action_positions) > 0:
+            valid_state_positions = state_reward_positions[
+                state_reward_positions < seq_len_tokens - 1
+            ]
+            if len(valid_state_positions) > 0:
+                state_reward_tokens = processed_sequence[:, valid_state_positions]
+                batch_size, n_positions, _ = state_reward_tokens.shape
+
+                flat_tokens = state_reward_tokens.view(batch_size * n_positions, self.token_dim)
+                pred_actions, _, _ = self.action_predictor.get_action(flat_tokens)
+
+                pred_actions = pred_actions.view(batch_size, n_positions, self.action_dim)
+                target_actions = data.actions[:, valid_state_positions // 2]
+
+                seq_loss += F.mse_loss(pred_actions, target_actions)
+
+        if len(action_positions) > 0:
+            valid_action_positions = action_positions[action_positions < seq_len_tokens - 1]
+            if len(valid_action_positions) > 0:
+                action_tokens = processed_sequence[:, valid_action_positions]
+                batch_size, n_positions, _ = action_tokens.shape
+
+                flat_tokens = action_tokens.view(batch_size * n_positions, self.token_dim)
+                pred_state_rewards, _, _ = self.state_reward_predictor.get_state_reward(flat_tokens)
+
+                pred_state_rewards = pred_state_rewards.view(
+                    batch_size, n_positions, self.cnn_dim + 1
+                )
+
+                state_indices = (valid_action_positions + 1) // 2
+                target_states = self.encoder_image.encode(
+                    data.observations[:, state_indices].view(
+                        batch_size * n_positions, *data.observations.shape[2:]
+                    )
+                )
+                target_states = target_states.view(batch_size, n_positions, self.cnn_dim)
+                target_rewards = data.rewards[:, state_indices]
+                target_state_rewards = torch.cat([target_states, target_rewards], dim=-1)
+
+                seq_loss += F.mse_loss(pred_state_rewards, target_state_rewards)
+
+        activations_dict = {}
+
+        info_dict = {
+            "seq_loss": seq_loss.item() if isinstance(seq_loss, torch.Tensor) else seq_loss,
+        }
+
+        return seq_loss, activations_dict, info_dict
 
 
 if __name__ == "__main__":
@@ -234,18 +418,9 @@ if __name__ == "__main__":
     action_dim = np.prod(env.action_space.shape)
     seq_len = 2
     assert seq_len >= 2, "seq_len must be >= 2 for sequence modeling"
-    num_bins = 51
-    network = Network(
-        num_bins=num_bins, sparsity=args.sparsity, action_dim=action_dim, seq_len=seq_len
-    ).to(device)
+    network = Network(sparsity=args.sparsity, action_dim=action_dim, seq_len=seq_len).to(device)
     lr = 1e-4
     optimizer = optim.AdamW(network.parameters(), lr=lr, weight_decay=1e-5)
-    hl_gauss_loss = HLGaussLoss(
-        min_value=-30,
-        max_value=+30,
-        num_bins=num_bins,
-        clamp_to_range=True,
-    ).to(device)
 
     rb = ReplayBuffer(
         args.buffer_size,
@@ -387,170 +562,18 @@ if __name__ == "__main__":
             # training.
             data = rb.sample(args.batch_size)
 
-            with torch.no_grad():
-                state_next = network.encoder_image.encode(data.observations[:, -1])
-                next_state_actions, next_state_log_pi, _ = network.actor.get_action(state_next)
-                qf1_next_output_dict = network.qf1(state_next, next_state_actions)
-                qf2_next_output_dict = network.qf2(state_next, next_state_actions)
-                qf1_next_target = qf1_next_output_dict["output"]
-                qf2_next_target = qf2_next_output_dict["output"]
-                qf1_next_target = hl_gauss_loss(qf1_next_target).unsqueeze(-1)
-                qf2_next_target = hl_gauss_loss(qf2_next_target).unsqueeze(-1)
-                min_q = torch.min(qf1_next_target, qf2_next_target)
-                min_qf_next_target = min_q.view(-1)
-                curr_reward = data.rewards[:, -2].flatten()
-                curr_continue = 1 - data.dones[:, -2].flatten()
-                next_q_value = curr_reward + curr_continue * args.gamma * min_qf_next_target
-
+            # Compute all losses using refactored methods
             state_curr = network.encoder_image.encode(data.observations[:, -2])
+            qf_loss, qf_activations, qf_info = network.compute_critic_loss(data, state_curr)
+            actor_loss, actor_activations, actor_info = network.compute_actor_loss(state_curr)
+            seq_loss, seq_activations, seq_info = network.compute_sequence_loss(data)
 
-            # Get Q-values and activations for Srank computation
-            qf1_output_dict = network.qf1(state_curr, data.actions[:, -2])
-            qf2_output_dict = network.qf2(state_curr, data.actions[:, -2])
-
-            qf1_a_values = qf1_output_dict["output"]
-            qf2_a_values = qf2_output_dict["output"]
-
-            qf1_loss = hl_gauss_loss(qf1_a_values, next_q_value)
-            qf2_loss = hl_gauss_loss(qf2_a_values, next_q_value)
-            qf_loss = qf1_loss + qf2_loss
-
-            pi, log_pi, _ = network.actor.get_action(state_curr)
-            for param in network.qf1.parameters():
-                param.requires_grad_(False)
-            for param in network.qf2.parameters():
-                param.requires_grad_(False)
-            qf1_pi_output_dict = network.qf1(state_curr, pi)
-            qf2_pi_output_dict = network.qf2(state_curr, pi)
-            qf1_pi = qf1_pi_output_dict["output"]
-            qf2_pi = qf2_pi_output_dict["output"]
-            qf1_pi = hl_gauss_loss(qf1_pi).unsqueeze(-1)
-            qf2_pi = hl_gauss_loss(qf2_pi).unsqueeze(-1)
-            min_qf_pi = torch.min(qf1_pi, qf2_pi)
-            actor_loss = -min_qf_pi.mean()
-            for param in network.qf1.parameters():
-                param.requires_grad_(True)
-            for param in network.qf2.parameters():
-                param.requires_grad_(True)
-
-            # DACER2 (https://arxiv.org/abs/2505.23426) loss
-            actions = pi.clone().detach()
-            actions.requires_grad = True
-            eps = 1e-4
-            t = (torch.rand((args.batch_size, 1), device=device)) * (1 - eps) + eps
-            c = 0.4
-            d = -1.8
-            w_t = torch.exp(c * t + d)
-
-            def calc_target(q_network, actions):
-                q_output_dict = q_network(state_curr, actions)
-                q_values = q_output_dict["output"]
-                q_values = hl_gauss_loss(q_values).unsqueeze(-1)
-                q_grad = torch.autograd.grad(
-                    outputs=q_values.sum(),
-                    inputs=actions,
-                    create_graph=True,
-                )[0]
-                with torch.no_grad():
-                    # target = -actions / (1 - t) - t / (1 - t) * q_grad
-                    target = (1 - t) / t * q_grad + 1 / t * actions
-                    target /= target.norm(dim=1, keepdim=True) + 1e-8
-                    return w_t * target
-
-            target1 = calc_target(network.qf1, actions)
-            target2 = calc_target(network.qf2, actions)
-            target = (target1 + target2) / 2.0
-            noise = torch.randn_like(actions)
-            noise = torch.clamp(noise, -3.0, 3.0)
-            a_t = (1.0 - t) * noise + t * actions
-            actor_output_dict = network.actor.forward(a_t, t.squeeze(1), state_curr)
-            v = actor_output_dict["output"]
-            dacer_loss = F.mse_loss(v, target)
-            actor_loss += dacer_loss * 0.05
-
-            # Sequence modeling loss
-            # Create sequence tokens using shared function
-            sequence_tensor = create_sequence_tokens(
-                data.observations, data.rewards, data.actions, network
-            )
-
-            # Process through sequence processor
-            processed_sequence = network.sequence_processor(sequence_tensor)
-
-            # Vectorized prediction
-            seq_len_tokens = processed_sequence.shape[1]
-
-            # Action prediction: predict actions from state+reward tokens
-            state_reward_positions = torch.arange(0, seq_len_tokens, 2, device=device)
-            action_positions = torch.arange(1, seq_len_tokens, 2, device=device)
-            seq_loss = 0.0
-
-            # Predict actions from state+reward tokens
-            if len(state_reward_positions) > 0 and len(action_positions) > 0:
-                # Get state+reward tokens that have corresponding actions
-                valid_state_positions = state_reward_positions[
-                    state_reward_positions < seq_len_tokens - 1
-                ]
-                if len(valid_state_positions) > 0:
-                    # Batch process action predictions
-                    state_reward_tokens = processed_sequence[
-                        :, valid_state_positions
-                    ]  # (batch, n_positions, token_dim)
-                    batch_size, n_positions, _ = state_reward_tokens.shape
-
-                    # Flatten for batch processing
-                    flat_tokens = state_reward_tokens.view(
-                        batch_size * n_positions, network.token_dim
-                    )
-                    pred_actions, _, _ = network.action_predictor.get_action(flat_tokens)
-
-                    # Reshape back and get target actions
-                    pred_actions = pred_actions.view(batch_size, n_positions, action_dim)
-                    target_actions = data.actions[:, valid_state_positions // 2]
-
-                    seq_loss += F.mse_loss(pred_actions, target_actions)
-
-            # Predict state+reward from action tokens
-            if len(action_positions) > 0:
-                # Get action tokens that have corresponding next states
-                valid_action_positions = action_positions[action_positions < seq_len_tokens - 1]
-                if len(valid_action_positions) > 0:
-                    # Batch process state+reward predictions
-                    action_tokens = processed_sequence[
-                        :, valid_action_positions
-                    ]  # (batch, n_positions, token_dim)
-                    batch_size, n_positions, _ = action_tokens.shape
-
-                    # Flatten for batch processing
-                    flat_tokens = action_tokens.view(batch_size * n_positions, network.token_dim)
-                    pred_state_rewards, _, _ = network.state_reward_predictor.get_state_reward(
-                        flat_tokens
-                    )
-
-                    # Reshape back and get target state+rewards
-                    pred_state_rewards = pred_state_rewards.view(
-                        batch_size, n_positions, network.cnn_dim + 1
-                    )
-
-                    # Build target state+rewards
-                    state_indices = (valid_action_positions + 1) // 2
-                    target_states = network.encoder_image.encode(
-                        data.observations[:, state_indices].view(
-                            batch_size * n_positions, *data.observations.shape[2:]
-                        )
-                    )
-                    target_states = target_states.view(batch_size, n_positions, network.cnn_dim)
-                    target_rewards = data.rewards[:, state_indices]
-                    target_state_rewards = torch.cat([target_states, target_rewards], dim=-1)
-
-                    seq_loss += F.mse_loss(pred_state_rewards, target_state_rewards)
-
-            # Compute srank for key activations (using intermediate layer outputs)
+            # Combine all activations for feature_dict
             feature_dict = {
                 "state": state_curr,
-                "actor": actor_output_dict["activation"],
-                "qf1": qf1_pi_output_dict["activation"],
-                "qf2": qf2_pi_output_dict["activation"],
+                **actor_activations,
+                **qf_activations,
+                **seq_activations,
             }
 
             # optimize the model
@@ -603,20 +626,24 @@ if __name__ == "__main__":
                 elapsed_time = time.time() - start_time
                 data_dict = {
                     "global_step": global_step,
-                    "losses/qf1_values": qf1_a_values.mean().item(),
-                    "losses/qf2_values": qf2_a_values.mean().item(),
-                    "losses/qf1_loss": qf1_loss.item(),
-                    "losses/qf2_loss": qf2_loss.item(),
-                    "losses/qf_loss": qf_loss.item() / 2.0,
-                    "losses/min_qf_next_target": min_qf_next_target.mean().item(),
-                    "losses/next_q_value": next_q_value.mean().item(),
-                    "losses/actor_loss": actor_loss.item(),
-                    "losses/log_pi": log_pi.mean().item(),
                     "a_logp": selected_log_pi.mean().item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
                 }
+
+                # Add loss information from compute methods
+                for key, value in qf_info.items():
+                    data_dict[f"losses/{key}"] = value
+
+                for key, value in actor_info.items():
+                    data_dict[f"losses/{key}"] = value
+
+                for key, value in seq_info.items():
+                    data_dict[f"losses/{key}"] = value
+
+                # Add combined loss
+                data_dict["losses/qf_loss"] = qf_loss.item() / 2.0
 
                 # Add gradient norm metrics
                 for key, value in grad_metrics.items():
@@ -635,11 +662,6 @@ if __name__ == "__main__":
                     result_dict = metrics_computers[feature_name](feature)
                     for key, value in result_dict.items():
                         data_dict[f"{key}/{feature_name}"] = value
-
-                data_dict["losses/dacer_loss"] = dacer_loss.item()
-                data_dict["losses/seq_loss"] = (
-                    seq_loss.item() if isinstance(seq_loss, torch.Tensor) else seq_loss
-                )
                 wandb.log(data_dict)
 
                 fixed_data = {
