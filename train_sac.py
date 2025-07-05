@@ -45,11 +45,10 @@ def create_sequence_tokens(observations, rewards, actions, network):
     states = states.view(batch_size, seq_len, network.cnn_dim)
 
     # Encode all rewards at once
-    rewards = network.encoder_reward(rewards.view(batch_size * seq_len))
+    rewards = network.encoder_reward(rewards)
     rewards = rewards.view(batch_size, seq_len, network.reward_dim)
 
     # Encode all actions at once
-    actions = actions.view(batch_size * seq_len, actions.shape[-1])
     actions = network.encoder_action(actions)
     actions = actions.view(batch_size, seq_len, network.token_dim)
 
