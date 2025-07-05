@@ -21,7 +21,11 @@ import wandb
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import AE
-from networks.diffusion_policy import DiffusionPolicy, TimestepEmbedder
+from networks.diffusion_policy import (
+    DiffusionPolicy,
+    DiffusionStateRewardPredictor,
+    TimestepEmbedder,
+)
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sequence_processor import SequenceProcessor
 from networks.sparse_utils import apply_masks_during_training
@@ -29,6 +33,38 @@ from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
 from utils import concat_images
 from wrappers import make_env
+
+
+def create_sequence_tokens(observations, rewards, actions, network, device):
+    """Create interleaved sequence tokens from observations, rewards, and actions"""
+    batch_size, seq_len = observations.shape[:2]
+    cnn_dim = network.cnn_dim  # 576
+    reward_dim = 32
+    token_dim = cnn_dim + reward_dim  # 608
+
+    # Encode all states at once
+    all_states = observations.view(batch_size * seq_len, *observations.shape[2:])
+    all_state_encs = network.encoder_image.encode(all_states)
+    all_state_encs = all_state_encs.view(batch_size, seq_len, cnn_dim)
+
+    # Encode all rewards at once
+    all_reward_encs = network.encoder_reward(rewards.view(batch_size * seq_len))
+    all_reward_encs = all_reward_encs.view(batch_size, seq_len, reward_dim)
+
+    # Encode all actions at once
+    all_actions = actions.view(batch_size * seq_len, actions.shape[-1])
+    all_action_encs = network.encoder_action(all_actions)
+    all_action_encs = all_action_encs.view(batch_size, seq_len, token_dim)
+
+    # Create state+reward tokens
+    state_reward_tokens = torch.cat([all_state_encs, all_reward_encs], dim=-1)
+
+    # Stack and interleave tokens
+    stacked_tokens = torch.stack([state_reward_tokens, all_action_encs], dim=2)
+    sequence_tensor = stacked_tokens.view(batch_size, seq_len * 2, token_dim)
+    sequence_tensor = sequence_tensor[:, :-1]  # Remove last token
+
+    return sequence_tensor
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,16 +91,19 @@ def parse_args() -> argparse.Namespace:
 
 
 class Network(nn.Module):
-    def __init__(self, num_bins: int, sparsity: float):
+    def __init__(self, num_bins: int, sparsity: float, action_dim: int, seq_len: int):
         super(Network, self).__init__()
         self.sparsity = sparsity
-        cnn_dim = 4 * 12 * 12
+        cnn_dim = 4 * 12 * 12  # 576
+        self.cnn_dim = cnn_dim
+        reward_dim = 32
+        token_dim = cnn_dim + reward_dim  # 608
         self.encoder_image = AE()
-        self.encoder_reward = TimestepEmbedder(cnn_dim)
-        self.encoder_action = nn.Linear(action_dim, cnn_dim)
+        self.encoder_reward = TimestepEmbedder(reward_dim)
+        self.encoder_action = nn.Linear(action_dim, token_dim)
         self.sequence_processor = SequenceProcessor(
             seq_len=seq_len,
-            hidden_dim=cnn_dim,
+            hidden_dim=token_dim,
             sparsity=args.sparsity,
         )
         self.actor = DiffusionPolicy(
@@ -88,6 +127,20 @@ class Network(nn.Module):
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
             num_bins=num_bins,
+            sparsity=args.sparsity,
+        )
+        self.state_reward_predictor = DiffusionStateRewardPredictor(
+            input_dim=token_dim,
+            state_dim=cnn_dim,
+            hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
+            sparsity=args.sparsity,
+        )
+        self.action_predictor = DiffusionPolicy(
+            state_dim=token_dim,
+            action_dim=action_dim,
+            hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
 
@@ -145,8 +198,11 @@ if __name__ == "__main__":
 
     action_dim = np.prod(env.action_space.shape)
     seq_len = 2
+    assert seq_len >= 2, "seq_len must be >= 2 for sequence modeling"
     num_bins = 51
-    network = Network(num_bins=num_bins, sparsity=args.sparsity).to(device)
+    network = Network(
+        num_bins=num_bins, sparsity=args.sparsity, action_dim=action_dim, seq_len=seq_len
+    ).to(device)
     lr = 1e-4
     optimizer = optim.AdamW(network.parameters(), lr=lr, weight_decay=1e-5)
     hl_gauss_loss = HLGaussLoss(
@@ -158,7 +214,7 @@ if __name__ == "__main__":
 
     rb = ReplayBuffer(
         args.buffer_size,
-        seq_len + 1,
+        seq_len,
         env.observation_space.shape,
         env.action_space.shape,
         device,
@@ -171,6 +227,8 @@ if __name__ == "__main__":
         "actor": network.actor,
         "qf1": network.qf1,
         "qf2": network.qf2,
+        "action_predictor": network.action_predictor,
+        "state_reward_predictor": network.state_reward_predictor,
     }
 
     # Initialize weight projection if enabled
@@ -182,6 +240,10 @@ if __name__ == "__main__":
         weight_projection_norms["actor"] = get_initial_norms(network.actor)
         weight_projection_norms["qf1"] = get_initial_norms(network.qf1)
         weight_projection_norms["qf2"] = get_initial_norms(network.qf2)
+        weight_projection_norms["action_predictor"] = get_initial_norms(network.action_predictor)
+        weight_projection_norms["state_reward_predictor"] = get_initial_norms(
+            network.state_reward_predictor
+        )
 
     start_time = time.time()
 
@@ -236,6 +298,46 @@ if __name__ == "__main__":
                     c = args.action_noise
                     action = (1 - c) * action + c * action_noise
                     action = np.clip(action, action_low, action_high)
+
+                    # Sequence processing for next state and reward prediction
+                    if global_step > args.learning_starts:
+                        # Prepare sequence data (use seq_len to match observations/rewards)
+                        seq_obs_tensor = torch.stack(input_obs_list, dim=1)
+                        seq_reward_tensor = torch.stack(input_reward_list, dim=1)
+                        current_action_tensor = torch.Tensor(action).to(device).unsqueeze(0)
+                        seq_action_list = input_action_list[-seq_len + 1 :] + [
+                            current_action_tensor
+                        ]
+                        seq_action_tensor = torch.stack(seq_action_list, dim=1)
+
+                        # Create sequence tokens using shared function
+                        sequence_tensor = create_sequence_tokens(
+                            seq_obs_tensor,
+                            seq_reward_tensor,
+                            seq_action_tensor,
+                            network,
+                            device,
+                        )
+
+                        # Process and predict
+                        processed_sequence = network.sequence_processor(sequence_tensor)
+                        last_action_token = processed_sequence[:, -1]
+                        pred_state_reward, _, _ = network.state_reward_predictor.get_state_reward(
+                            last_action_token
+                        )
+
+                        # Visualize prediction
+                        pred_state = pred_state_reward[:, : network.cnn_dim]
+                        pred_obs = network.encoder_image.decode(pred_state)
+                        pred_obs_np = pred_obs[0].detach().cpu().numpy().transpose(1, 2, 0)
+                        current_obs_np = obs_tensor[0].detach().cpu().numpy().transpose(1, 2, 0)
+                        # Create a dummy main image for visualization
+                        main_img = (np.zeros((400, 600, 3), dtype=np.float32) * 255).astype(
+                            np.uint8
+                        )
+                        current_obs_uint8 = (current_obs_np * 255).astype(np.uint8)
+                        pred_obs_uint8 = (np.clip(pred_obs_np, 0, 1) * 255).astype(np.uint8)
+                        comparison_img = concat_images(main_img, current_obs_uint8, pred_obs_uint8)
 
                     input_action_list.append(torch.Tensor(action).to(device).unsqueeze(0))
                     input_action_list.pop(0)
@@ -356,6 +458,86 @@ if __name__ == "__main__":
             dacer_loss = F.mse_loss(v, target)
             actor_loss += dacer_loss * 0.05
 
+            # Sequence modeling loss
+            # Get dimensions
+            cnn_dim = network.cnn_dim
+            reward_dim = 32
+            token_dim = cnn_dim + reward_dim
+
+            # Create sequence tokens using shared function
+            sequence_tensor = create_sequence_tokens(
+                data.observations, data.rewards, data.actions, network, device
+            )
+
+            # Process through sequence processor
+            processed_sequence = network.sequence_processor(sequence_tensor)
+
+            # Vectorized prediction
+            seq_len_tokens = processed_sequence.shape[1]
+
+            # Action prediction: predict actions from state+reward tokens
+            state_reward_positions = torch.arange(0, seq_len_tokens, 2, device=device)
+            action_positions = torch.arange(1, seq_len_tokens, 2, device=device)
+            seq_loss = 0.0
+
+            # Predict actions from state+reward tokens
+            if len(state_reward_positions) > 0 and len(action_positions) > 0:
+                # Get state+reward tokens that have corresponding actions
+                valid_state_positions = state_reward_positions[
+                    state_reward_positions < seq_len_tokens - 1
+                ]
+                if len(valid_state_positions) > 0:
+                    # Batch process action predictions
+                    state_reward_tokens = processed_sequence[
+                        :, valid_state_positions
+                    ]  # (batch, n_positions, token_dim)
+                    batch_size, n_positions, _ = state_reward_tokens.shape
+
+                    # Flatten for batch processing
+                    flat_tokens = state_reward_tokens.view(batch_size * n_positions, token_dim)
+                    pred_actions, _, _ = network.action_predictor.get_action(flat_tokens)
+
+                    # Reshape back and get target actions
+                    pred_actions = pred_actions.view(batch_size, n_positions, action_dim)
+                    target_actions = data.actions[:, valid_state_positions // 2]
+
+                    seq_loss += F.mse_loss(pred_actions, target_actions)
+
+            # Predict state+reward from action tokens
+            if len(action_positions) > 0:
+                # Get action tokens that have corresponding next states
+                valid_action_positions = action_positions[action_positions < seq_len_tokens - 1]
+                if len(valid_action_positions) > 0:
+                    # Batch process state+reward predictions
+                    action_tokens = processed_sequence[
+                        :, valid_action_positions
+                    ]  # (batch, n_positions, token_dim)
+                    batch_size, n_positions, _ = action_tokens.shape
+
+                    # Flatten for batch processing
+                    flat_tokens = action_tokens.view(batch_size * n_positions, token_dim)
+                    pred_state_rewards, _, _ = network.state_reward_predictor.get_state_reward(
+                        flat_tokens
+                    )
+
+                    # Reshape back and get target state+rewards
+                    pred_state_rewards = pred_state_rewards.view(
+                        batch_size, n_positions, cnn_dim + 1
+                    )
+
+                    # Build target state+rewards
+                    state_indices = (valid_action_positions + 1) // 2
+                    target_states = network.encoder_image.encode(
+                        data.observations[:, state_indices].view(
+                            batch_size * n_positions, *data.observations.shape[2:]
+                        )
+                    )
+                    target_states = target_states.view(batch_size, n_positions, cnn_dim)
+                    target_rewards = data.rewards[:, state_indices]
+                    target_state_rewards = torch.cat([target_states, target_rewards], dim=-1)
+
+                    seq_loss += F.mse_loss(pred_state_rewards, target_state_rewards)
+
             # Compute srank for key activations (using intermediate layer outputs)
             feature_dict = {
                 "state": state_curr,
@@ -365,7 +547,7 @@ if __name__ == "__main__":
             }
 
             # optimize the model
-            loss = actor_loss + qf_loss
+            loss = actor_loss + qf_loss + seq_loss
             optimizer.zero_grad()
             loss.backward()
 
@@ -393,6 +575,13 @@ if __name__ == "__main__":
                 weight_project(network.actor, weight_projection_norms["actor"])
                 weight_project(network.qf1, weight_projection_norms["qf1"])
                 weight_project(network.qf2, weight_projection_norms["qf2"])
+                weight_project(
+                    network.action_predictor, weight_projection_norms["action_predictor"]
+                )
+                weight_project(
+                    network.state_reward_predictor,
+                    weight_projection_norms["state_reward_predictor"],
+                )
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
             if args.apply_masks_during_training:
@@ -400,6 +589,8 @@ if __name__ == "__main__":
                 apply_masks_during_training(network.actor)
                 apply_masks_during_training(network.qf1)
                 apply_masks_during_training(network.qf2)
+                apply_masks_during_training(network.action_predictor)
+                apply_masks_during_training(network.state_reward_predictor)
 
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time
@@ -439,6 +630,9 @@ if __name__ == "__main__":
                         data_dict[f"{key}/{feature_name}"] = value
 
                 data_dict["losses/dacer_loss"] = dacer_loss.item()
+                data_dict["losses/seq_loss"] = (
+                    seq_loss.item() if isinstance(seq_loss, torch.Tensor) else seq_loss
+                )
                 wandb.log(data_dict)
 
                 fixed_data = {
