@@ -104,7 +104,7 @@ def predict_next_state(
     # Process and predict
     processed_sequence = network.sequence_processor(sequence_tensor)
     # The last token should be an action token (odd index), use it to predict next state+reward
-    last_action_token = processed_sequence[:, -1]
+    last_action_token = processed_sequence[:, -2]
     pred_state, _, _ = network.state_predictor.get_state(last_action_token)
 
     # Compare prediction with actual next observation
