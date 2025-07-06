@@ -50,6 +50,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
+    parser.add_argument("--predictor_hidden_dim", type=int, default=1024)
+    parser.add_argument("--predictor_block_num", type=int, default=2)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
@@ -159,8 +161,8 @@ class Network(nn.Module):
         self.state_predictor = DiffusionStatePredictor(
             input_dim=self.token_dim,
             state_dim=self.cnn_dim,
-            hidden_dim=args.actor_hidden_dim,
-            block_num=args.actor_block_num,
+            hidden_dim=args.predictor_hidden_dim,
+            block_num=args.predictor_block_num,
             sparsity=args.sparsity,
         )
         self.reward_predictor = nn.Linear(self.token_dim, 1)
