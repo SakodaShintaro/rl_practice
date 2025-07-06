@@ -4,6 +4,7 @@ from torch.distributions import Beta
 
 from .smolvla_backbone import SmolVLABackbone
 
+
 class PpoSmolvlaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int) -> None:
         super().__init__()

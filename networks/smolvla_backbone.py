@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 class SmolVLABackbone(nn.Module):
     def __init__(self, model_id: str = "lerobot/smolvla_base") -> None:
         super().__init__()

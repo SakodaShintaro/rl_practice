@@ -1,9 +1,10 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from .smolvla_backbone import SmolVLABackbone
 
 from .sac_tanh_policy_and_q import LOG_STD_MAX, LOG_STD_MIN
+from .smolvla_backbone import SmolVLABackbone
+
 
 class SacSmolVLAQ(nn.Module):
     def __init__(self, action_dim: int, hidden_dim: int, out_dim: int) -> None:

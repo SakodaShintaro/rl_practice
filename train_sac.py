@@ -13,15 +13,15 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+import wandb
 from hl_gauss_pytorch import HLGaussLoss
 from torch import optim
 from tqdm import tqdm
 
-import wandb
 from networks.backbone import AE
-from networks.smolvla_backbone import SmolVLABackbone
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
+from networks.smolvla_backbone import SmolVLABackbone
 from replay_buffer import ReplayBuffer
 from utils import concat_images
 from wrappers import make_env
