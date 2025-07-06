@@ -488,8 +488,10 @@ if __name__ == "__main__":
 
     for episode_id in range(10000):
         if (episode_id + 1) % image_save_interval == 0:
-            curr_image_dir = image_dir / f"ep_{episode_id:08d}"
+            curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
             curr_image_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            curr_image_dir = None
 
         obs, _ = env.reset()
         reward_list = []
@@ -709,13 +711,6 @@ if __name__ == "__main__":
             print(
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
             )
-
-        # setup image directory for next episode if needed
-        if (episode_id + 1) % image_save_interval == 0:
-            curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
-            curr_image_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            curr_image_dir = None
 
         episode_id += 1
 
