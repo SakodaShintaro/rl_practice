@@ -156,14 +156,6 @@ class Network(nn.Module):
             num_bins=num_bins,
             sparsity=args.sparsity,
         )
-        self.qf2 = SacQ(
-            in_channels=self.cnn_dim,
-            action_dim=action_dim,
-            hidden_dim=args.critic_hidden_dim,
-            block_num=args.critic_block_num,
-            num_bins=num_bins,
-            sparsity=args.sparsity,
-        )
         self.state_predictor = DiffusionStatePredictor(
             input_dim=self.token_dim,
             state_dim=self.cnn_dim,
@@ -192,34 +184,26 @@ class Network(nn.Module):
             state_next = self.encoder_image.encode(data.observations[:, -1])
             next_state_actions, _, _ = self.actor.get_action(state_next)
             qf1_next_output_dict = self.qf1(state_next, next_state_actions)
-            qf2_next_output_dict = self.qf2(state_next, next_state_actions)
             qf1_next_target = qf1_next_output_dict["output"]
-            qf2_next_target = qf2_next_output_dict["output"]
             qf1_next_target = self.hl_gauss_loss(qf1_next_target).unsqueeze(-1)
-            qf2_next_target = self.hl_gauss_loss(qf2_next_target).unsqueeze(-1)
-            min_q = torch.min(qf1_next_target, qf2_next_target)
+            min_q = qf1_next_target
             min_qf_next_target = min_q.view(-1)
             curr_reward = data.rewards[:, -2].flatten()
             curr_continue = 1 - data.dones[:, -2].flatten()
             next_q_value = curr_reward + curr_continue * self.gamma * min_qf_next_target
 
         qf1_output_dict = self.qf1(state_curr, data.actions[:, -2])
-        qf2_output_dict = self.qf2(state_curr, data.actions[:, -2])
 
         qf1_a_values = qf1_output_dict["output"]
-        qf2_a_values = qf2_output_dict["output"]
 
         qf1_loss = self.hl_gauss_loss(qf1_a_values, next_q_value)
-        qf2_loss = self.hl_gauss_loss(qf2_a_values, next_q_value)
-        qf_loss = qf1_loss + qf2_loss
+        qf_loss = qf1_loss
 
         activations_dict = {}
 
         info_dict = {
             "qf1_loss": qf1_loss.item(),
-            "qf2_loss": qf2_loss.item(),
             "qf1_values": qf1_a_values.mean().item(),
-            "qf2_values": qf2_a_values.mean().item(),
             "min_qf_next_target": min_qf_next_target.mean().item(),
             "next_q_value": next_q_value.mean().item(),
         }
@@ -231,21 +215,14 @@ class Network(nn.Module):
 
         for param in self.qf1.parameters():
             param.requires_grad_(False)
-        for param in self.qf2.parameters():
-            param.requires_grad_(False)
 
         qf1_pi_output_dict = self.qf1(state_curr, pi)
-        qf2_pi_output_dict = self.qf2(state_curr, pi)
         qf1_pi = qf1_pi_output_dict["output"]
-        qf2_pi = qf2_pi_output_dict["output"]
         qf1_pi = self.hl_gauss_loss(qf1_pi).unsqueeze(-1)
-        qf2_pi = self.hl_gauss_loss(qf2_pi).unsqueeze(-1)
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+        min_qf_pi = qf1_pi
         actor_loss = -min_qf_pi.mean()
 
         for param in self.qf1.parameters():
-            param.requires_grad_(True)
-        for param in self.qf2.parameters():
             param.requires_grad_(True)
 
         # DACER2 loss (https://arxiv.org/abs/2505.23426)
@@ -274,8 +251,7 @@ class Network(nn.Module):
                 return w_t * target
 
         target1 = calc_target(self.qf1, actions)
-        target2 = calc_target(self.qf2, actions)
-        target = (target1 + target2) / 2.0
+        target = target1
         noise = torch.randn_like(actions)
         noise = torch.clamp(noise, -3.0, 3.0)
         a_t = (1.0 - t) * noise + t * actions
@@ -289,7 +265,6 @@ class Network(nn.Module):
         activations_dict = {
             "actor": actor_output_dict["activation"],
             "qf1": qf1_pi_output_dict["activation"],
-            "qf2": qf2_pi_output_dict["activation"],
         }
 
         info_dict = {
@@ -475,7 +450,6 @@ if __name__ == "__main__":
         "sequence_processor": network.sequence_processor,
         "actor": network.actor,
         "qf1": network.qf1,
-        "qf2": network.qf2,
         "action_predictor": network.action_predictor,
         "state_predictor": network.state_predictor,
         "reward_predictor": network.reward_predictor,
@@ -489,7 +463,6 @@ if __name__ == "__main__":
         )
         weight_projection_norms["actor"] = get_initial_norms(network.actor)
         weight_projection_norms["qf1"] = get_initial_norms(network.qf1)
-        weight_projection_norms["qf2"] = get_initial_norms(network.qf2)
         weight_projection_norms["action_predictor"] = get_initial_norms(network.action_predictor)
         weight_projection_norms["state_predictor"] = get_initial_norms(network.state_predictor)
         weight_projection_norms["reward_predictor"] = get_initial_norms(network.reward_predictor)
@@ -510,7 +483,6 @@ if __name__ == "__main__":
     metrics_computers = {
         "state": StatisticalMetricsComputer(),
         "qf1": StatisticalMetricsComputer(),
-        "qf2": StatisticalMetricsComputer(),
         "actor": StatisticalMetricsComputer(),
     }
 
@@ -643,7 +615,6 @@ if __name__ == "__main__":
                 )
                 weight_project(network.actor, weight_projection_norms["actor"])
                 weight_project(network.qf1, weight_projection_norms["qf1"])
-                weight_project(network.qf2, weight_projection_norms["qf2"])
                 weight_project(
                     network.action_predictor, weight_projection_norms["action_predictor"]
                 )
@@ -657,7 +628,6 @@ if __name__ == "__main__":
                 apply_masks_during_training(network.sequence_processor)
                 apply_masks_during_training(network.actor)
                 apply_masks_during_training(network.qf1)
-                apply_masks_during_training(network.qf2)
                 apply_masks_during_training(network.action_predictor)
                 apply_masks_during_training(network.state_predictor)
                 apply_masks_during_training(network.reward_predictor)
