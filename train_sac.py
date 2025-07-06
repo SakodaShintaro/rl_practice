@@ -94,9 +94,9 @@ class Network(nn.Module):
 
         # Sequence modeling components (optional)
         if enable_sequence_modeling:
-            self.sequence_modeling = SequenceModelingModule(self.cnn_dim, action_dim, seq_len, args)
+            self.sequence_model = SequenceModelingModule(self.cnn_dim, action_dim, seq_len, args)
         else:
-            self.sequence_modeling = None
+            self.sequence_model = None
 
         self.hl_gauss_loss = HLGaussLoss(
             min_value=-30,
@@ -202,7 +202,7 @@ class Network(nn.Module):
         return total_actor_loss, activations_dict, info_dict
 
     def compute_sequence_loss(self, data):
-        if self.sequence_modeling is None:
+        if self.sequence_model is None:
             # Return zero loss when sequence modeling is disabled
             return (
                 torch.tensor(0.0, device=data.observations.device),
@@ -210,7 +210,7 @@ class Network(nn.Module):
                 {},
             )
 
-        return self.sequence_modeling.compute_sequence_loss(data, self.encoder_image)
+        return self.sequence_model.compute_sequence_loss(data, self.encoder_image)
 
 
 if __name__ == "__main__":
@@ -300,10 +300,8 @@ if __name__ == "__main__":
         weight_projection_norms["qf1"] = get_initial_norms(network.qf1)
 
     if args.enable_sequence_modeling:
-        monitoring_targets["sequence_processor"] = network.sequence_processor
-        weight_projection_norms["sequence_processor"] = get_initial_norms(
-            network.sequence_processor
-        )
+        monitoring_targets["sequence_model"] = network.sequence_model
+        weight_projection_norms["sequence_model"] = get_initial_norms(network.sequence_model)
 
     start_time = time.time()
 
@@ -450,7 +448,7 @@ if __name__ == "__main__":
 
                 if args.enable_sequence_modeling:
                     weight_project(
-                        network.sequence_processor, weight_projection_norms["sequence_processor"]
+                        network.sequence_model, weight_projection_norms["sequence_model"]
                     )
 
             # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
@@ -459,7 +457,7 @@ if __name__ == "__main__":
                 apply_masks_during_training(network.qf1)
 
                 if args.enable_sequence_modeling:
-                    apply_masks_during_training(network.sequence_processor)
+                    apply_masks_during_training(network.sequence_model)
 
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time
