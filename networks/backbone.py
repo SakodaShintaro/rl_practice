@@ -1,7 +1,7 @@
 import torch
 from diffusers.models import AutoencoderKL, AutoencoderTiny
 from torch import nn
-from transformers import AutoModelForImageTextToText, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoModelForVision2Seq, AutoProcessor
 
 
 class BaseCNN(nn.Module):
@@ -110,6 +110,53 @@ class SmolVLMEncoder(nn.Module):
         return x
 
 
+class SmolVLABackbone(nn.Module):
+    def __init__(self, device=None) -> None:
+        super().__init__()
+        model_id = "HuggingFaceTB/SmolVLM-256M-Base"
+        attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        self.model = AutoModelForVision2Seq.from_pretrained(
+            model_id,
+            torch_dtype=torch.bfloat16,
+            _attn_implementation=attn_impl,
+            cache_dir="./cache",
+            device_map=device,
+        )
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.prompt = "<image> Please drive in the lane."
+        self.output_dim = 576
+
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        device = images.device
+        batch_size = images.shape[0]
+        images_np = images.cpu().numpy()
+        model_inputs = (
+            self.processor(
+                text=[self.prompt] * batch_size,
+                images=[[img] for img in images_np],
+                return_tensors="pt",
+                do_rescale=False,
+                padding=True,
+            )
+            .to(torch.bfloat16)
+            .to(device)
+        )
+        input_len = model_inputs["input_ids"].shape[-1]
+        with torch.no_grad():
+            outputs = self.model.forward(
+                **model_inputs,
+                output_hidden_states=True,
+            )
+            hidden = outputs["hidden_states"][-1]
+            x = hidden[:, input_len - 1]
+        x = x.to(torch.float32)
+        return x
+
+
 if __name__ == "__main__":
     import torch
 
@@ -134,4 +181,8 @@ if __name__ == "__main__":
 
     model_smolvlm = SmolVLMEncoder(device=device)
     output = model_smolvlm.encode(x)
+    print(output.shape)  # (1, 256)
+
+    model_smolvla = SmolVLABackbone(device=device)
+    output = model_smolvla.encode(x)
     print(output.shape)  # (1, 256)
