@@ -489,7 +489,7 @@ if __name__ == "__main__":
     }
 
     for episode_id in range(10000):
-        if (episode_id + 1) % image_save_interval == 0:
+        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
             curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
             curr_image_dir.mkdir(parents=True, exist_ok=True)
         else:
@@ -559,7 +559,7 @@ if __name__ == "__main__":
                 cv2.waitKey(1)
 
             # save images for specific episodes
-            if episode_id % image_save_interval == 0 and curr_image_dir is not None:
+            if curr_image_dir is not None:
                 bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
                 cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
