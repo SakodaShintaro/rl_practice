@@ -366,7 +366,7 @@ class Network(nn.Module):
         reward_loss = F.mse_loss(pred_rewards_flat, target_rewards_flat)
 
         # Total sequence loss
-        seq_loss = action_loss + state_loss + reward_loss
+        seq_loss = action_loss + state_loss + reward_loss * 0.1
 
         activations_dict = {}
 
@@ -540,7 +540,7 @@ if __name__ == "__main__":
             input_reward_list.pop(0)
 
             # Sequence processing for next state prediction (after getting next_obs)
-            if global_step > args.learning_starts:
+            if global_step > args.learning_starts and global_step % 10 == 0:
                 curr_obs_float, pred_obs_float = predict_next_state(
                     input_obs_list,
                     input_reward_list,

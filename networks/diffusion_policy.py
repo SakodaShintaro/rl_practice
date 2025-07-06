@@ -136,7 +136,7 @@ class DiffusionStatePredictor(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, state_dim)
         self.state_dim = state_dim
-        self.step_num = 5
+        self.step_num = 50
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.sparse_mask = (
             None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
