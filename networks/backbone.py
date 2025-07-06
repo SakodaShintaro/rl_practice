@@ -37,7 +37,7 @@ class BaseCNN(nn.Module):
 class AE(nn.Module):
     def __init__(self):
         super().__init__()
-        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./pretrained")
+        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
         self.output_dim = 576
 
     @torch.no_grad()
@@ -53,9 +53,7 @@ class AE(nn.Module):
 class VAE(nn.Module):
     def __init__(self):
         super().__init__()
-        self.vae = AutoencoderKL.from_pretrained(
-            "stabilityai/sd-vae-ft-ema", cache_dir="./pretrained"
-        )
+        self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema", cache_dir="./cache")
         self.scale = 0.18215
 
     def encode(self, x):
