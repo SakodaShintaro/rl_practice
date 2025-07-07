@@ -20,7 +20,7 @@ from tqdm import tqdm
 import wandb
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import AE
+from networks.backbone import AE, SmolVLABackbone
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -52,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
     parser.add_argument("--enable_sequence_modeling", action="store_true")
+    parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvla"])
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
@@ -75,7 +76,12 @@ class Network(nn.Module):
         self.reward_dim = 32
         self.token_dim = self.cnn_dim + self.reward_dim  # 608
 
-        self.encoder_image = AE()
+        if args.image_encoder == "ae":
+            self.encoder_image = AE()
+        elif args.image_encoder == "smolvla":
+            self.encoder_image = SmolVLABackbone()
+        else:
+            raise ValueError(f"Unknown image encoder: {args.image_encoder}")
         self.actor = DiffusionPolicy(
             state_dim=self.cnn_dim,
             action_dim=action_dim,

@@ -87,11 +87,11 @@ class SmolVLABackbone(nn.Module):
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
-        images_np = images.cpu().numpy()
+        images_list = [images[i] for i in range(batch_size)]
         model_inputs = (
             self.processor(
                 text=[self.prompt] * batch_size,
-                images=[[img] for img in images_np],
+                images=images_list,
                 return_tensors="pt",
                 do_rescale=False,
                 padding=True,
