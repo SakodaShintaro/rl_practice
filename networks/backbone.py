@@ -130,6 +130,7 @@ class SmolVLABackbone(nn.Module):
         self.prompt = "<image> Please drive in the lane."
         self.output_dim = 576
 
+    @torch.no_grad()
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
