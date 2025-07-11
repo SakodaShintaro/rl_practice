@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
+    parser.add_argument("--sparsity", type=float, default=0.0)
 
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
@@ -81,7 +82,7 @@ class AVG:
         self.actor = SacTanhPolicy(
             in_channels=self.cnn_dim,
             block_num=args.actor_block_num,
-            sparsity=0.0,
+            sparsity=args.sparsity,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
         ).to(args.device)
@@ -90,7 +91,7 @@ class AVG:
             in_channels=self.cnn_dim,
             block_num=args.critic_block_num,
             num_bins=num_bins,
-            sparsity=0.0,
+            sparsity=args.sparsity,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
         ).to(args.device)
