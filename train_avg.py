@@ -50,7 +50,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
     parser.add_argument("--additional_coeff", default=1.0, type=float)
-    parser.add_argument("--save_suffix", default="AVG", type=str)
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
