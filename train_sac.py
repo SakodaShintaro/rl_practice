@@ -279,9 +279,21 @@ class SacAgent:
         self.prev_action = None
 
     def initialize_for_episode(self):
+        # Reset previous action
+        self.prev_action = None
+
         # Initialize sequence modeling lists if enabled
         if self.enable_sequence_modeling:
             self.sequence_helper.initialize_lists(self.action_dim)
+
+    def make_decision(self, global_step, obs, reward, termination, truncation):
+        data_dict = {}
+
+        feedback_dict = self.env_feedback(global_step, obs, reward, termination, truncation)
+        data_dict.update(feedback_dict)
+
+        action, selected_log_pi = self.select_action(obs)
+        return action, data_dict
 
     @torch.inference_mode()
     def select_action(self, obs):
@@ -304,7 +316,7 @@ class SacAgent:
         if self.enable_sequence_modeling:
             self.sequence_helper.update_lists(obs_tensor, reward, action)
             curr_obs_float, pred_obs_float = self.sequence_helper.predict_next_state(
-                action, next_obs, self.network
+                action, obs, self.network
             )
 
         self.prev_action = action
@@ -312,6 +324,10 @@ class SacAgent:
 
     def env_feedback(self, global_step, obs, reward, termination, truncation) -> dict:
         data_dict = {}
+
+        # if previous action is None, there is no feedback to process
+        if self.prev_action is None:
+            return data_dict
 
         reward /= 10.0
 
@@ -487,16 +503,20 @@ if __name__ == "__main__":
         else:
             curr_image_dir = None
 
+        agent.initialize_for_episode()
         obs, _ = env.reset()
+        reward = None
+        termination = False
+        truncation = False
 
         while True:
             global_step += 1
 
             # select action
-            action, selected_log_pi = agent.select_action(obs)
+            action, agent_info = agent.make_decision(global_step, obs, reward, termination, truncation)
 
             # step
-            next_obs, reward, termination, truncation, info = env.step(action)
+            obs, reward, termination, truncation, info = env.step(action)
 
             # render
             if args.render:
@@ -515,10 +535,6 @@ if __name__ == "__main__":
             if global_step >= step_limit:
                 break
 
-            feedback_dict = agent.env_feedback(global_step, obs, reward, termination, truncation)
-
-            obs = next_obs
-
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time
                 data_dict = {
@@ -526,7 +542,7 @@ if __name__ == "__main__":
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
-                    **feedback_dict,
+                    **agent_info,
                 }
 
                 wandb.log(data_dict)
