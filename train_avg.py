@@ -45,7 +45,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_lr", default=0.0063, type=float)
     parser.add_argument("--critic_lr", default=0.0087, type=float)
     parser.add_argument("--alpha_lr", default=1e-2, type=float)
-    parser.add_argument("--beta1", default=0.0, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--l2_actor", default=0.0, type=float)
     parser.add_argument("--l2_critic", default=0.0, type=float)
@@ -98,16 +97,17 @@ class AVG:
         self.actor_lr = args.actor_lr
         self.critic_lr = args.critic_lr
 
+        betas = [0.0, 0.999]
         self.popt = torch.optim.AdamW(
             self.actor.parameters(),
             lr=args.actor_lr,
-            betas=args.betas,
+            betas=betas,
             weight_decay=args.l2_actor,
         )
         self.qopt = torch.optim.AdamW(
             self.Q.parameters(),
             lr=args.critic_lr,
-            betas=args.betas,
+            betas=betas,
             weight_decay=args.l2_critic,
         )
 
@@ -253,7 +253,6 @@ if __name__ == "__main__":
     torch.cuda.set_device(0)
 
     # Adam
-    args.betas = [args.beta1, 0.999]
 
     # CPU/GPU use for the run
     if torch.cuda.is_available() and "cuda" in args.device:
