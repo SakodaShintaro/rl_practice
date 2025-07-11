@@ -6,6 +6,7 @@ Copyright (c) [2024] [Gautham Vasan] - MIT License.
 import argparse
 import logging
 import os
+import random
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -29,9 +30,9 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
+    parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--env", default="CarRacing-v3", type=str)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
     parser.add_argument("--critic_lr", default=0.0087, type=float)
@@ -232,7 +233,6 @@ if __name__ == "__main__":
     args = parse_args()
     if args.debug:
         args.off_wandb = True
-        args.learning_starts = 10
         args.render = 0
 
     if args.off_wandb:
@@ -240,6 +240,15 @@ if __name__ == "__main__":
 
     exp_name = f"AVG_{args.exp_name}"
     wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
+
+    # seeding
+    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.cuda.set_device(0)
 
     # Adam
     args.betas = [args.beta1, 0.999]
@@ -276,7 +285,7 @@ if __name__ == "__main__":
         ],
     )
     logger = logging.getLogger(__name__)
-    logger.info(f"AVG-_seed-{args.seed}")
+    logger.info(f"AVG-_seed-{seed}")
 
     logger.info("Command line arguments:")
     for arg, value in vars(args).items():
@@ -286,12 +295,12 @@ if __name__ == "__main__":
     env = make_env(save_dir / "video")
 
     #### Reproducibility
-    env.reset(seed=args.seed)
-    env.action_space.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    env.reset(seed=seed)
+    env.action_space.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+        torch.cuda.manual_seed_all(seed)
     ####
 
     # Learner
