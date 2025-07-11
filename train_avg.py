@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("exp_name", type=str)
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
     parser.add_argument("--critic_lr", default=0.0087, type=float)

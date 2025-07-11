@@ -35,10 +35,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
     parser.add_argument("--seed", type=int, default=-1)
+    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
-    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--action_noise", type=float, default=0.0)
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
