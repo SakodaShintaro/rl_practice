@@ -50,7 +50,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
     parser.add_argument("--additional_coeff", default=1.0, type=float)
-    parser.add_argument("--save_dir", default="./results", type=Path)
     parser.add_argument("--save_suffix", default="AVG", type=str)
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
@@ -252,11 +251,9 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.cuda.set_device(0)
 
-    # Adam
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    save_dir = args.save_dir / f"{datetime_str}_{args.save_suffix}"
-    save_dir.mkdir(exist_ok=True, parents=True)
+    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Start experiment
     # N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
@@ -273,7 +270,7 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(f"{save_dir}/log.txt"),
+            logging.FileHandler(f"{result_dir}/log.txt"),
         ],
     )
     logger = logging.getLogger(__name__)
@@ -284,7 +281,7 @@ if __name__ == "__main__":
         logger.info(f"  {arg}: {value}")
 
     # Env
-    env = make_env(save_dir / "video")
+    env = make_env(result_dir / "video")
 
     #### Reproducibility
     env.reset(seed=seed)
@@ -339,7 +336,7 @@ if __name__ == "__main__":
 
         reward_normed = reward_processor.normalize(reward)
         if episode_id % args.record_interval_episode == 0:
-            save_image_dir = save_dir / f"images/{episode_id:06d}"
+            save_image_dir = result_dir / f"images/{episode_id:06d}"
             save_image_dir.mkdir(exist_ok=True, parents=True)
             image = env.render()
             cv2.imwrite(str(save_image_dir / f"{ep_step:08d}.png"), image)
@@ -381,7 +378,7 @@ if __name__ == "__main__":
 
             data_list.append(data_dict)
             df = pd.DataFrame(data_list)
-            df.to_csv(f"{save_dir}/result.tsv", index=False, sep="\t")
+            df.to_csv(f"{result_dir}/result.tsv", index=False, sep="\t")
             wandb.log(data_dict)
 
             episode_stats["episode_id"].append(episode_id)
