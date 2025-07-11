@@ -16,6 +16,7 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 import torch
+from hl_gauss_pytorch import HLGaussLoss
 
 import wandb
 from networks.backbone import AE, SmolVLABackbone
@@ -81,10 +82,11 @@ class AVG:
             action_dim=action_dim,
             hidden_dim=cfg.hidden_actor,
         ).to(cfg.device)
+        num_bins = 51
         self.Q = SacQ(
             in_channels=self.cnn_dim,
             block_num=1,
-            num_bins=51,
+            num_bins=num_bins,
             sparsity=0.0,
             action_dim=action_dim,
             hidden_dim=cfg.hidden_critic,
@@ -127,10 +129,16 @@ class AVG:
             )
             self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
 
+        self.hl_gauss_loss = HLGaussLoss(
+            min_value=-30,
+            max_value=+30,
+            num_bins=num_bins,
+            clamp_to_range=True,
+        ).to(cfg.device)
+
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
         obs = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
-        print(f"{obs.shape=}")
         obs = self.encoder_image.encode(obs)
         action, log_prob, mean = self.actor.get_action(obs)
         return action, log_prob, mean
@@ -147,14 +155,17 @@ class AVG:
         """Update the actor and critic networks based on the observed transition."""
         obs = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
         next_obs = torch.Tensor(next_obs.astype(np.float32)).unsqueeze(0).to(self.device)
+        obs = self.encoder_image.encode(obs)
+        next_obs = self.encoder_image.encode(next_obs)
 
         #### Q loss
-        q = self.Q(obs, action.detach())  # N.B: Gradient should NOT pass through action here
         with torch.no_grad():
             alpha = self.log_alpha.exp().item() if self.log_alpha is not None else 0.0
             next_action, next_lprob, mean = self.actor.get_action(next_obs)
-            q2 = self.Q(next_obs, next_action)
-            target_V = q2 - alpha * next_lprob
+            next_q_dict = self.Q(next_obs, next_action)
+            next_q_logit = next_q_dict["output"]
+            next_q = self.hl_gauss_loss(next_q_logit).unsqueeze(-1)
+            target_V = next_q - alpha * next_lprob
 
         #### Return scaling
         r_ent = reward - alpha * lprob.detach().item()
@@ -165,18 +176,24 @@ class AVG:
         else:
             self.td_error_scaler.update(reward=r_ent, gamma=self.gamma, G=None)
 
-        delta = reward + (1 - done) * self.gamma * target_V - q
+        curr_q_dict = self.Q(obs, action.detach())
+        curr_q_logit = curr_q_dict["output"]
+        curr_q = self.hl_gauss_loss(curr_q_logit).unsqueeze(-1)
+        delta = reward + (1 - done) * self.gamma * target_V - curr_q
         delta /= self.td_error_scaler.sigma
 
         # Policy loss
-        ploss = alpha * lprob - self.Q(obs, action)  # N.B: USE reparametrized action
+        curr_q_dict = self.Q(obs, action)
+        curr_q_logit = curr_q_dict["output"]
+        curr_q = self.hl_gauss_loss(curr_q_logit).unsqueeze(-1)
+        ploss = alpha * lprob - curr_q
         self.popt.zero_grad()
         ploss.backward()
         self.popt.step()
 
         self.qopt.zero_grad()
         if self.use_eligibility_trace:
-            q.backward()
+            curr_q_dict.backward()
             with torch.no_grad():
                 for p, et in zip(self.Q.parameters(), self.eligibility_traces_q):
                     et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
@@ -199,7 +216,7 @@ class AVG:
 
         return {
             "delta": delta.item(),
-            "q": q.item(),
+            "q": curr_q.item(),
             "policy_loss": ploss.item(),
             "alpha_loss": alpha_loss.item(),
             "alpha": alpha,
