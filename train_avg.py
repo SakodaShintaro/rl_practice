@@ -278,7 +278,7 @@ if __name__ == "__main__":
 
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    tic = time.time()
+    start_time = time.time()
 
     logging.basicConfig(
         level=logging.INFO,
@@ -372,7 +372,7 @@ if __name__ == "__main__":
         if terminated or truncated:
             curr_ave_delta = sum_delta / ep_step
             curr_ave_lprob = sum_lprob / ep_step
-            duration_total_sec = int(time.time() - tic)
+            duration_total_sec = int(time.time() - start_time)
 
             data_dict = {
                 "charts/elapse_time_sec": duration_total_sec,
