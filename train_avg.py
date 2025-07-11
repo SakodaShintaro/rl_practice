@@ -49,7 +49,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
-    parser.add_argument("--additional_coeff", default=1.0, type=float)
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
@@ -311,11 +310,6 @@ if __name__ == "__main__":
     args.obs_dim = env.observation_space.shape[0]
 
     agent = AVG(args, env, device)
-
-    # なぜか追加の係数がないとHumanoid-v5で学習が進まない
-    logger.info(f"Before {action_scale=}")
-    action_scale *= args.additional_coeff
-    logger.info(f"After  {action_scale=}")
 
     # Interaction
     reward_processor = RewardProcessor(args.reward_processing_type)
