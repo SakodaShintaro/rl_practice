@@ -309,7 +309,6 @@ if __name__ == "__main__":
     logger.info(f"{env.observation_space=}")
     logger.info(f"{env.action_space=}")
     args.obs_dim = env.observation_space.shape[0]
-    args.action_dim = env.action_space.shape[0]
 
     agent = AVG(args, env, device)
 
