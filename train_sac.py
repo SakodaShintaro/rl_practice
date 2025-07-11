@@ -307,17 +307,15 @@ class SacAgent:
 
         return action, selected_log_pi
 
-    def env_feedback(
-        self, global_step, obs, action, reward, next_obs, termination, truncation
-    ) -> dict:
-        data_dict = {}
+    def env_feedback(self, global_step, obs, action, reward, termination, truncation) -> dict:
+        info_dict = {}
 
         reward /= 10.0
 
         self.rb.add(obs, action, reward, termination or truncation)
 
         if global_step < self.learning_starts:
-            return data_dict
+            return info_dict
         elif global_step == self.learning_starts:
             print(f"Start training at global step {global_step}.")
 
@@ -380,35 +378,35 @@ class SacAgent:
 
         # Add loss information from compute methods
         for key, value in qf_info.items():
-            data_dict[f"losses/{key}"] = value
+            info_dict[f"losses/{key}"] = value
 
         for key, value in actor_info.items():
-            data_dict[f"losses/{key}"] = value
+            info_dict[f"losses/{key}"] = value
 
         for key, value in seq_info.items():
-            data_dict[f"losses/{key}"] = value
+            info_dict[f"losses/{key}"] = value
 
-        data_dict["losses/qf_loss"] = qf_loss
+        info_dict["losses/qf_loss"] = qf_loss
 
         # Add gradient norm metrics
         for key, value in grad_metrics.items():
-            data_dict[f"gradients/{key}"] = value
+            info_dict[f"gradients/{key}"] = value
 
         # Add parameter norm metrics
         for key, value in param_metrics.items():
-            data_dict[f"parameters/{key}"] = value
+            info_dict[f"parameters/{key}"] = value
 
         # Add activation norms
         for key, value in activation_norms.items():
-            data_dict[f"activation_norms/{key}"] = value
+            info_dict[f"activation_norms/{key}"] = value
 
         # Trigger statistical metrics computation
         for feature_name, feature in feature_dict.items():
             result_dict = self.metrics_computers[feature_name](feature)
             for key, value in result_dict.items():
-                data_dict[f"{key}/{feature_name}"] = value
+                info_dict[f"{key}/{feature_name}"] = value
 
-        return data_dict
+        return info_dict
 
 
 if __name__ == "__main__":
@@ -516,7 +514,7 @@ if __name__ == "__main__":
                 break
 
             feedback_dict = agent.env_feedback(
-                global_step, obs, action, reward, next_obs, termination, truncation
+                global_step, obs, action, reward, termination, truncation
             )
 
             obs = next_obs
