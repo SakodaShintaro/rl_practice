@@ -18,6 +18,7 @@ import pandas as pd
 import torch
 
 import wandb
+from networks.backbone import AE, SmolVLABackbone
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
@@ -52,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
     parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvla"])
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
@@ -62,16 +64,25 @@ class AVG:
     def __init__(self, cfg: argparse.Namespace, env: gym.Env) -> None:
         self.steps = 0
 
+        if cfg.image_encoder == "ae":
+            self.encoder_image = AE()
+        elif cfg.image_encoder == "smolvla":
+            self.encoder_image = SmolVLABackbone()
+        else:
+            raise ValueError(f"Unknown image encoder: {cfg.image_encoder}")
+        self.encoder_image.to(cfg.device)
+        self.cnn_dim = 4 * 12 * 12  # 576
+
         action_dim = np.prod(env.action_space.shape)
         self.actor = SacTanhPolicy(
-            in_channels=3,
+            in_channels=self.cnn_dim,
             block_num=1,
             sparsity=0.0,
             action_dim=action_dim,
             hidden_dim=cfg.hidden_actor,
         ).to(cfg.device)
         self.Q = SacQ(
-            in_channels=3,
+            in_channels=self.cnn_dim,
             block_num=1,
             num_bins=51,
             sparsity=0.0,
@@ -119,6 +130,8 @@ class AVG:
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
         obs = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
+        print(f"{obs.shape=}")
+        obs = self.encoder_image.encode(obs)
         action, log_prob, mean = self.actor.get_action(obs)
         return action, log_prob, mean
 
