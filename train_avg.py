@@ -52,7 +52,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--additional_coeff", default=1.0, type=float)
     parser.add_argument("--save_dir", default="./results", type=Path)
     parser.add_argument("--save_suffix", default="AVG", type=str)
-    parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
@@ -64,6 +63,8 @@ class AVG:
 
     def __init__(self, args: argparse.Namespace, env: gym.Env) -> None:
         self.steps = 0
+
+        args.device = "cuda"
 
         if args.image_encoder == "ae":
             self.encoder_image = AE()
@@ -252,13 +253,6 @@ if __name__ == "__main__":
     torch.cuda.set_device(0)
 
     # Adam
-
-    # CPU/GPU use for the run
-    if torch.cuda.is_available() and "cuda" in args.device:
-        args.device = torch.device(args.device)
-    else:
-        args.device = torch.device("cpu")
-
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     save_dir = args.save_dir / f"{datetime_str}_{args.save_suffix}"
