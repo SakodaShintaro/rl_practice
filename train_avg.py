@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("exp_name", type=str)
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--actor_hidden_dim", type=int, default=512)
+    parser.add_argument("--actor_block_num", type=int, default=1)
+    parser.add_argument("--critic_hidden_dim", type=int, default=1024)
+    parser.add_argument("--critic_block_num", type=int, default=1)
 
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
@@ -41,8 +46,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--l2_actor", default=0.0, type=float)
     parser.add_argument("--l2_critic", default=0.0, type=float)
-    parser.add_argument("--hidden_actor", default=256, type=int)
-    parser.add_argument("--hidden_critic", default=2048, type=int)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
@@ -54,7 +57,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
-    parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvla"])
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
@@ -63,79 +65,79 @@ def parse_args() -> argparse.Namespace:
 class AVG:
     """AVG Agent."""
 
-    def __init__(self, cfg: argparse.Namespace, env: gym.Env) -> None:
+    def __init__(self, args: argparse.Namespace, env: gym.Env) -> None:
         self.steps = 0
 
-        if cfg.image_encoder == "ae":
+        if args.image_encoder == "ae":
             self.encoder_image = AE()
-        elif cfg.image_encoder == "smolvla":
+        elif args.image_encoder == "smolvla":
             self.encoder_image = SmolVLABackbone()
         else:
-            raise ValueError(f"Unknown image encoder: {cfg.image_encoder}")
-        self.encoder_image.to(cfg.device)
+            raise ValueError(f"Unknown image encoder: {args.image_encoder}")
+        self.encoder_image.to(args.device)
         self.cnn_dim = 4 * 12 * 12  # 576
 
         action_dim = np.prod(env.action_space.shape)
         self.actor = SacTanhPolicy(
             in_channels=self.cnn_dim,
-            block_num=1,
+            block_num=args.actor_block_num,
             sparsity=0.0,
             action_dim=action_dim,
-            hidden_dim=cfg.hidden_actor,
-        ).to(cfg.device)
+            hidden_dim=args.actor_hidden_dim,
+        ).to(args.device)
         num_bins = 51
         self.Q = SacQ(
             in_channels=self.cnn_dim,
-            block_num=1,
+            block_num=args.critic_block_num,
             num_bins=num_bins,
             sparsity=0.0,
             action_dim=action_dim,
-            hidden_dim=cfg.hidden_critic,
-        ).to(cfg.device)
+            hidden_dim=args.critic_hidden_dim,
+        ).to(args.device)
 
-        self.actor_lr = cfg.actor_lr
-        self.critic_lr = cfg.critic_lr
+        self.actor_lr = args.actor_lr
+        self.critic_lr = args.critic_lr
 
         self.popt = torch.optim.AdamW(
             self.actor.parameters(),
-            lr=cfg.actor_lr,
-            betas=cfg.betas,
-            weight_decay=cfg.l2_actor,
+            lr=args.actor_lr,
+            betas=args.betas,
+            weight_decay=args.l2_actor,
         )
         self.qopt = torch.optim.AdamW(
             self.Q.parameters(),
-            lr=cfg.critic_lr,
-            betas=cfg.betas,
-            weight_decay=cfg.l2_critic,
+            lr=args.critic_lr,
+            betas=args.betas,
+            weight_decay=args.l2_critic,
         )
 
-        self.gamma, self.device = cfg.gamma, cfg.device
+        self.gamma, self.device = args.gamma, args.device
         self.td_error_scaler = TDErrorScaler()
         self.G = 0
 
-        self.use_eligibility_trace = cfg.use_eligibility_trace
+        self.use_eligibility_trace = args.use_eligibility_trace
 
-        self.et_lambda = cfg.et_lambda
+        self.et_lambda = args.et_lambda
         with torch.no_grad():
             self.eligibility_traces_q = [
                 torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
             ]
 
-        if cfg.without_entropy_term:
+        if args.without_entropy_term:
             self.log_alpha = None
         else:
             self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
             self.log_alpha = torch.nn.Parameter(
-                torch.zeros(1, requires_grad=True, device=cfg.device)
+                torch.zeros(1, requires_grad=True, device=args.device)
             )
-            self.aopt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
+            self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
 
         self.hl_gauss_loss = HLGaussLoss(
             min_value=-30,
             max_value=+30,
             num_bins=num_bins,
             clamp_to_range=True,
-        ).to(cfg.device)
+        ).to(args.device)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
