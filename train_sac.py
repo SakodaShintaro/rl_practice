@@ -15,7 +15,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 from torch import optim
-from tqdm import tqdm
 
 import wandb
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
@@ -219,6 +218,199 @@ class Network(nn.Module):
         return self.sequence_model.compute_sequence_loss(data, self.encoder_image)
 
 
+class SacAgent:
+    def __init__(self, action_dim) -> None:
+        seq_len = 2
+        if args.enable_sequence_modeling:
+            assert seq_len >= 2, "seq_len must be >= 2 for sequence modeling"
+
+        self.action_dim = action_dim
+        self.enable_sequence_modeling = args.enable_sequence_modeling
+        self.learning_starts = args.learning_starts
+        self.action_noise = args.action_noise
+        self.batch_size = args.batch_size
+        self.use_weight_projection = args.use_weight_projection
+        self.apply_masks_during_training = args.apply_masks_during_training
+
+        self.network = Network(
+            sparsity=args.sparsity,
+            action_dim=action_dim,
+            seq_len=seq_len,
+            args=args,
+            enable_sequence_modeling=args.enable_sequence_modeling,
+        ).to(device)
+        lr = 1e-4
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
+
+        self.rb = ReplayBuffer(
+            args.buffer_size,
+            seq_len,
+            env.observation_space.shape,
+            env.action_space.shape,
+            device,
+        )
+
+        # Initialize gradient norm targets
+        self.monitoring_targets = {
+            "total": self.network,
+            "actor": self.network.actor,
+            "qf1": self.network.qf1,
+        }
+
+        # Initialize weight projection if enabled
+        self.weight_projection_norms = {}
+        if args.use_weight_projection:
+            self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
+            self.weight_projection_norms["qf1"] = get_initial_norms(self.network.qf1)
+
+        if args.enable_sequence_modeling:
+            self.monitoring_targets["sequence_model"] = self.network.sequence_model
+            self.weight_projection_norms["sequence_model"] = get_initial_norms(
+                self.network.sequence_model
+            )
+            self.sequence_helper = SequenceModelingHelper(seq_len, device)
+
+        self.metrics_computers = {
+            "state": StatisticalMetricsComputer(),
+            "qf1": StatisticalMetricsComputer(),
+            "actor": StatisticalMetricsComputer(),
+        }
+
+    def initialize_for_episode(self):
+        # Initialize sequence modeling lists if enabled
+        if self.enable_sequence_modeling:
+            self.sequence_helper.initialize_lists(self.action_dim)
+
+    @torch.inference_mode()
+    def select_action(self, obs):
+        obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
+        if global_step < self.learning_starts:
+            action = env.action_space.sample()
+            selected_log_pi = 0.0
+        else:
+            output_enc = self.network.encoder_image.encode(obs_tensor)
+            action, selected_log_pi, _ = self.network.actor.get_action(output_enc)
+            action = action[0].detach().cpu().numpy()
+            action = action * action_scale + action_bias
+
+            action_noise = env.action_space.sample()
+            c = self.action_noise
+            action = (1 - c) * action + c * action_noise
+            action = np.clip(action, action_low, action_high)
+
+        # Update sequence modeling lists
+        if self.enable_sequence_modeling:
+            self.sequence_helper.update_lists(obs_tensor, reward, action)
+            curr_obs_float, pred_obs_float = self.sequence_helper.predict_next_state(
+                action, next_obs, self.network
+            )
+
+        return action, selected_log_pi
+
+    def env_feedback(
+        self, global_step, obs, action, reward, next_obs, termination, truncation
+    ) -> dict:
+        data_dict = {}
+
+        reward /= 10.0
+
+        self.rb.add(obs, action, reward, termination or truncation)
+
+        if global_step < self.learning_starts:
+            return data_dict
+        elif global_step == self.learning_starts:
+            print(f"Start training at global step {global_step}.")
+
+        # training
+        data = self.rb.sample(self.batch_size)
+
+        # Compute all losses using refactored methods
+        state_curr = self.network.encoder_image.encode(data.observations[:, -2])
+
+        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+        actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
+        seq_loss, seq_activations, seq_info = self.network.compute_sequence_loss(data)
+
+        # Combine all activations for feature_dict
+        feature_dict = {
+            "state": state_curr,
+            **actor_activations,
+            **qf_activations,
+            **seq_activations,
+        }
+
+        # optimize the model
+        loss = actor_loss + qf_loss + seq_loss
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        # Clip gradients
+        torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
+
+        # Compute gradient and parameter norms
+        grad_metrics = {
+            key: compute_gradient_norm(model) for key, model in self.monitoring_targets.items()
+        }
+        param_metrics = {
+            key: compute_parameter_norm(model) for key, model in self.monitoring_targets.items()
+        }
+        activation_norms = {
+            key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
+        }
+
+        self.optimizer.step()
+
+        # Apply weight projection after optimizer step
+        if self.use_weight_projection:
+            weight_project(self.network.actor, self.weight_projection_norms["actor"])
+            weight_project(self.network.qf1, self.weight_projection_norms["qf1"])
+
+            if self.enable_sequence_modeling:
+                weight_project(
+                    self.network.sequence_model, self.weight_projection_norms["sequence_model"]
+                )
+
+        # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
+        if self.apply_masks_during_training:
+            apply_masks_during_training(self.network.actor)
+            apply_masks_during_training(self.network.qf1)
+
+            if self.enable_sequence_modeling:
+                apply_masks_during_training(self.network.sequence_model)
+
+        # Add loss information from compute methods
+        for key, value in qf_info.items():
+            data_dict[f"losses/{key}"] = value
+
+        for key, value in actor_info.items():
+            data_dict[f"losses/{key}"] = value
+
+        for key, value in seq_info.items():
+            data_dict[f"losses/{key}"] = value
+
+        data_dict["losses/qf_loss"] = qf_loss
+
+        # Add gradient norm metrics
+        for key, value in grad_metrics.items():
+            data_dict[f"gradients/{key}"] = value
+
+        # Add parameter norm metrics
+        for key, value in param_metrics.items():
+            data_dict[f"parameters/{key}"] = value
+
+        # Add activation norms
+        for key, value in activation_norms.items():
+            data_dict[f"activation_norms/{key}"] = value
+
+        # Trigger statistical metrics computation
+        for feature_name, feature in feature_dict.items():
+            result_dict = self.metrics_computers[feature_name](feature)
+            for key, value in result_dict.items():
+                data_dict[f"{key}/{feature_name}"] = value
+
+        return data_dict
+
+
 if __name__ == "__main__":
     args = parse_args()
     if args.debug:
@@ -271,43 +463,6 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     action_dim = np.prod(env.action_space.shape)
-    seq_len = 2
-    if args.enable_sequence_modeling:
-        assert seq_len >= 2, "seq_len must be >= 2 for sequence modeling"
-    network = Network(
-        sparsity=args.sparsity,
-        action_dim=action_dim,
-        seq_len=seq_len,
-        args=args,
-        enable_sequence_modeling=args.enable_sequence_modeling,
-    ).to(device)
-    lr = 1e-4
-    optimizer = optim.AdamW(network.parameters(), lr=lr, weight_decay=1e-5)
-
-    rb = ReplayBuffer(
-        args.buffer_size,
-        seq_len,
-        env.observation_space.shape,
-        env.action_space.shape,
-        device,
-    )
-
-    # Initialize gradient norm targets
-    monitoring_targets = {
-        "total": network,
-        "actor": network.actor,
-        "qf1": network.qf1,
-    }
-
-    # Initialize weight projection if enabled
-    weight_projection_norms = {}
-    if args.use_weight_projection:
-        weight_projection_norms["actor"] = get_initial_norms(network.actor)
-        weight_projection_norms["qf1"] = get_initial_norms(network.qf1)
-
-    if args.enable_sequence_modeling:
-        monitoring_targets["sequence_model"] = network.sequence_model
-        weight_projection_norms["sequence_model"] = get_initial_norms(network.sequence_model)
 
     start_time = time.time()
 
@@ -315,7 +470,6 @@ if __name__ == "__main__":
     global_step = 0
     score_list = []
     obs, _ = env.reset(seed=seed)
-    progress_bar = tqdm(range(args.learning_starts), dynamic_ncols=True)
     curr_image_dir = None
     step_limit = 200_000
 
@@ -323,15 +477,7 @@ if __name__ == "__main__":
     curr_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
     pred_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
 
-    # Initialize sequence modeling helper
-    if args.enable_sequence_modeling:
-        sequence_helper = SequenceModelingHelper(seq_len, device)
-
-    metrics_computers = {
-        "state": StatisticalMetricsComputer(),
-        "qf1": StatisticalMetricsComputer(),
-        "actor": StatisticalMetricsComputer(),
-    }
+    agent = SacAgent(action_dim)
 
     for episode_id in range(10000):
         if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
@@ -342,50 +488,15 @@ if __name__ == "__main__":
 
         obs, _ = env.reset()
         reward_list = []
-        first_value = None
-
-        # Initialize sequence modeling lists if enabled
-        if args.enable_sequence_modeling:
-            sequence_helper.initialize_lists(action_dim)
 
         while True:
             global_step += 1
 
             # select action
-            obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
-            if global_step < args.learning_starts:
-                action = env.action_space.sample()
-                progress_bar.update(1)
-            else:
-                with torch.inference_mode():
-                    output_enc = network.encoder_image.encode(obs_tensor)
-                    action, selected_log_pi, _ = network.actor.get_action(output_enc)
-                    action = action[0].detach().cpu().numpy()
-                    action = action * action_scale + action_bias
+            action, selected_log_pi = agent.select_action(obs)
 
-                    action_noise = env.action_space.sample()
-                    c = args.action_noise
-                    action = (1 - c) * action + c * action_noise
-                    action = np.clip(action, action_low, action_high)
-
-            # execute the game and log data.
+            # step
             next_obs, reward, termination, truncation, info = env.step(action)
-            reward /= 10.0
-            rb.add(obs, action, reward, termination or truncation)
-
-            # Update sequence modeling lists
-            if args.enable_sequence_modeling:
-                sequence_helper.update_lists(obs_tensor, reward, action)
-
-            # Sequence processing for next state prediction (after getting next_obs)
-            if (
-                args.enable_sequence_modeling
-                and global_step > args.learning_starts
-                and global_step % 10 == 0
-            ):
-                curr_obs_float, pred_obs_float = sequence_helper.predict_next_state(
-                    action, next_obs, network
-                )
 
             # render
             if args.render:
@@ -404,117 +515,25 @@ if __name__ == "__main__":
             if global_step >= step_limit:
                 break
 
+            feedback_dict = agent.env_feedback(
+                global_step, obs, action, reward, next_obs, termination, truncation
+            )
+
             obs = next_obs
-
-            if global_step <= args.learning_starts:
-                continue
-
-            # training.
-            data = rb.sample(args.batch_size)
-
-            # Compute all losses using refactored methods
-            state_curr = network.encoder_image.encode(data.observations[:, -2])
-            qf_loss, qf_activations, qf_info = network.compute_critic_loss(data, state_curr)
-            actor_loss, actor_activations, actor_info = network.compute_actor_loss(state_curr)
-            seq_loss, seq_activations, seq_info = network.compute_sequence_loss(data)
-
-            # Combine all activations for feature_dict
-            feature_dict = {
-                "state": state_curr,
-                **actor_activations,
-                **qf_activations,
-                **seq_activations,
-            }
-
-            # optimize the model
-            loss = actor_loss + qf_loss + seq_loss
-            optimizer.zero_grad()
-            loss.backward()
-
-            # Clip gradients
-            torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=10.0)
-
-            # Compute gradient and parameter norms
-            grad_metrics = {
-                key: compute_gradient_norm(model) for key, model in monitoring_targets.items()
-            }
-            param_metrics = {
-                key: compute_parameter_norm(model) for key, model in monitoring_targets.items()
-            }
-            activation_norms = {
-                key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
-            }
-
-            optimizer.step()
-
-            # Apply weight projection after optimizer step
-            if args.use_weight_projection:
-                weight_project(network.actor, weight_projection_norms["actor"])
-                weight_project(network.qf1, weight_projection_norms["qf1"])
-
-                if args.enable_sequence_modeling:
-                    weight_project(
-                        network.sequence_model, weight_projection_norms["sequence_model"]
-                    )
-
-            # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
-            if args.apply_masks_during_training:
-                apply_masks_during_training(network.actor)
-                apply_masks_during_training(network.qf1)
-
-                if args.enable_sequence_modeling:
-                    apply_masks_during_training(network.sequence_model)
 
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time
                 data_dict = {
                     "global_step": global_step,
-                    "a_logp": selected_log_pi.mean().item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
+                    **feedback_dict,
                 }
 
-                # Add loss information from compute methods
-                for key, value in qf_info.items():
-                    data_dict[f"losses/{key}"] = value
-
-                for key, value in actor_info.items():
-                    data_dict[f"losses/{key}"] = value
-
-                for key, value in seq_info.items():
-                    data_dict[f"losses/{key}"] = value
-
-                # Add combined loss
-                data_dict["losses/qf_loss"] = qf_loss.item() / 2.0
-
-                # Add gradient norm metrics
-                for key, value in grad_metrics.items():
-                    data_dict[f"gradients/{key}"] = value
-
-                # Add parameter norm metrics
-                for key, value in param_metrics.items():
-                    data_dict[f"parameters/{key}"] = value
-
-                # Add activation norms
-                for key, value in activation_norms.items():
-                    data_dict[f"activation_norms/{key}"] = value
-
-                # Trigger statistical metrics computation
-                for feature_name, feature in feature_dict.items():
-                    result_dict = metrics_computers[feature_name](feature)
-                    for key, value in result_dict.items():
-                        data_dict[f"{key}/{feature_name}"] = value
                 wandb.log(data_dict)
-
-                fixed_data = {
-                    k.replace("losses/", "").replace("charts/", ""): v for k, v in data_dict.items()
-                }
-                log_step.append(fixed_data)
-                log_step_df = pd.DataFrame(log_step)
-                log_step_df.to_csv(
-                    result_dir / "log_step.tsv", sep="\t", index=False, float_format="%.3f"
-                )
+                log_step.append(data_dict)
+                # save_dict_to_tsv(data_dict, result_dir)
 
         if global_step >= step_limit:
             break
