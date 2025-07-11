@@ -487,7 +487,6 @@ if __name__ == "__main__":
             curr_image_dir = None
 
         obs, _ = env.reset()
-        reward_list = []
 
         while True:
             global_step += 1
@@ -525,7 +524,6 @@ if __name__ == "__main__":
                 elapsed_time = time.time() - start_time
                 data_dict = {
                     "global_step": global_step,
-                    "a_logp": selected_log_pi.mean().item(),
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
