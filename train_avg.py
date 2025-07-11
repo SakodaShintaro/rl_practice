@@ -26,7 +26,9 @@ from wrappers import make_env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("exp_name", type=str)
     parser.add_argument("--env", default="CarRacing-v3", type=str)
+    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
@@ -50,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
     parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
 
@@ -61,11 +64,20 @@ class AVG:
 
         action_dim = np.prod(env.action_space.shape)
         self.actor = SacTanhPolicy(
-            in_channels=3, action_dim=action_dim, hidden_dim=cfg.hidden_actor
+            in_channels=3,
+            block_num=1,
+            sparsity=0.0,
+            action_dim=action_dim,
+            hidden_dim=cfg.hidden_actor,
         ).to(cfg.device)
-        self.Q = SacQ(in_channels=3, action_dim=action_dim, hidden_dim=cfg.hidden_critic).to(
-            cfg.device
-        )
+        self.Q = SacQ(
+            in_channels=3,
+            block_num=1,
+            num_bins=51,
+            sparsity=0.0,
+            action_dim=action_dim,
+            hidden_dim=cfg.hidden_critic,
+        ).to(cfg.device)
 
         self.actor_lr = cfg.actor_lr
         self.critic_lr = cfg.critic_lr
@@ -188,12 +200,16 @@ class AVG:
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.debug:
+        args.off_wandb = True
+        args.learning_starts = 10
+        args.render = 0
 
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
-    # init wandb
-    wandb.init(project="rl_practice", name=args.save_suffix, config=args)
+    exp_name = f"AVG_{args.exp_name}"
+    wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
 
     # Adam
     args.betas = [args.beta1, 0.999]
@@ -230,7 +246,7 @@ if __name__ == "__main__":
         ],
     )
     logger = logging.getLogger(__name__)
-    logger.info(f"AVG-{args.env}_seed-{args.seed}")
+    logger.info(f"AVG-_seed-{args.seed}")
 
     logger.info("Command line arguments:")
     for arg, value in vars(args).items():
