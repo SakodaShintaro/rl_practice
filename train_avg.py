@@ -254,12 +254,28 @@ if __name__ == "__main__":
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    # Start experiment
-    # N.B: Pytorch over-allocates resources and hogs CPU, which makes experiments very slow.
-    # Set number of threads for pytorch to 1 to avoid this issue. This is a temporary workaround.
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    torch.set_num_threads(1)
+    # save seed to file
+    with open(result_dir / "seed.txt", "w") as f:
+        f.write(str(seed))
+
+    image_dir = result_dir / "image"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    image_save_interval = 100
+    log_step = []
+    log_episode = []
+
+    # env setup
+    env = make_env(result_dir / "video")
+    env.action_space.seed(seed)
+
+    action_low = env.action_space.low
+    action_high = env.action_space.high
+    print(f"action_low: {action_low}, action_high: {action_high}")
+    action_scale = (action_high - action_low) / 2.0
+    action_bias = (action_high + action_low) / 2.0
+    print(f"action_scale: {action_scale}, action_bias: {action_bias}")
+
+    assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     tic = time.time()
 
@@ -279,9 +295,6 @@ if __name__ == "__main__":
     for arg, value in vars(args).items():
         logger.info(f"  {arg}: {value}")
 
-    # Env
-    env = make_env(result_dir / "video")
-
     #### Reproducibility
     env.reset(seed=seed)
     env.action_space.seed(seed)
@@ -298,9 +311,6 @@ if __name__ == "__main__":
     args.action_dim = env.action_space.shape[0]
 
     agent = AVG(args, env)
-
-    action_scale = (env.action_space.high - env.action_space.low) / 2.0
-    action_bias = (env.action_space.high + env.action_space.low) / 2.0
 
     # なぜか追加の係数がないとHumanoid-v5で学習が進まない
     logger.info(f"Before {action_scale=}")
