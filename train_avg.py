@@ -46,8 +46,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--critic_lr", default=0.0087, type=float)
     parser.add_argument("--alpha_lr", default=1e-2, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
-    parser.add_argument("--l2_actor", default=0.0, type=float)
-    parser.add_argument("--l2_critic", default=0.0, type=float)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
@@ -98,17 +96,18 @@ class AVG:
         self.critic_lr = args.critic_lr
 
         betas = [0.0, 0.999]
+        weight_decay = 1e-5
         self.popt = torch.optim.AdamW(
             self.actor.parameters(),
             lr=args.actor_lr,
             betas=betas,
-            weight_decay=args.l2_actor,
+            weight_decay=weight_decay,
         )
         self.qopt = torch.optim.AdamW(
             self.Q.parameters(),
             lr=args.critic_lr,
             betas=betas,
-            weight_decay=args.l2_critic,
+            weight_decay=weight_decay,
         )
 
         self.gamma, self.device = args.gamma, args.device
