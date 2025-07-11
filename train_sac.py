@@ -35,7 +35,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
     parser.add_argument("--seed", type=int, default=-1)
-    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
