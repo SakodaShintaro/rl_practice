@@ -283,10 +283,11 @@ class SacAgent:
 
     @torch.inference_mode()
     def select_action(self, obs):
+        info_dict = {}
+
         obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
         if global_step < self.learning_starts:
             action = env.action_space.sample()
-            selected_log_pi = 0.0
         else:
             output_enc = self.network.encoder_image.encode(obs_tensor)
             action, selected_log_pi, _ = self.network.actor.get_action(output_enc)
@@ -297,6 +298,7 @@ class SacAgent:
             c = self.action_noise
             action = (1 - c) * action + c * action_noise
             action = np.clip(action, action_low, action_high)
+            info_dict["selected_log_pi"] = selected_log_pi[0].item()
 
         # Update sequence modeling lists
         if self.enable_sequence_modeling:
@@ -305,7 +307,7 @@ class SacAgent:
                 action, next_obs, self.network
             )
 
-        return action, selected_log_pi
+        return action, info_dict
 
     def env_feedback(self, global_step, obs, action, reward, termination, truncation) -> dict:
         info_dict = {}
@@ -491,10 +493,10 @@ if __name__ == "__main__":
             global_step += 1
 
             # select action
-            action, selected_log_pi = agent.select_action(obs)
+            action, action_info = agent.select_action(obs)
 
             # step
-            next_obs, reward, termination, truncation, info = env.step(action)
+            next_obs, reward, termination, truncation, env_info = env.step(action)
 
             # render
             if args.render:
@@ -513,7 +515,7 @@ if __name__ == "__main__":
             if global_step >= step_limit:
                 break
 
-            feedback_dict = agent.env_feedback(
+            feedback_info = agent.env_feedback(
                 global_step, obs, action, reward, termination, truncation
             )
 
@@ -526,7 +528,8 @@ if __name__ == "__main__":
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
-                    **feedback_dict,
+                    **action_info,
+                    **feedback_info,
                 }
 
                 wandb.log(data_dict)
@@ -535,15 +538,15 @@ if __name__ == "__main__":
         if global_step >= step_limit:
             break
 
-        score = info["episode"]["r"]
+        score = env_info["episode"]["r"]
         score_list.append(score)
         score_list = score_list[-20:]
         recent_average_score = np.mean(score_list)
 
         data_dict = {
             "global_step": global_step,
-            "episodic_return": info["episode"]["r"],
-            "episodic_length": info["episode"]["l"],
+            "episodic_return": env_info["episode"]["r"],
+            "episodic_length": env_info["episode"]["l"],
             "recent_average_score": recent_average_score,
         }
         wandb.log(data_dict)
@@ -556,7 +559,7 @@ if __name__ == "__main__":
 
         if episode_id % 5 == 0 or is_solved:
             print(
-                f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
+                f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
             )
 
         episode_id += 1
