@@ -33,11 +33,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvla"])
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
     parser.add_argument("--sparsity", type=float, default=0.0)
+    parser.add_argument("--debug", action="store_true")
 
     parser.add_argument("--N", default=2_000_000, type=int)
     parser.add_argument("--actor_lr", default=0.0063, type=float)
@@ -58,8 +60,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
-    parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvla"])
-    parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
 
