@@ -276,6 +276,8 @@ class SacAgent:
             "actor": StatisticalMetricsComputer(),
         }
 
+        self.prev_action = None
+
     def initialize_for_episode(self):
         # Initialize sequence modeling lists if enabled
         if self.enable_sequence_modeling:
@@ -305,16 +307,15 @@ class SacAgent:
                 action, next_obs, self.network
             )
 
+        self.prev_action = action
         return action, selected_log_pi
 
-    def env_feedback(
-        self, global_step, obs, action, reward, next_obs, termination, truncation
-    ) -> dict:
+    def env_feedback(self, global_step, obs, reward, termination, truncation) -> dict:
         data_dict = {}
 
         reward /= 10.0
 
-        self.rb.add(obs, action, reward, termination or truncation)
+        self.rb.add(obs, self.prev_action, reward, termination or truncation)
 
         if global_step < self.learning_starts:
             return data_dict
@@ -514,9 +515,7 @@ if __name__ == "__main__":
             if global_step >= step_limit:
                 break
 
-            feedback_dict = agent.env_feedback(
-                global_step, obs, action, reward, next_obs, termination, truncation
-            )
+            feedback_dict = agent.env_feedback(global_step, obs, reward, termination, truncation)
 
             obs = next_obs
 
