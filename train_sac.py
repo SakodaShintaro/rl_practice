@@ -531,7 +531,6 @@ if __name__ == "__main__":
 
                 wandb.log(data_dict)
                 log_step.append(data_dict)
-                # save_dict_to_tsv(data_dict, result_dir)
 
         if global_step >= step_limit:
             break
