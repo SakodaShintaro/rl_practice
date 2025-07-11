@@ -59,10 +59,8 @@ def parse_args() -> argparse.Namespace:
 class AVG:
     """AVG Agent."""
 
-    def __init__(self, args: argparse.Namespace, env: gym.Env) -> None:
+    def __init__(self, args: argparse.Namespace, env: gym.Env, device: torch.device) -> None:
         self.steps = 0
-
-        args.device = "cuda"
 
         if args.image_encoder == "ae":
             self.encoder_image = AE()
@@ -70,7 +68,7 @@ class AVG:
             self.encoder_image = SmolVLABackbone()
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
-        self.encoder_image.to(args.device)
+        self.encoder_image.to(device)
         self.cnn_dim = 4 * 12 * 12  # 576
 
         action_dim = np.prod(env.action_space.shape)
@@ -80,7 +78,7 @@ class AVG:
             sparsity=args.sparsity,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
-        ).to(args.device)
+        ).to(device)
         num_bins = 51
         self.Q = SacQ(
             in_channels=self.cnn_dim,
@@ -89,7 +87,7 @@ class AVG:
             sparsity=args.sparsity,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
-        ).to(args.device)
+        ).to(device)
 
         self.actor_lr = args.actor_lr
         self.critic_lr = args.critic_lr
@@ -109,7 +107,8 @@ class AVG:
             weight_decay=weight_decay,
         )
 
-        self.gamma, self.device = args.gamma, args.device
+        self.device = device
+        self.gamma = args.gamma
         self.td_error_scaler = TDErrorScaler()
         self.G = 0
 
@@ -126,7 +125,7 @@ class AVG:
         else:
             self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
             self.log_alpha = torch.nn.Parameter(
-                torch.zeros(1, requires_grad=True, device=args.device)
+                torch.zeros(1, requires_grad=True, device=device)
             )
             self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
 
@@ -135,7 +134,7 @@ class AVG:
             max_value=+30,
             num_bins=num_bins,
             clamp_to_range=True,
-        ).to(args.device)
+        ).to(device)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -250,6 +249,8 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.cuda.set_device(0)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
     result_dir.mkdir(parents=True, exist_ok=True)
@@ -310,7 +311,7 @@ if __name__ == "__main__":
     args.obs_dim = env.observation_space.shape[0]
     args.action_dim = env.action_space.shape[0]
 
-    agent = AVG(args, env)
+    agent = AVG(args, env, device)
 
     # なぜか追加の係数がないとHumanoid-v5で学習が進まない
     logger.info(f"Before {action_scale=}")
