@@ -56,7 +56,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save_dir", default="./results", type=Path)
     parser.add_argument("--save_suffix", default="AVG", type=str)
     parser.add_argument("--device", default="cuda", type=str)
-    parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--print_interval_episode", default=1, type=int)
     parser.add_argument("--record_interval_episode", default=10, type=int)
     parser.add_argument("--without_entropy_term", action="store_true")
@@ -273,8 +272,6 @@ if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     torch.set_num_threads(1)
-
-    torch.cuda.set_device(args.gpu_id)
 
     tic = time.time()
 
