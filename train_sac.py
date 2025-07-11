@@ -278,7 +278,7 @@ class SacAgent:
 
         self.prev_action = None
 
-    def initialize_for_episode(self):
+    def reset(self) -> None:
         # Reset previous action
         self.prev_action = None
 
@@ -286,21 +286,27 @@ class SacAgent:
         if self.enable_sequence_modeling:
             self.sequence_helper.initialize_lists(self.action_dim)
 
-    def make_decision(self, global_step, obs, reward, termination, truncation):
-        data_dict = {}
+    def step(self, global_step, obs, reward, termination, truncation):
+        info_dict = {}
 
-        feedback_dict = self.env_feedback(global_step, obs, reward, termination, truncation)
-        data_dict.update(feedback_dict)
+        feedback_dict = self._process_env_feedback(
+            global_step, obs, reward, termination, truncation
+        )
+        info_dict.update(feedback_dict)
 
-        action, selected_log_pi = self.select_action(obs)
-        return action, data_dict
+        action, action_info_dict = self._select_action(obs)
+        info_dict.update(action_info_dict)
+
+        return action, info_dict
 
     @torch.inference_mode()
-    def select_action(self, obs):
+    def _select_action(self, obs):
+        info_dict = {}
+
         obs_tensor = torch.Tensor(obs).to(device).unsqueeze(0)
         if global_step < self.learning_starts:
             action = env.action_space.sample()
-            selected_log_pi = 0.0
+            info_dict["selected_log_pi"] = 0.0
         else:
             output_enc = self.network.encoder_image.encode(obs_tensor)
             action, selected_log_pi, _ = self.network.actor.get_action(output_enc)
@@ -312,6 +318,8 @@ class SacAgent:
             action = (1 - c) * action + c * action_noise
             action = np.clip(action, action_low, action_high)
 
+            info_dict["selected_log_pi"] = selected_log_pi.item()
+
         # Update sequence modeling lists
         if self.enable_sequence_modeling:
             self.sequence_helper.update_lists(obs_tensor, reward, action)
@@ -320,21 +328,21 @@ class SacAgent:
             )
 
         self.prev_action = action
-        return action, selected_log_pi
+        return action, info_dict
 
-    def env_feedback(self, global_step, obs, reward, termination, truncation) -> dict:
-        data_dict = {}
+    def _process_env_feedback(self, global_step, obs, reward, termination, truncation) -> dict:
+        info_dict = {}
 
         # if previous action is None, there is no feedback to process
         if self.prev_action is None:
-            return data_dict
+            return info_dict
 
         reward /= 10.0
 
         self.rb.add(obs, self.prev_action, reward, termination or truncation)
 
         if global_step < self.learning_starts:
-            return data_dict
+            return info_dict
         elif global_step == self.learning_starts:
             print(f"Start training at global step {global_step}.")
 
@@ -397,35 +405,35 @@ class SacAgent:
 
         # Add loss information from compute methods
         for key, value in qf_info.items():
-            data_dict[f"losses/{key}"] = value
+            info_dict[f"losses/{key}"] = value
 
         for key, value in actor_info.items():
-            data_dict[f"losses/{key}"] = value
+            info_dict[f"losses/{key}"] = value
 
         for key, value in seq_info.items():
-            data_dict[f"losses/{key}"] = value
+            info_dict[f"losses/{key}"] = value
 
-        data_dict["losses/qf_loss"] = qf_loss
+        info_dict["losses/qf_loss"] = qf_loss
 
         # Add gradient norm metrics
         for key, value in grad_metrics.items():
-            data_dict[f"gradients/{key}"] = value
+            info_dict[f"gradients/{key}"] = value
 
         # Add parameter norm metrics
         for key, value in param_metrics.items():
-            data_dict[f"parameters/{key}"] = value
+            info_dict[f"parameters/{key}"] = value
 
         # Add activation norms
         for key, value in activation_norms.items():
-            data_dict[f"activation_norms/{key}"] = value
+            info_dict[f"activation_norms/{key}"] = value
 
         # Trigger statistical metrics computation
         for feature_name, feature in feature_dict.items():
             result_dict = self.metrics_computers[feature_name](feature)
             for key, value in result_dict.items():
-                data_dict[f"{key}/{feature_name}"] = value
+                info_dict[f"{key}/{feature_name}"] = value
 
-        return data_dict
+        return info_dict
 
 
 if __name__ == "__main__":
@@ -503,7 +511,7 @@ if __name__ == "__main__":
         else:
             curr_image_dir = None
 
-        agent.initialize_for_episode()
+        agent.reset()
         obs, _ = env.reset()
         reward = None
         termination = False
@@ -512,11 +520,9 @@ if __name__ == "__main__":
         while True:
             global_step += 1
 
-            # select action
-            action, agent_info = agent.make_decision(global_step, obs, reward, termination, truncation)
-
             # step
-            obs, reward, termination, truncation, info = env.step(action)
+            action, agent_info = agent.step(global_step, obs, reward, termination, truncation)
+            obs, reward, termination, truncation, env_info = env.step(action)
 
             # render
             if args.render:
@@ -552,15 +558,15 @@ if __name__ == "__main__":
         if global_step >= step_limit:
             break
 
-        score = info["episode"]["r"]
+        score = env_info["episode"]["r"]
         score_list.append(score)
         score_list = score_list[-20:]
         recent_average_score = np.mean(score_list)
 
         data_dict = {
             "global_step": global_step,
-            "episodic_return": info["episode"]["r"],
-            "episodic_length": info["episode"]["l"],
+            "episodic_return": env_info["episode"]["r"],
+            "episodic_length": env_info["episode"]["l"],
             "recent_average_score": recent_average_score,
         }
         wandb.log(data_dict)
@@ -573,7 +579,7 @@ if __name__ == "__main__":
 
         if episode_id % 5 == 0 or is_solved:
             print(
-                f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {info['episode']['l']:.2f}"
+                f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
             )
 
         episode_id += 1
