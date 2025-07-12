@@ -39,16 +39,15 @@ class AvgAgent:
         ).to(self.device)
 
         # Use learning rates from AVG args
-        lr = getattr(args, "actor_lr", 1e-4)  # Use actor_lr if available, else default
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=args.actor_lr, weight_decay=1e-5)
 
         # AVG specific parameters
-        self.gamma = getattr(args, "gamma", 0.99)
+        self.gamma = args.gamma
         self.td_error_scaler = TDErrorScaler()
         self.G = 0
 
-        self.use_eligibility_trace = getattr(args, "use_eligibility_trace", False)
-        self.et_lambda = getattr(args, "et_lambda", 0.0)
+        self.use_eligibility_trace = args.use_eligibility_trace
+        self.et_lambda = args.et_lambda
 
         with torch.no_grad():
             self.eligibility_traces_q = [
@@ -56,7 +55,7 @@ class AvgAgent:
             ]
 
         # Alpha (entropy) handling
-        self.without_entropy_term = getattr(args, "without_entropy_term", False)
+        self.without_entropy_term = args.without_entropy_term
         if self.without_entropy_term:
             self.log_alpha = None
         else:
@@ -64,8 +63,7 @@ class AvgAgent:
             self.log_alpha = torch.nn.Parameter(
                 torch.zeros(1, requires_grad=True, device=self.device)
             )
-            alpha_lr = getattr(args, "alpha_lr", 1e-2)
-            self.aopt = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
+            self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
 
         # Initialize state tracking
         self._prev_obs = None
