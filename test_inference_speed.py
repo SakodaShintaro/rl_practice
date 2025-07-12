@@ -2,7 +2,7 @@ import time
 
 import torch
 
-from networks.backbone import AE, VAE, BaseCNN, SmolVLABackbone, SmolVLMEncoder
+from networks.backbone import AE, VAE, BaseCNN, SmolVLAEncoder, SmolVLMEncoder
 
 
 def parameter_count(model):
@@ -43,5 +43,5 @@ if __name__ == "__main__":
     model_smolvlm = SmolVLMEncoder(device=device)
     test_inference_speed(model_smolvlm, "SmolVLMEncoder")
 
-    model_smolvla = SmolVLABackbone(device=device)
+    model_smolvla = SmolVLAEncoder(device=device)
     test_inference_speed(model_smolvla, "SmolVLABackbone")

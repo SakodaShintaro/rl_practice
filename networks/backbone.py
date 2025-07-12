@@ -106,7 +106,7 @@ class SmolVLMEncoder(nn.Module):
         return x
 
 
-class SmolVLABackbone(nn.Module):
+class SmolVLAEncoder(nn.Module):
     def __init__(self, device=None) -> None:
         super().__init__()
         model_id = "HuggingFaceTB/SmolVLM-256M-Base"
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     output = model_smolvlm.encode(x)
     print(output.shape)  # (1, 256)
 
-    model_smolvla = SmolVLABackbone(device=device)
+    model_smolvla = SmolVLAEncoder(device=device)
     print(f"SmolVLABackbone parameter count: {parameter_count(model_smolvla):,}")
     output = model_smolvla.encode(x)
     print(output.shape)  # (1, 256)

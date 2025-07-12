@@ -20,7 +20,7 @@ import torch
 from hl_gauss_pytorch import HLGaussLoss
 
 import wandb
-from networks.backbone import AE, SmolVLABackbone
+from networks.backbone import AE, SmolVLAEncoder
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
@@ -64,7 +64,7 @@ class AVG:
         if args.image_encoder == "ae":
             self.encoder_image = AE()
         elif args.image_encoder == "smolvla":
-            self.encoder_image = SmolVLABackbone()
+            self.encoder_image = SmolVLAEncoder()
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
         self.encoder_image.to(device)
@@ -123,9 +123,7 @@ class AVG:
             self.log_alpha = None
         else:
             self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
-            self.log_alpha = torch.nn.Parameter(
-                torch.zeros(1, requires_grad=True, device=device)
-            )
+            self.log_alpha = torch.nn.Parameter(torch.zeros(1, requires_grad=True, device=device))
             self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
 
         self.hl_gauss_loss = HLGaussLoss(
