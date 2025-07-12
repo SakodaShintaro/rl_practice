@@ -58,7 +58,7 @@ class AvgAgent:
         self._prev_action = None
 
     def select_action(self, global_step, obs):
-        obs_tensor = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
+        obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
         obs_encoded = self.network.encoder_image.encode(obs_tensor)
         action, log_prob, _ = self.network.actor.get_action(obs_encoded)
 
@@ -78,8 +78,8 @@ class AvgAgent:
         # Create batch data with seq_len=2 format that SAC expects
         observations = torch.stack(
             [
-                torch.Tensor(self._prev_obs.astype(np.float32)).unsqueeze(0),
-                torch.Tensor(obs.astype(np.float32)).unsqueeze(0),
+                torch.Tensor(self._prev_obs).unsqueeze(0),
+                torch.Tensor(obs).unsqueeze(0),
             ],
             dim=1,
         ).to(self.device)  # [batch_size=1, seq_len=2, obs_dim]
@@ -104,11 +104,8 @@ class AvgAgent:
         )
 
         # Encode current state
-        state_curr = self.network.encoder_image.encode(
-            torch.Tensor(self._prev_obs.astype(np.float32)).unsqueeze(0).to(self.device)
-        )
+        state_curr = self.network.encoder_image.encode(data.observations[:, -2])
 
-        # Use SAC's loss computation methods
         qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
 
