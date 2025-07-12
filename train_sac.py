@@ -309,7 +309,9 @@ class SacAgent:
 
         return action, info_dict
 
-    def env_feedback(self, global_step, obs, action, reward, termination, truncation) -> dict:
+    def process_env_feedback(
+        self, global_step, obs, action, reward, termination, truncation
+    ) -> dict:
         info_dict = {}
 
         reward /= 10.0
@@ -504,10 +506,8 @@ if __name__ == "__main__":
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
 
-            # save images for specific episodes
-            if curr_image_dir is not None:
-                bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
-                cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
+                if curr_image_dir is not None:
+                    cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:
                 break
@@ -515,7 +515,8 @@ if __name__ == "__main__":
             if global_step >= step_limit:
                 break
 
-            feedback_info = agent.env_feedback(
+            # process environment feedback
+            feedback_info = agent.process_env_feedback(
                 global_step, obs, action, reward, termination, truncation
             )
 
