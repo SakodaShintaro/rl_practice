@@ -17,7 +17,6 @@ from td_error_scaler import TDErrorScaler
 class AvgAgent:
     def __init__(self, args: argparse.Namespace, observation_space, action_space) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.steps = 0
 
         # action properties
         self.action_space = action_space
@@ -131,8 +130,6 @@ class AvgAgent:
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
 
         self.optimizer.step()
-
-        self.steps += 1
 
         # Combine info from both losses
         info_dict = {}
