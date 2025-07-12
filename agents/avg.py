@@ -7,10 +7,10 @@ import argparse
 
 import numpy as np
 import torch
-from hl_gauss_pytorch import HLGaussLoss
+from torch import optim
 
-from networks.backbone import AE, SmolVLABackbone
-from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
+from agents.sac import Network
+from replay_buffer import ReplayBufferData
 from td_error_scaler import TDErrorScaler
 
 
@@ -19,83 +19,53 @@ class AvgAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.steps = 0
 
-        if args.image_encoder == "ae":
-            self.encoder_image = AE()
-        elif args.image_encoder == "smolvla":
-            self.encoder_image = SmolVLABackbone()
-        else:
-            raise ValueError(f"Unknown image encoder: {args.image_encoder}")
-        self.encoder_image.to(self.device)
-        self.cnn_dim = 4 * 12 * 12  # 576
-
-        action_dim = np.prod(action_space.shape)
+        # action properties
         self.action_space = action_space
+        self.action_dim = np.prod(action_space.shape)
         self.action_low = action_space.low
         self.action_high = action_space.high
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
-        self.actor = SacTanhPolicy(
-            in_channels=self.cnn_dim,
-            block_num=args.actor_block_num,
+
+        # Use SAC's Network class
+        seq_len = 2
+        enable_sequence_modeling = False  # AVG doesn't use sequence modeling
+        self.network = Network(
             sparsity=args.sparsity,
-            action_dim=action_dim,
-            hidden_dim=args.actor_hidden_dim,
-        ).to(self.device)
-        num_bins = 51
-        self.Q = SacQ(
-            in_channels=self.cnn_dim,
-            block_num=args.critic_block_num,
-            num_bins=num_bins,
-            sparsity=args.sparsity,
-            action_dim=action_dim,
-            hidden_dim=args.critic_hidden_dim,
+            action_dim=self.action_dim,
+            seq_len=seq_len,
+            args=args,
+            enable_sequence_modeling=enable_sequence_modeling,
         ).to(self.device)
 
-        self.actor_lr = args.actor_lr
-        self.critic_lr = args.critic_lr
+        # Use learning rates from AVG args
+        lr = getattr(args, "actor_lr", 1e-4)  # Use actor_lr if available, else default
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
 
-        betas = [0.0, 0.999]
-        weight_decay = 1e-5
-        self.popt = torch.optim.AdamW(
-            self.actor.parameters(),
-            lr=args.actor_lr,
-            betas=betas,
-            weight_decay=weight_decay,
-        )
-        self.qopt = torch.optim.AdamW(
-            self.Q.parameters(),
-            lr=args.critic_lr,
-            betas=betas,
-            weight_decay=weight_decay,
-        )
-
-        self.gamma = args.gamma
+        # AVG specific parameters
+        self.gamma = getattr(args, "gamma", 0.99)
         self.td_error_scaler = TDErrorScaler()
         self.G = 0
 
-        self.use_eligibility_trace = args.use_eligibility_trace
+        self.use_eligibility_trace = getattr(args, "use_eligibility_trace", False)
+        self.et_lambda = getattr(args, "et_lambda", 0.0)
 
-        self.et_lambda = args.et_lambda
         with torch.no_grad():
             self.eligibility_traces_q = [
-                torch.zeros_like(p, requires_grad=False) for p in self.Q.parameters()
+                torch.zeros_like(p, requires_grad=False) for p in self.network.qf1.parameters()
             ]
 
-        if args.without_entropy_term:
+        # Alpha (entropy) handling
+        self.without_entropy_term = getattr(args, "without_entropy_term", False)
+        if self.without_entropy_term:
             self.log_alpha = None
         else:
             self.target_entropy = -torch.prod(torch.Tensor(action_space.shape)).item()
             self.log_alpha = torch.nn.Parameter(
                 torch.zeros(1, requires_grad=True, device=self.device)
             )
-            self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
-
-        self.hl_gauss_loss = HLGaussLoss(
-            min_value=-30,
-            max_value=+30,
-            num_bins=num_bins,
-            clamp_to_range=True,
-        ).to(self.device)
+            alpha_lr = getattr(args, "alpha_lr", 1e-2)
+            self.aopt = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
 
         # Initialize state tracking
         self._prev_obs = None
@@ -103,8 +73,8 @@ class AvgAgent:
 
     def select_action(self, global_step, obs):
         obs_tensor = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
-        obs_encoded = self.encoder_image.encode(obs_tensor)
-        action, log_prob, _ = self.actor.get_action(obs_encoded)
+        obs_encoded = self.network.encoder_image.encode(obs_tensor)
+        action, log_prob, _ = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
         self._prev_obs = obs
@@ -116,89 +86,100 @@ class AvgAgent:
         return action, {"selected_log_pi": log_prob[0].item()}
 
     def process_env_feedback(self, global_step, obs, action, reward, termination, truncation):
-        # Compute log_prob for the previous action
-        prev_obs_tensor = (
+        # Create ReplayBufferData for SAC's loss computation
+        done = termination or truncation
+
+        # Create batch data with seq_len=2 format that SAC expects
+        observations = torch.stack(
+            [
+                torch.Tensor(self._prev_obs.astype(np.float32)).unsqueeze(0),
+                torch.Tensor(obs.astype(np.float32)).unsqueeze(0),
+            ],
+            dim=1,
+        ).to(self.device)  # [batch_size=1, seq_len=2, obs_dim]
+
+        actions = (
+            torch.stack(
+                [
+                    self._prev_action.squeeze(0),  # [action_dim]
+                    self._prev_action.squeeze(0),  # dummy, only [:, -2] used
+                ],
+                dim=0,
+            )
+            .unsqueeze(0)
+            .to(self.device)
+        )  # [batch_size=1, seq_len=2, action_dim]
+
+        rewards = torch.tensor([[0.0, reward]], device=self.device, dtype=torch.float32)
+        dones = torch.tensor([[False, done]], device=self.device, dtype=torch.float32)
+
+        data = ReplayBufferData(
+            observations=observations, actions=actions, rewards=rewards, dones=dones
+        )
+
+        # Encode current state
+        state_curr = self.network.encoder_image.encode(
             torch.Tensor(self._prev_obs.astype(np.float32)).unsqueeze(0).to(self.device)
         )
-        prev_obs_encoded = self.encoder_image.encode(prev_obs_tensor)
-        _, prev_log_prob, _ = self.actor.get_action(prev_obs_encoded)
 
-        # Update the actor and critic networks based on the observed transition
-        obs_tensor = torch.Tensor(obs.astype(np.float32)).unsqueeze(0).to(self.device)
-        obs_encoded = self.encoder_image.encode(obs_tensor)
-        next_obs = obs_encoded
+        # Use SAC's loss computation methods
+        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+        actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
 
-        #### Q loss
-        with torch.no_grad():
-            alpha = self.log_alpha.exp().item() if self.log_alpha is not None else 0.0
-            next_action, next_lprob, _ = self.actor.get_action(next_obs)
-            next_q_dict = self.Q(next_obs, next_action)
-            next_q_logit = next_q_dict["output"]
-            next_q = self.hl_gauss_loss(next_q_logit).unsqueeze(-1)
-            target_V = next_q - alpha * next_lprob
+        # Combine losses (no sequence modeling for AVG)
+        loss = actor_loss + qf_loss
 
-        #### Return scaling
-        done = termination or truncation
-        r_ent = reward - alpha * prev_log_prob.detach().item()
-        self.G += r_ent
-        if done:
-            self.td_error_scaler.update(reward=r_ent, gamma=0, G=self.G)
-            self.G = 0
-        else:
-            self.td_error_scaler.update(reward=r_ent, gamma=self.gamma, G=None)
+        self.optimizer.zero_grad()
+        loss.backward()
 
-        curr_q_dict = self.Q(prev_obs_encoded, self._prev_action.detach())
-        curr_q_logit = curr_q_dict["output"]
-        curr_q = self.hl_gauss_loss(curr_q_logit).unsqueeze(-1)
-        delta = reward + (1 - done) * self.gamma * target_V - curr_q
-        delta /= self.td_error_scaler.sigma
-
-        # Policy loss
-        curr_q_dict = self.Q(prev_obs_encoded, self._prev_action)
-        curr_q_logit = curr_q_dict["output"]
-        curr_q = self.hl_gauss_loss(curr_q_logit).unsqueeze(-1)
-        ploss = alpha * prev_log_prob - curr_q
-        self.popt.zero_grad()
-        ploss.backward()
-        self.popt.step()
-
-        self.qopt.zero_grad()
+        # Apply eligibility traces if enabled
         if self.use_eligibility_trace:
-            curr_q_dict.backward()
             with torch.no_grad():
-                for p, et in zip(self.Q.parameters(), self.eligibility_traces_q):
-                    et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
-                    p.grad.data = -2.0 * delta.item() * et
-        else:
-            qloss = delta**2
-            qloss.backward()
-        self.qopt.step()
+                for p, et in zip(self.network.qf1.parameters(), self.eligibility_traces_q):
+                    if p.grad is not None:
+                        et.mul_(self.et_lambda * self.gamma).add_(p.grad.data)
+                        p.grad.data = et
 
-        # alpha
-        if self.log_alpha is None:
-            alpha_loss = torch.Tensor([0.0])
-        else:
+        # Clip gradients
+        torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
+
+        self.optimizer.step()
+
+        # Alpha update
+        if not self.without_entropy_term:
+            # Compute log_prob for alpha update
+            prev_obs_encoded = self.network.encoder_image.encode(
+                torch.Tensor(self._prev_obs.astype(np.float32)).unsqueeze(0).to(self.device)
+            )
+            _, prev_log_prob, _ = self.network.actor.get_action(prev_obs_encoded)
+
             alpha_loss = (
                 -self.log_alpha.exp() * (prev_log_prob.detach() + self.target_entropy)
             ).mean()
             self.aopt.zero_grad()
             alpha_loss.backward()
             self.aopt.step()
+        else:
+            alpha_loss = torch.tensor(0.0)
 
         self.steps += 1
 
-        return {
-            "delta": delta.item(),
-            "q": curr_q.item(),
-            "policy_loss": ploss.item(),
-            "alpha_loss": alpha_loss.item(),
-            "alpha": alpha,
-        }
+        # Combine info from both losses
+        info_dict = {}
+        for key, value in qf_info.items():
+            info_dict[f"losses/{key}"] = value
+        for key, value in actor_info.items():
+            info_dict[f"losses/{key}"] = value
+        info_dict["losses/alpha_loss"] = alpha_loss.item()
+
+        return info_dict
 
     def initialize_for_episode(self):
         """Initialize for new episode."""
         self._prev_obs = None
         self._prev_action = None
 
-        for et in self.eligibility_traces_q:
-            et.zero_()
+        # Reset eligibility traces
+        if self.use_eligibility_trace:
+            for et in self.eligibility_traces_q:
+                et.zero_()
