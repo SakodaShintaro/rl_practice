@@ -40,7 +40,6 @@ class AvgAgent:
         # Use learning rates from AVG args
         self.optimizer = optim.AdamW(self.network.parameters(), lr=1e-4, weight_decay=1e-5)
 
-        # AVG specific parameters
         self.gamma = args.gamma
         self.td_error_scaler = TDErrorScaler()
         self.G = 0

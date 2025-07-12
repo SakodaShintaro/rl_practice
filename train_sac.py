@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
     parser.add_argument("--sparsity", type=float, default=0.0)
+    parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
@@ -46,7 +47,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable_sequence_modeling", action="store_true")
 
     # for AVG
-    parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
