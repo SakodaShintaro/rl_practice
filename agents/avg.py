@@ -72,6 +72,10 @@ class AvgAgent:
         return action, {"selected_log_pi": log_prob[0].item()}
 
     def process_env_feedback(self, global_step, obs, action, reward, termination, truncation):
+        info_dict = {}
+
+        reward /= 10.0
+
         # Create ReplayBufferData for SAC's loss computation
         done = termination or truncation
 
@@ -129,7 +133,6 @@ class AvgAgent:
         self.optimizer.step()
 
         # Combine info from both losses
-        info_dict = {}
         for key, value in qf_info.items():
             info_dict[f"losses/{key}"] = value
         for key, value in actor_info.items():
