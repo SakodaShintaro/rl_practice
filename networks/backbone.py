@@ -30,7 +30,7 @@ class BaseCNN(nn.Module):
             nn.Flatten(),  # -> (256,)
         )
 
-    def forward(self, x):
+    def encode(self, x):
         return self.features(x)
 
 
