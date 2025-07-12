@@ -4,7 +4,7 @@ import numpy as np
 REPEAT = 8
 
 
-def make_env(video_dir):
+def make_env():
     env = gym.make("CarRacing-v3", render_mode="rgb_array")
     env = env.env  # Unwrap the original TimeLimit wrapper
     env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
@@ -12,9 +12,6 @@ def make_env(video_dir):
     env = AverageRewardEarlyStopWrapper(env)
     env = DieStateRewardWrapper(env)
     env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.RecordVideo(
-        env, video_folder=video_dir, episode_trigger=lambda x: x % 100 == 0
-    )
     env = TransposeAndNormalizeObs(env)
     return env
 

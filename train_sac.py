@@ -447,12 +447,12 @@ if __name__ == "__main__":
 
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
-    image_save_interval = 100
+    image_save_interval = 50
     log_step = []
     log_episode = []
 
     # env setup
-    env = make_env(result_dir / "video")
+    env = make_env()
     env.action_space.seed(seed)
 
     action_low = env.action_space.low
