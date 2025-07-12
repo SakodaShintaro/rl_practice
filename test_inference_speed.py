@@ -47,4 +47,4 @@ if __name__ == "__main__":
     test_inference_speed(model_smolvlm, "SmolVLMEncoder")
 
     model_smolvla = SmolVLAEncoder(device=device)
-    test_inference_speed(model_smolvla, "SmolVLABackbone")
+    test_inference_speed(model_smolvla, "SmolVLMEncoder")
