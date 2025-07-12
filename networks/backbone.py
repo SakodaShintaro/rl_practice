@@ -33,6 +33,9 @@ class BaseCNN(nn.Module):
     def encode(self, x):
         return self.features(x)
 
+    def forward(self, x):
+        return self.encode(x)
+
 
 class AE(nn.Module):
     def __init__(self):
@@ -43,6 +46,9 @@ class AE(nn.Module):
     @torch.no_grad()
     def encode(self, x):
         return self.ae.encode(x).latents.flatten(1)
+
+    def forward(self, x):
+        return self.encode(x)
 
     @torch.no_grad()
     def decode(self, x):
@@ -58,6 +64,9 @@ class VAE(nn.Module):
 
     def encode(self, x):
         return self.vae.encode(x).latent_dist.sample().mul_(self.scale)
+
+    def forward(self, x):
+        return self.encode(x)
 
     def decode(self, x):
         return self.vae.decode(x / self.scale).sample
@@ -105,6 +114,9 @@ class SmolVLMEncoder(nn.Module):
         x = x.to(torch.float32)
         return x
 
+    def forward(self, x):
+        return self.encode(x)
+
 
 class SmolVLAEncoder(nn.Module):
     def __init__(self, device=None) -> None:
@@ -151,6 +163,9 @@ class SmolVLAEncoder(nn.Module):
         x = hidden[:, input_len - 1]
         x = x.to(torch.float32)
         return x
+
+    def forward(self, x):
+        return self.encode(x)
 
 
 if __name__ == "__main__":
