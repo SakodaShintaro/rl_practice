@@ -54,7 +54,6 @@ class AvgAgent:
                 torch.zeros_like(p, requires_grad=False) for p in self.network.qf1.parameters()
             ]
 
-
         # Initialize state tracking
         self._prev_obs = None
         self._prev_action = None
@@ -132,7 +131,6 @@ class AvgAgent:
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
 
         self.optimizer.step()
-
 
         self.steps += 1
 
