@@ -49,7 +49,6 @@ def parse_args() -> argparse.Namespace:
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
-    parser.add_argument("--reward_processing_type", default="none", type=str)
     return parser.parse_args()
 
 
