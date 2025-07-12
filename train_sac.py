@@ -48,12 +48,10 @@ def parse_args() -> argparse.Namespace:
     # for AVG
     parser.add_argument("--actor_lr", default=0.0063, type=float)
     parser.add_argument("--critic_lr", default=0.0087, type=float)
-    parser.add_argument("--alpha_lr", default=1e-2, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.0, type=float)
     parser.add_argument("--reward_processing_type", default="none", type=str)
-    parser.add_argument("--without_entropy_term", action="store_true")
     return parser.parse_args()
 
 

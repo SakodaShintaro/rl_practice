@@ -54,16 +54,6 @@ class AvgAgent:
                 torch.zeros_like(p, requires_grad=False) for p in self.network.qf1.parameters()
             ]
 
-        # Alpha (entropy) handling
-        self.without_entropy_term = args.without_entropy_term
-        if self.without_entropy_term:
-            self.log_alpha = None
-        else:
-            self.target_entropy = -torch.prod(torch.Tensor(action_space.shape)).item()
-            self.log_alpha = torch.nn.Parameter(
-                torch.zeros(1, requires_grad=True, device=self.device)
-            )
-            self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
 
         # Initialize state tracking
         self._prev_obs = None
@@ -143,22 +133,6 @@ class AvgAgent:
 
         self.optimizer.step()
 
-        # Alpha update
-        if not self.without_entropy_term:
-            # Compute log_prob for alpha update
-            prev_obs_encoded = self.network.encoder_image.encode(
-                torch.Tensor(self._prev_obs.astype(np.float32)).unsqueeze(0).to(self.device)
-            )
-            _, prev_log_prob, _ = self.network.actor.get_action(prev_obs_encoded)
-
-            alpha_loss = (
-                -self.log_alpha.exp() * (prev_log_prob.detach() + self.target_entropy)
-            ).mean()
-            self.aopt.zero_grad()
-            alpha_loss.backward()
-            self.aopt.step()
-        else:
-            alpha_loss = torch.tensor(0.0)
 
         self.steps += 1
 
@@ -168,7 +142,6 @@ class AvgAgent:
             info_dict[f"losses/{key}"] = value
         for key, value in actor_info.items():
             info_dict[f"losses/{key}"] = value
-        info_dict["losses/alpha_loss"] = alpha_loss.item()
 
         return info_dict
 
