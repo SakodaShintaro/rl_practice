@@ -13,12 +13,15 @@ def parameter_count(model):
 def test_inference_speed(model, name):
     device = torch.device("cuda")
     x = torch.rand(32, 3, 96, 96, device=device)
-    _ = model.encode(x)
 
     COUNT = 10
 
+    model = torch.compile(model)
     model.to(device)
     print(f"{name} parameter count: {parameter_count(model):,}")
+
+    _ = model.encode(x)
+
     start_time = time.time()
     for _ in range(COUNT):
         _ = model.encode(x)
