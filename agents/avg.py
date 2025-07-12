@@ -38,7 +38,7 @@ class AvgAgent:
         ).to(self.device)
 
         # Use learning rates from AVG args
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=args.actor_lr, weight_decay=1e-5)
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=1e-4, weight_decay=1e-5)
 
         # AVG specific parameters
         self.gamma = args.gamma
