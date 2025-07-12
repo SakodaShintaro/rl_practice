@@ -87,20 +87,16 @@ class AvgAgent:
             dim=1,
         ).to(self.device)  # [batch_size=1, seq_len=2, obs_dim]
 
-        actions = (
-            torch.stack(
-                [
-                    self._prev_action.squeeze(0),  # [action_dim]
-                    self._prev_action.squeeze(0),  # dummy, only [:, -2] used
-                ],
-                dim=0,
-            )
-            .unsqueeze(0)
-            .to(self.device)
-        )  # [batch_size=1, seq_len=2, action_dim]
+        actions = torch.stack(
+            [
+                self._prev_action.squeeze(0),
+                torch.Tensor(action).to(self.device),
+            ],
+            dim=0,
+        ).unsqueeze(0)  # [batch_size=1, seq_len=2, action_dim]
 
-        rewards = torch.tensor([[0.0, reward]], device=self.device, dtype=torch.float32)
-        dones = torch.tensor([[False, done]], device=self.device, dtype=torch.float32)
+        rewards = torch.tensor([[reward, reward]], device=self.device, dtype=torch.float32)
+        dones = torch.tensor([[done, done]], device=self.device, dtype=torch.float32)
 
         data = ReplayBufferData(
             observations=observations, actions=actions, rewards=rewards, dones=dones
