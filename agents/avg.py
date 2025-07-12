@@ -55,10 +55,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class AVG:
+class AvgAgent:
     """AVG Agent."""
 
-    def __init__(self, args: argparse.Namespace, env: gym.Env, device: torch.device) -> None:
+    def __init__(self, args: argparse.Namespace, observation_space, action_space) -> None:
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.steps = 0
 
         if args.image_encoder == "ae":
@@ -67,17 +68,22 @@ class AVG:
             self.encoder_image = SmolVLABackbone()
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
-        self.encoder_image.to(device)
+        self.encoder_image.to(self.device)
         self.cnn_dim = 4 * 12 * 12  # 576
 
-        action_dim = np.prod(env.action_space.shape)
+        action_dim = np.prod(action_space.shape)
+        self.action_space = action_space
+        self.action_low = action_space.low
+        self.action_high = action_space.high
+        self.action_scale = (action_space.high - action_space.low) / 2.0
+        self.action_bias = (action_space.high + action_space.low) / 2.0
         self.actor = SacTanhPolicy(
             in_channels=self.cnn_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
-        ).to(device)
+        ).to(self.device)
         num_bins = 51
         self.Q = SacQ(
             in_channels=self.cnn_dim,
@@ -86,7 +92,7 @@ class AVG:
             sparsity=args.sparsity,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
-        ).to(device)
+        ).to(self.device)
 
         self.actor_lr = args.actor_lr
         self.critic_lr = args.critic_lr
@@ -106,7 +112,6 @@ class AVG:
             weight_decay=weight_decay,
         )
 
-        self.device = device
         self.gamma = args.gamma
         self.td_error_scaler = TDErrorScaler()
         self.G = 0
@@ -122,9 +127,9 @@ class AVG:
         if args.without_entropy_term:
             self.log_alpha = None
         else:
-            self.target_entropy = -torch.prod(torch.Tensor(env.action_space.shape)).item()
+            self.target_entropy = -torch.prod(torch.Tensor(action_space.shape)).item()
             self.log_alpha = torch.nn.Parameter(
-                torch.zeros(1, requires_grad=True, device=device)
+                torch.zeros(1, requires_grad=True, device=self.device)
             )
             self.aopt = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr)
 
@@ -133,7 +138,7 @@ class AVG:
             max_value=+30,
             num_bins=num_bins,
             clamp_to_range=True,
-        ).to(device)
+        ).to(self.device)
 
     def compute_action(self, obs: np.ndarray) -> tuple[torch.Tensor, dict]:
         """Compute the action and action information given an observation."""
@@ -141,6 +146,60 @@ class AVG:
         obs = self.encoder_image.encode(obs)
         action, log_prob, mean = self.actor.get_action(obs)
         return action, log_prob, mean
+
+    def select_action(self, global_step, obs):
+        """Interface method for train_sac.py compatibility."""
+        action, log_prob, mean = self.compute_action(obs)
+        action = action[0].detach().cpu().numpy()
+        action = action * self.action_scale + self.action_bias
+        action = np.clip(action, self.action_low, self.action_high)
+        return action, {"selected_log_pi": log_prob[0].item()}
+
+    def process_env_feedback(self, global_step, obs, action, reward, termination, truncation):
+        """Interface method for train_sac.py compatibility."""
+        # Convert action back to normalized range
+        normalized_action = (action - self.action_bias) / self.action_scale
+        normalized_action = torch.tensor(normalized_action, device=self.device).unsqueeze(0)
+
+        # Store previous observation and action for update
+        if (
+            hasattr(self, "_prev_obs")
+            and hasattr(self, "_prev_action")
+            and hasattr(self, "_prev_log_prob")
+        ):
+            stats = self.update(
+                self._prev_obs,
+                self._prev_action,
+                obs,
+                reward,
+                termination or truncation,
+                self._prev_log_prob,
+            )
+
+            # Store current observation and action for next update
+            self._prev_obs = obs
+            action_tensor, log_prob, _ = self.compute_action(obs)
+            self._prev_action = action_tensor
+            self._prev_log_prob = log_prob
+
+            return stats
+        else:
+            # First step - just store for next update
+            self._prev_obs = obs
+            action_tensor, log_prob, _ = self.compute_action(obs)
+            self._prev_action = action_tensor
+            self._prev_log_prob = log_prob
+            return {}
+
+    def initialize_for_episode(self):
+        """Initialize for new episode."""
+        self.reset_eligibility_traces()
+        if hasattr(self, "_prev_obs"):
+            delattr(self, "_prev_obs")
+        if hasattr(self, "_prev_action"):
+            delattr(self, "_prev_action")
+        if hasattr(self, "_prev_log_prob"):
+            delattr(self, "_prev_log_prob")
 
     def update(
         self,
@@ -309,7 +368,7 @@ if __name__ == "__main__":
     logger.info(f"{env.action_space=}")
     args.obs_dim = env.observation_space.shape[0]
 
-    agent = AVG(args, env, device)
+    agent = AvgAgent(args, env, device)
 
     # Interaction
     reward_processor = RewardProcessor(args.reward_processing_type)
