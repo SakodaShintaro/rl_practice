@@ -21,6 +21,7 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
+    parser.add_argument("--agent_type", type=str, default="sac", choices=["sac"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
@@ -32,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--debug", action="store_true")
 
+    # for SAC
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
@@ -54,7 +56,7 @@ if __name__ == "__main__":
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
-    exp_name = f"SAC_{args.exp_name}"
+    exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
     wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
 
     # seeding
@@ -98,7 +100,10 @@ if __name__ == "__main__":
     curr_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
     pred_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
 
-    agent = SacAgent(args, env.observation_space, env.action_space)
+    if args.agent_type == "sac":
+        agent = SacAgent(args, env.observation_space, env.action_space)
+    else:
+        raise ValueError(f"Unknown agent type: {args.agent_type}")
 
     for episode_id in range(10000):
         if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
