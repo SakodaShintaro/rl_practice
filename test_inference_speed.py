@@ -1,8 +1,9 @@
 import time
 
 import torch
+from torch import nn
 
-from networks.backbone import AE, VAE, BaseCNN, SmolVLAEncoder, SmolVLMEncoder
+from networks.backbone import AE, VAE, SmolVLMEncoder
 
 
 def parameter_count(model):
@@ -12,19 +13,20 @@ def parameter_count(model):
 @torch.inference_mode()
 def test_inference_speed(model, name):
     device = torch.device("cuda")
-    x = torch.rand(32, 3, 96, 96, device=device)
+    x = torch.rand(16, 3, 96, 96, device=device)
 
     COUNT = 10
 
-    model = torch.compile(model)
     model.to(device)
+    model.eval()
+    model = nn.DataParallel(model)
     print(f"{name} parameter count: {parameter_count(model):,}")
 
-    _ = model.encode(x)
+    _ = model(x)
 
     start_time = time.time()
     for _ in range(COUNT):
-        _ = model.encode(x)
+        _ = model(x)
     end_time = time.time()
     elapsed_time = (end_time - start_time) / COUNT * 1000
     print(f"{name} encode time: {elapsed_time:.1f} ms")
@@ -40,11 +42,5 @@ if __name__ == "__main__":
     model_vae = VAE().to(device)
     test_inference_speed(model_vae, "VAE")
 
-    model_cnn = BaseCNN(in_channels=3).to(device)
-    test_inference_speed(model_cnn, "BaseCNN")
-
     model_smolvlm = SmolVLMEncoder(device=device)
     test_inference_speed(model_smolvlm, "SmolVLMEncoder")
-
-    model_smolvla = SmolVLAEncoder(device=device)
-    test_inference_speed(model_smolvla, "SmolVLMEncoder")
