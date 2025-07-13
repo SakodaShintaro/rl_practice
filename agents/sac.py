@@ -48,7 +48,7 @@ class Network(nn.Module):
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
-        self.qf1 = SacQ(
+        self.critic = SacQ(
             in_channels=self.cnn_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
@@ -74,28 +74,26 @@ class Network(nn.Module):
         with torch.no_grad():
             state_next = self.encoder_image.encode(data.observations[:, -1])
             next_state_actions, _, _ = self.actor.get_action(state_next)
-            qf1_next_output_dict = self.qf1(state_next, next_state_actions)
-            qf1_next_target = qf1_next_output_dict["output"]
-            qf1_next_target = self.hl_gauss_loss(qf1_next_target).unsqueeze(-1)
-            min_q = qf1_next_target
-            min_qf_next_target = min_q.view(-1)
+            critic_next_output_dict = self.critic(state_next, next_state_actions)
+            critic_next_target = critic_next_output_dict["output"]
+            critic_next_target = self.hl_gauss_loss(critic_next_target).view(-1)
             curr_reward = data.rewards[:, -2].flatten()
             curr_continue = 1 - data.dones[:, -2].flatten()
-            next_q_value = curr_reward + curr_continue * self.gamma * min_qf_next_target
+            next_q_value = curr_reward + curr_continue * self.gamma * critic_next_target
 
-        qf1_output_dict = self.qf1(state_curr, data.actions[:, -2])
+        critic_output_dict = self.critic(state_curr, data.actions[:, -2])
 
-        qf1_a_values = qf1_output_dict["output"]
+        critic_a_values = critic_output_dict["output"]
 
-        qf1_loss = self.hl_gauss_loss(qf1_a_values, next_q_value)
-        qf_loss = qf1_loss
+        critic_loss = self.hl_gauss_loss(critic_a_values, next_q_value)
+        qf_loss = critic_loss
 
         activations_dict = {}
 
         info_dict = {
-            "qf1_loss": qf1_loss.item(),
-            "qf1_values": qf1_a_values.mean().item(),
-            "min_qf_next_target": min_qf_next_target.mean().item(),
+            "critic_loss": critic_loss.item(),
+            "critic_values": critic_a_values.mean().item(),
+            "critic_next_target": critic_next_target.mean().item(),
             "next_q_value": next_q_value.mean().item(),
         }
 
@@ -104,16 +102,15 @@ class Network(nn.Module):
     def compute_actor_loss(self, state_curr):
         pi, log_pi, _ = self.actor.get_action(state_curr)
 
-        for param in self.qf1.parameters():
+        for param in self.critic.parameters():
             param.requires_grad_(False)
 
-        qf1_pi_output_dict = self.qf1(state_curr, pi)
-        qf1_pi = qf1_pi_output_dict["output"]
-        qf1_pi = self.hl_gauss_loss(qf1_pi).unsqueeze(-1)
-        min_qf_pi = qf1_pi
-        actor_loss = -min_qf_pi.mean()
+        critic_pi_output_dict = self.critic(state_curr, pi)
+        critic_pi = critic_pi_output_dict["output"]
+        critic_pi = self.hl_gauss_loss(critic_pi).unsqueeze(-1)
+        actor_loss = -critic_pi.mean()
 
-        for param in self.qf1.parameters():
+        for param in self.critic.parameters():
             param.requires_grad_(True)
 
         # DACER2 loss (https://arxiv.org/abs/2505.23426)
@@ -141,8 +138,7 @@ class Network(nn.Module):
                 target /= target.norm(dim=1, keepdim=True) + 1e-8
                 return w_t * target
 
-        target1 = calc_target(self.qf1, actions)
-        target = target1
+        target = calc_target(self.critic, actions)
         noise = torch.randn_like(actions)
         noise = torch.clamp(noise, -3.0, 3.0)
         a_t = (1.0 - t) * noise + t * actions
@@ -155,7 +151,7 @@ class Network(nn.Module):
 
         activations_dict = {
             "actor": actor_output_dict["activation"],
-            "qf1": qf1_pi_output_dict["activation"],
+            "critic": critic_pi_output_dict["activation"],
         }
 
         info_dict = {
@@ -223,14 +219,14 @@ class SacAgent:
         self.monitoring_targets = {
             "total": self.network,
             "actor": self.network.actor,
-            "qf1": self.network.qf1,
+            "critic": self.network.critic,
         }
 
         # Initialize weight projection if enabled
         self.weight_projection_norms = {}
         if args.use_weight_projection:
             self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
-            self.weight_projection_norms["qf1"] = get_initial_norms(self.network.qf1)
+            self.weight_projection_norms["critic"] = get_initial_norms(self.network.critic)
 
         if args.enable_sequence_modeling:
             self.monitoring_targets["sequence_model"] = self.network.sequence_model
@@ -241,7 +237,7 @@ class SacAgent:
 
         self.metrics_computers = {
             "state": StatisticalMetricsComputer(),
-            "qf1": StatisticalMetricsComputer(),
+            "critic": StatisticalMetricsComputer(),
             "actor": StatisticalMetricsComputer(),
         }
 
@@ -334,7 +330,7 @@ class SacAgent:
         # Apply weight projection after optimizer step
         if self.use_weight_projection:
             weight_project(self.network.actor, self.weight_projection_norms["actor"])
-            weight_project(self.network.qf1, self.weight_projection_norms["qf1"])
+            weight_project(self.network.critic, self.weight_projection_norms["critic"])
 
             if self.enable_sequence_modeling:
                 weight_project(
@@ -344,7 +340,7 @@ class SacAgent:
         # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
         if self.apply_masks_during_training:
             apply_masks_during_training(self.network.actor)
-            apply_masks_during_training(self.network.qf1)
+            apply_masks_during_training(self.network.critic)
 
             if self.enable_sequence_modeling:
                 apply_masks_during_training(self.network.sequence_model)
