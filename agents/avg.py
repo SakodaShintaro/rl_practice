@@ -354,7 +354,7 @@ if __name__ == "__main__":
             step_data = {
                 "global_step": total_step,
                 "losses/actor_loss": stats["policy_loss"],
-                "losses/qf1_values": stats["q"],
+                "losses/critic_values": stats["q"],
                 "losses/alpha": stats["alpha"],
                 "losses/alpha_loss": stats["alpha_loss"],
             }
@@ -372,7 +372,7 @@ if __name__ == "__main__":
                 "episodic_length": ep_step,
                 "episodic_return": sum_reward,
                 "episodic_return_normed": sum_reward_normed,
-                "losses/qf1_loss": curr_ave_delta,
+                "losses/critic_loss": curr_ave_delta,
                 "losses/log_pi": curr_ave_lprob,
                 "global_step": total_step,
             }
