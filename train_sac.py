@@ -13,6 +13,7 @@ import pandas as pd
 import torch
 
 import wandb
+from agents.avg import AvgAgent
 from agents.sac import SacAgent
 from utils import concat_images
 from wrappers import make_env
@@ -21,7 +22,7 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
-    parser.add_argument("--agent_type", type=str, default="sac", choices=["sac"])
+    parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
@@ -31,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
     parser.add_argument("--sparsity", type=float, default=0.0)
+    parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
@@ -43,6 +45,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
     parser.add_argument("--enable_sequence_modeling", action="store_true")
+
+    # for AVG
+    parser.add_argument("--use_eligibility_trace", action="store_true")
+    parser.add_argument("--et_lambda", default=0.0, type=float)
     return parser.parse_args()
 
 
@@ -102,6 +108,8 @@ if __name__ == "__main__":
 
     if args.agent_type == "sac":
         agent = SacAgent(args, env.observation_space, env.action_space)
+    elif args.agent_type == "avg":
+        agent = AvgAgent(args, env.observation_space, env.action_space)
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
@@ -113,6 +121,7 @@ if __name__ == "__main__":
             curr_image_dir = None
 
         obs, _ = env.reset()
+        agent.initialize_for_episode()
         reward_list = []
 
         while True:
