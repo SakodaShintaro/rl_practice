@@ -115,7 +115,10 @@ class Network(nn.Module):
 
         critic_pi_output_dict = self.critic(state_curr, pi)
         critic_pi = critic_pi_output_dict["output"]
-        critic_pi = self.hl_gauss_loss(critic_pi).unsqueeze(-1)
+        if self.num_bins > 1:
+            critic_pi = self.hl_gauss_loss(critic_pi).unsqueeze(-1)
+        else:
+            critic_pi = critic_pi.unsqueeze(-1)
         actor_loss = -critic_pi.mean()
 
         for param in self.critic.parameters():
