@@ -20,7 +20,7 @@ import torch
 from hl_gauss_pytorch import HLGaussLoss
 
 import wandb
-from networks.backbone import AE, SmolVLAEncoder
+from networks.backbone import AE, SmolVLMEncoder
 from networks.sac_tanh_policy_and_q import SacQ, SacTanhPolicy
 from reward_processor import RewardProcessor
 from td_error_scaler import TDErrorScaler
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvla"])
+    parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvlm"])
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
@@ -63,8 +63,8 @@ class AVG:
 
         if args.image_encoder == "ae":
             self.encoder_image = AE()
-        elif args.image_encoder == "smolvla":
-            self.encoder_image = SmolVLAEncoder()
+        elif args.image_encoder == "smolvlm":
+            self.encoder_image = SmolVLMEncoder()
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
         self.encoder_image.to(device)
