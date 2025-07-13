@@ -89,7 +89,7 @@ class SmolVLMEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = "<image> Please drive in the lane."
+        self.prompt = "Drive the red car along the gray road. Do not leave the road or touch the green areas. <image>"
         self.output_dim = 576
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
@@ -135,7 +135,7 @@ class SmolVLAEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = "<image> Please drive in the lane."
+        self.prompt = "Drive the red car along the gray road. Do not leave the road or touch the green areas. <image>"
         self.output_dim = 576
 
     @torch.no_grad()
