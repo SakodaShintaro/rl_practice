@@ -11,7 +11,6 @@ from torch import optim
 
 from agents.sac import Network
 from replay_buffer import ReplayBufferData
-from td_error_scaler import TDErrorScaler
 
 
 # https://github.com/mohmdelsayed/streaming-drl/blob/main/stream_ac_continuous.py
@@ -28,6 +27,8 @@ class ObGD(torch.optim.Optimizer):
                 state = self.state[p]
                 if len(state) == 0:
                     state["eligibility_trace"] = torch.zeros_like(p.data)
+                if p.grad is None:
+                    continue
                 e = state["eligibility_trace"]
                 e.mul_(group["gamma"] * group["et_lambda"]).add_(p.grad, alpha=1.0)
                 z_sum += e.abs().sum().item()
@@ -63,6 +64,8 @@ class AdaptiveObGD(torch.optim.Optimizer):
                 if len(state) == 0:
                     state["eligibility_trace"] = torch.zeros_like(p.data)
                     state["v"] = torch.zeros_like(p.data)
+                if p.grad is None:
+                    continue
                 e, v = state["eligibility_trace"], state["v"]
                 e.mul_(group["gamma"] * group["et_lambda"]).add_(p.grad, alpha=1.0)
 
@@ -109,20 +112,17 @@ class AvgAgent:
             enable_sequence_modeling=enable_sequence_modeling,
         ).to(self.device)
 
-        # Use learning rates from AVG args
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=1e-4, weight_decay=1e-5)
-
         self.gamma = args.gamma
-        self.td_error_scaler = TDErrorScaler()
-        self.G = 0
 
         self.use_eligibility_trace = args.use_eligibility_trace
         self.et_lambda = args.et_lambda
 
-        with torch.no_grad():
-            self.eligibility_traces_q = [
-                torch.zeros_like(p, requires_grad=False) for p in self.network.critic.parameters()
-            ]
+        if self.use_eligibility_trace:
+            self.optimizer = AdaptiveObGD(
+                self.network.parameters(), lr=1e-5, gamma=self.gamma, et_lambda=self.et_lambda
+            )
+        else:
+            self.optimizer = optim.AdamW(self.network.parameters(), lr=1e-5, weight_decay=1e-5)
 
         # Initialize state tracking
         self._prev_obs = None
@@ -189,7 +189,11 @@ class AvgAgent:
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
 
-        self.optimizer.step()
+        if self.use_eligibility_trace:
+            delta = qf_info["delta"]
+            self.optimizer.step(delta, reset=done)
+        else:
+            self.optimizer.step()
 
         # Combine info from both losses
         for key, value in qf_info.items():
@@ -203,8 +207,3 @@ class AvgAgent:
         """Initialize for new episode."""
         self._prev_obs = None
         self._prev_action = None
-
-        # Reset eligibility traces
-        if self.use_eligibility_trace:
-            for et in self.eligibility_traces_q:
-                et.zero_()
