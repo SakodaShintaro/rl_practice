@@ -95,11 +95,10 @@ class SmolVLMEncoder(nn.Module):
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
-        images_np = images.cpu().numpy()
         model_inputs = (
             self.processor(
                 text=[self.prompt] * batch_size,
-                images=[[img] for img in images_np],
+                images=[[img] for img in images],
                 return_tensors="pt",
                 do_rescale=False,
                 padding=True,
@@ -142,11 +141,10 @@ class SmolVLAEncoder(nn.Module):
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
-        images_list = [images[i] for i in range(batch_size)]
         model_inputs = (
             self.processor(
                 text=[self.prompt] * batch_size,
-                images=images_list,
+                images=[[img] for img in images],
                 return_tensors="pt",
                 do_rescale=False,
                 padding=True,
