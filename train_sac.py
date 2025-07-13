@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
+    parser.add_argument("--num_bins", type=int, default=51)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--debug", action="store_true")

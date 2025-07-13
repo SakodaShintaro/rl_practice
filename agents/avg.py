@@ -103,7 +103,6 @@ class AvgAgent:
         seq_len = 2
         enable_sequence_modeling = False  # AVG doesn't use sequence modeling
         self.network = Network(
-            sparsity=args.sparsity,
             action_dim=self.action_dim,
             seq_len=seq_len,
             args=args,
@@ -122,7 +121,7 @@ class AvgAgent:
 
         with torch.no_grad():
             self.eligibility_traces_q = [
-                torch.zeros_like(p, requires_grad=False) for p in self.network.qf1.parameters()
+                torch.zeros_like(p, requires_grad=False) for p in self.network.critic.parameters()
             ]
 
         # Initialize state tracking
@@ -178,7 +177,7 @@ class AvgAgent:
         # Encode current state
         state_curr = self.network.encoder_image.encode(data.observations[:, -2])
 
-        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+        qf_loss, _, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
 
         # Combine losses (no sequence modeling for AVG)

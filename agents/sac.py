@@ -19,16 +19,15 @@ from sequence_modeling import SequenceModelingHelper, SequenceModelingModule
 class Network(nn.Module):
     def __init__(
         self,
-        sparsity: float,
         action_dim: int,
         seq_len: int,
         args,
         enable_sequence_modeling: bool,
     ):
         super(Network, self).__init__()
-        num_bins = 51
         self.gamma = 0.99
-        self.sparsity = sparsity
+        self.num_bins = args.num_bins
+        self.sparsity = args.sparsity
 
         self.action_dim = action_dim
         self.cnn_dim = 4 * 12 * 12  # 576
@@ -53,7 +52,7 @@ class Network(nn.Module):
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
-            num_bins=num_bins,
+            num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
 
@@ -63,41 +62,50 @@ class Network(nn.Module):
         else:
             self.sequence_model = None
 
-        self.hl_gauss_loss = HLGaussLoss(
-            min_value=-30,
-            max_value=+30,
-            num_bins=num_bins,
-            clamp_to_range=True,
-        )
+        if self.num_bins > 1:
+            self.hl_gauss_loss = HLGaussLoss(
+                min_value=-30,
+                max_value=+30,
+                num_bins=self.num_bins,
+                clamp_to_range=True,
+            )
 
     def compute_critic_loss(self, data, state_curr):
         with torch.no_grad():
             state_next = self.encoder_image.encode(data.observations[:, -1])
             next_state_actions, _, _ = self.actor.get_action(state_next)
-            critic_next_output_dict = self.critic(state_next, next_state_actions)
-            critic_next_target = critic_next_output_dict["output"]
-            critic_next_target = self.hl_gauss_loss(critic_next_target).view(-1)
+            next_critic_output_dict = self.critic(state_next, next_state_actions)
+            next_critic_value = next_critic_output_dict["output"]
+            if self.num_bins > 1:
+                next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
+            else:
+                next_critic_value = next_critic_value.view(-1)
             curr_reward = data.rewards[:, -2].flatten()
             curr_continue = 1 - data.dones[:, -2].flatten()
-            next_q_value = curr_reward + curr_continue * self.gamma * critic_next_target
+            target_value = curr_reward + curr_continue * self.gamma * next_critic_value
 
-        critic_output_dict = self.critic(state_curr, data.actions[:, -2])
+        curr_critic_output_dict = self.critic(state_curr, data.actions[:, -2])
 
-        critic_a_values = critic_output_dict["output"]
+        if self.num_bins > 1:
+            curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
+            critic_loss = self.hl_gauss_loss(curr_critic_output_dict["output"], target_value)
+        else:
+            curr_critic_value = curr_critic_output_dict["output"].view(-1)
+            critic_loss = F.mse_loss(curr_critic_value, target_value)
 
-        critic_loss = self.hl_gauss_loss(critic_a_values, next_q_value)
-        qf_loss = critic_loss
+        delta = target_value - curr_critic_value
 
         activations_dict = {}
 
         info_dict = {
+            "delta": delta.mean().item(),
             "critic_loss": critic_loss.item(),
-            "critic_values": critic_a_values.mean().item(),
-            "critic_next_target": critic_next_target.mean().item(),
-            "next_q_value": next_q_value.mean().item(),
+            "curr_critic_value": curr_critic_value.mean().item(),
+            "next_critic_value": next_critic_value.mean().item(),
+            "target_value": target_value.mean().item(),
         }
 
-        return qf_loss, activations_dict, info_dict
+        return critic_loss, delta, activations_dict, info_dict
 
     def compute_actor_loss(self, state_curr):
         pi, log_pi, _ = self.actor.get_action(state_curr)
@@ -127,7 +135,10 @@ class Network(nn.Module):
         def calc_target(q_network, actions):
             q_output_dict = q_network(state_curr, actions)
             q_values = q_output_dict["output"]
-            q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
+            if self.num_bins > 1:
+                q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
+            else:
+                q_values = q_values.unsqueeze(-1)
             q_grad = torch.autograd.grad(
                 outputs=q_values.sum(),
                 inputs=actions,
@@ -198,7 +209,6 @@ class SacAgent:
         self.apply_masks_during_training = args.apply_masks_during_training
 
         self.network = Network(
-            sparsity=args.sparsity,
             action_dim=self.action_dim,
             seq_len=seq_len,
             args=args,
@@ -294,7 +304,7 @@ class SacAgent:
         # Compute all losses using refactored methods
         state_curr = self.network.encoder_image.encode(data.observations[:, -2])
 
-        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+        qf_loss, _, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
         seq_loss, seq_activations, seq_info = self.network.compute_sequence_loss(data)
 
