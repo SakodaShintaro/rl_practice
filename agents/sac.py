@@ -72,7 +72,7 @@ class Network(nn.Module):
 
     def compute_critic_loss(self, data, state_curr):
         with torch.no_grad():
-            state_next = self.encoder_image.encode(data.observations[:, -1])
+            state_next = data.observations[:, -1]
             next_state_actions, _, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -223,7 +223,7 @@ class SacAgent:
         self.rb = ReplayBuffer(
             args.buffer_size,
             seq_len,
-            observation_space.shape,
+            (self.network.cnn_dim,),
             action_space.shape,
             self.device,
         )
@@ -264,10 +264,11 @@ class SacAgent:
         info_dict = {}
 
         obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
+        output_enc = self.network.encoder_image.encode(obs_tensor)
+
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
-            output_enc = self.network.encoder_image.encode(obs_tensor)
             action, selected_log_pi, _ = self.network.actor.get_action(output_enc)
             action = action[0].detach().cpu().numpy()
             action = action * self.action_scale + self.action_bias
@@ -285,6 +286,7 @@ class SacAgent:
         #         action, next_obs, self.network
         #     )
 
+        self.encoded_obs = output_enc
         return action, info_dict
 
     def process_env_feedback(
@@ -294,7 +296,7 @@ class SacAgent:
 
         reward /= 10.0
 
-        self.rb.add(obs, action, reward, termination or truncation)
+        self.rb.add(self.encoded_obs[0].cpu().numpy(), action, reward, termination or truncation)
 
         if global_step < self.learning_starts:
             return info_dict
@@ -305,7 +307,7 @@ class SacAgent:
         data = self.rb.sample(self.batch_size)
 
         # Compute all losses using refactored methods
-        state_curr = self.network.encoder_image.encode(data.observations[:, -2])
+        state_curr = data.observations[:, -2]
 
         qf_loss, _, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
