@@ -30,8 +30,11 @@ class BaseCNN(nn.Module):
             nn.Flatten(),  # -> (256,)
         )
 
-    def forward(self, x):
+    def encode(self, x):
         return self.features(x)
+
+    def forward(self, x):
+        return self.encode(x)
 
 
 class AE(nn.Module):
@@ -43,6 +46,9 @@ class AE(nn.Module):
     @torch.no_grad()
     def encode(self, x):
         return self.ae.encode(x).latents.flatten(1)
+
+    def forward(self, x):
+        return self.encode(x)
 
     @torch.no_grad()
     def decode(self, x):
@@ -58,6 +64,9 @@ class VAE(nn.Module):
 
     def encode(self, x):
         return self.vae.encode(x).latent_dist.sample().mul_(self.scale)
+
+    def forward(self, x):
+        return self.encode(x)
 
     def decode(self, x):
         return self.vae.decode(x / self.scale).sample
@@ -80,17 +89,16 @@ class SmolVLMEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = "<image> Please drive in the lane."
+        self.prompt = "Drive the red car along the gray road. Do not leave the road or touch the green areas. <image>"
         self.output_dim = 576
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
-        images_np = images.cpu().numpy()
         model_inputs = (
             self.processor(
                 text=[self.prompt] * batch_size,
-                images=[[img] for img in images_np],
+                images=[[img] for img in images],
                 return_tensors="pt",
                 do_rescale=False,
                 padding=True,
@@ -105,8 +113,11 @@ class SmolVLMEncoder(nn.Module):
         x = x.to(torch.float32)
         return x
 
+    def forward(self, x):
+        return self.encode(x)
 
-class SmolVLABackbone(nn.Module):
+
+class SmolVLAEncoder(nn.Module):
     def __init__(self, device=None) -> None:
         super().__init__()
         model_id = "HuggingFaceTB/SmolVLM-256M-Base"
@@ -123,18 +134,17 @@ class SmolVLABackbone(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = "<image> Please drive in the lane."
+        self.prompt = "Drive the red car along the gray road. Do not leave the road or touch the green areas. <image>"
         self.output_dim = 576
 
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
-        images_list = [images[i] for i in range(batch_size)]
         model_inputs = (
             self.processor(
                 text=[self.prompt] * batch_size,
-                images=images_list,
+                images=[[img] for img in images],
                 return_tensors="pt",
                 do_rescale=False,
                 padding=True,
@@ -151,6 +161,9 @@ class SmolVLABackbone(nn.Module):
         x = hidden[:, input_len - 1]
         x = x.to(torch.float32)
         return x
+
+    def forward(self, x):
+        return self.encode(x)
 
 
 if __name__ == "__main__":
@@ -186,7 +199,7 @@ if __name__ == "__main__":
     output = model_smolvlm.encode(x)
     print(output.shape)  # (1, 256)
 
-    model_smolvla = SmolVLABackbone(device=device)
+    model_smolvla = SmolVLAEncoder(device=device)
     print(f"SmolVLABackbone parameter count: {parameter_count(model_smolvla):,}")
     output = model_smolvla.encode(x)
     print(output.shape)  # (1, 256)

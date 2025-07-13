@@ -7,7 +7,7 @@ from torch import optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import AE, SmolVLABackbone
+from networks.backbone import AE, SmolVLMEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -37,8 +37,8 @@ class Network(nn.Module):
 
         if args.image_encoder == "ae":
             self.encoder_image = AE()
-        elif args.image_encoder == "smolvla":
-            self.encoder_image = SmolVLABackbone()
+        elif args.image_encoder == "smolvlm":
+            self.encoder_image = SmolVLMEncoder()
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
         self.actor = DiffusionPolicy(
