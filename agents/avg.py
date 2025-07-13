@@ -10,6 +10,8 @@ import torch
 from torch import optim
 
 from agents.sac import Network
+from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
+from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from replay_buffer import ReplayBufferData
 
 
@@ -117,6 +119,18 @@ class AvgAgent:
         self.use_eligibility_trace = args.use_eligibility_trace
         self.et_lambda = args.et_lambda
 
+        self.monitoring_targets = {
+            "total": self.network,
+            "actor": self.network.actor,
+            "critic": self.network.critic,
+        }
+
+        self.metrics_computers = {
+            "state": StatisticalMetricsComputer(),
+            "critic": StatisticalMetricsComputer(),
+            "actor": StatisticalMetricsComputer(),
+        }
+
         if self.use_eligibility_trace:
             self.optimizer = AdaptiveObGD(
                 self.network.parameters(), lr=1e-5, gamma=self.gamma, et_lambda=self.et_lambda
@@ -176,9 +190,14 @@ class AvgAgent:
 
         # Encode current state
         state_curr = self.network.encoder_image.encode(data.observations[:, -2])
-
         qf_loss, _, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
+
+        feature_dict = {
+            "state": state_curr,
+            **actor_activations,
+            **qf_activations,
+        }
 
         # Combine losses (no sequence modeling for AVG)
         loss = actor_loss + qf_loss
@@ -188,6 +207,16 @@ class AvgAgent:
 
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
+
+        grad_metrics = {
+            key: compute_gradient_norm(model) for key, model in self.monitoring_targets.items()
+        }
+        param_metrics = {
+            key: compute_parameter_norm(model) for key, model in self.monitoring_targets.items()
+        }
+        activation_norms = {
+            key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
+        }
 
         if self.use_eligibility_trace:
             delta = qf_info["delta"]
@@ -200,6 +229,24 @@ class AvgAgent:
             info_dict[f"losses/{key}"] = value
         for key, value in actor_info.items():
             info_dict[f"losses/{key}"] = value
+
+        # Add gradient norm metrics
+        for key, value in grad_metrics.items():
+            info_dict[f"gradients/{key}"] = value
+
+        # Add parameter norm metrics
+        for key, value in param_metrics.items():
+            info_dict[f"parameters/{key}"] = value
+
+        # Add activation norms
+        for key, value in activation_norms.items():
+            info_dict[f"activation_norms/{key}"] = value
+
+        # Trigger statistical metrics computation
+        for feature_name, feature in feature_dict.items():
+            result_dict = self.metrics_computers[feature_name](feature)
+            for key, value in result_dict.items():
+                info_dict[f"{key}/{feature_name}"] = value
 
         return info_dict
 
