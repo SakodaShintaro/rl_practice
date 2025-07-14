@@ -152,7 +152,7 @@ if __name__ == "__main__":
 
             # process environment feedback
             feedback_info = agent.process_env_feedback(
-                global_step, obs, action, reward, termination, truncation
+                global_step, next_obs, action, reward, termination, truncation
             )
 
             obs = next_obs

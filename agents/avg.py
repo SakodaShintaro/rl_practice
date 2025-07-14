@@ -148,7 +148,7 @@ class AvgAgent:
         action, log_prob, _ = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
-        self._prev_obs = obs
+        self._prev_obs = obs_encoded
         self._prev_action = action
 
         action = action[0].detach().cpu().numpy()
@@ -156,22 +156,17 @@ class AvgAgent:
         action = np.clip(action, self.action_low, self.action_high)
         return action, {"selected_log_pi": log_prob[0].item()}
 
-    def process_env_feedback(self, global_step, obs, action, reward, termination, truncation):
+    def process_env_feedback(self, global_step, next_obs, action, reward, termination, truncation):
         info_dict = {}
 
         reward /= 10.0
 
-        # Create ReplayBufferData for SAC's loss computation
         done = termination or truncation
 
-        # Create batch data with seq_len=2 format that SAC expects
-        observations = torch.stack(
-            [
-                torch.Tensor(self._prev_obs).unsqueeze(0),
-                torch.Tensor(obs).unsqueeze(0),
-            ],
-            dim=1,
-        ).to(self.device)  # [batch_size=1, seq_len=2, obs_dim]
+        next_obs = torch.Tensor(next_obs).unsqueeze(0).to(self.device)
+        self._next_obs = self.network.encoder_image.encode(next_obs)
+
+        observations = torch.stack([self._prev_obs, self._next_obs], dim=1).to(self.device)
 
         actions = torch.stack(
             [
@@ -189,7 +184,7 @@ class AvgAgent:
         )
 
         # Encode current state
-        state_curr = self.network.encoder_image.encode(data.observations[:, -2])
+        state_curr = data.observations[:, -2]
         qf_loss, _, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
 

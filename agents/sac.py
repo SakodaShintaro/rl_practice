@@ -290,7 +290,7 @@ class SacAgent:
         return action, info_dict
 
     def process_env_feedback(
-        self, global_step, obs, action, reward, termination, truncation
+        self, global_step, next_obs, action, reward, termination, truncation
     ) -> dict:
         info_dict = {}
 
