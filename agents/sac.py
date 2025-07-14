@@ -73,7 +73,7 @@ class Network(nn.Module):
     def compute_critic_loss(self, data, state_curr):
         with torch.no_grad():
             state_next = data.observations[:, -1]
-            next_state_actions, _, _ = self.actor.get_action(state_next)
+            next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
             if self.num_bins > 1:
@@ -108,7 +108,7 @@ class Network(nn.Module):
         return critic_loss, delta, activations_dict, info_dict
 
     def compute_actor_loss(self, state_curr):
-        pi, log_pi, _ = self.actor.get_action(state_curr)
+        pi, log_pi = self.actor.get_action(state_curr)
 
         for param in self.critic.parameters():
             param.requires_grad_(False)
@@ -269,7 +269,7 @@ class SacAgent:
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
-            action, selected_log_pi, _ = self.network.actor.get_action(output_enc)
+            action, selected_log_pi = self.network.actor.get_action(output_enc)
             action = action[0].detach().cpu().numpy()
             action = action * self.action_scale + self.action_bias
 

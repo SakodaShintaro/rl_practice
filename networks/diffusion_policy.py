@@ -116,8 +116,8 @@ class DiffusionPolicy(nn.Module):
 
             sys.exit(1)
 
-        dummy = torch.zeros((bs, 1), device=x.device)
-        return action, dummy, dummy
+        dummy_log_p = torch.zeros((bs, 1), device=x.device)
+        return action, dummy_log_p
 
 
 class DiffusionStatePredictor(nn.Module):
@@ -187,5 +187,5 @@ class DiffusionStatePredictor(nn.Module):
 
             sys.exit(1)
 
-        dummy = torch.zeros((bs, 1), device=input_token.device)
-        return target, dummy, dummy
+        dummy_log_p = torch.zeros((bs, 1), device=input_token.device)
+        return target, dummy_log_p
