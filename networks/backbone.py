@@ -72,61 +72,16 @@ class VAE(nn.Module):
         return self.vae.decode(x / self.scale).sample
 
 
-class SmolVLMEncoder(nn.Module):
-    def __init__(self, device=None) -> None:
+class BaseSmolEncoder(nn.Module):
+    def __init__(self, model_id: str, model_class, device=None) -> None:
         super().__init__()
-        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
+
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_id,
-            torch_dtype=torch.bfloat16,
-            _attn_implementation=attn_impl,
-            cache_dir="./cache",
-            device_map=device,
-        )
-        self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = "Drive the red car along the gray road. Do not leave the road or touch the green areas. <image>"
-        self.output_dim = 576
-
-    def encode(self, images: torch.Tensor) -> torch.Tensor:
-        device = images.device
-        batch_size = images.shape[0]
-        model_inputs = (
-            self.processor(
-                text=[self.prompt] * batch_size,
-                images=[[img] for img in images],
-                return_tensors="pt",
-                do_rescale=False,
-                padding=True,
-            )
-            .to(torch.bfloat16)
-            .to(device)
-        )
-        input_len = model_inputs["input_ids"].shape[-1]
-        outputs = self.model.forward(**model_inputs, output_hidden_states=True)
-        hidden = outputs["hidden_states"][-1]
-        x = hidden[:, input_len - 1]
-        x = x.to(torch.float32)
-        return x
-
-    def forward(self, x):
-        return self.encode(x)
-
-
-class SmolVLAEncoder(nn.Module):
-    def __init__(self, device=None) -> None:
-        super().__init__()
-        model_id = "HuggingFaceTB/SmolVLM-256M-Base"
-        attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        self.model = AutoModelForVision2Seq.from_pretrained(
+        self.model = model_class.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
@@ -153,10 +108,7 @@ class SmolVLAEncoder(nn.Module):
             .to(device)
         )
         input_len = model_inputs["input_ids"].shape[-1]
-        outputs = self.model.forward(
-            **model_inputs,
-            output_hidden_states=True,
-        )
+        outputs = self.model.forward(**model_inputs, output_hidden_states=True)
         hidden = outputs["hidden_states"][-1]
         x = hidden[:, input_len - 1]
         x = x.to(torch.float32)
@@ -164,6 +116,24 @@ class SmolVLAEncoder(nn.Module):
 
     def forward(self, x):
         return self.encode(x)
+
+
+class SmolVLMEncoder(BaseSmolEncoder):
+    def __init__(self, device=None) -> None:
+        super().__init__(
+            model_id="HuggingFaceTB/SmolVLM2-256M-Video-Instruct",
+            model_class=AutoModelForImageTextToText,
+            device=device,
+        )
+
+
+class SmolVLAEncoder(BaseSmolEncoder):
+    def __init__(self, device=None) -> None:
+        super().__init__(
+            model_id="HuggingFaceTB/SmolVLM-256M-Base",
+            model_class=AutoModelForVision2Seq,
+            device=device,
+        )
 
 
 if __name__ == "__main__":
@@ -197,9 +167,9 @@ if __name__ == "__main__":
     model_smolvlm = SmolVLMEncoder(device=device)
     print(f"SmolVLMEncoder parameter count: {parameter_count(model_smolvlm):,}")
     output = model_smolvlm.encode(x)
-    print(output.shape)  # (1, 256)
+    print(output.shape)  # (1, 576)
 
     model_smolvla = SmolVLAEncoder(device=device)
-    print(f"SmolVLABackbone parameter count: {parameter_count(model_smolvla):,}")
+    print(f"SmolVLAEncoder parameter count: {parameter_count(model_smolvla):,}")
     output = model_smolvla.encode(x)
-    print(output.shape)  # (1, 256)
+    print(output.shape)  # (1, 576)
