@@ -302,13 +302,6 @@ class SacAgent:
         for key, value in critic_info.items():
             info_dict[f"losses/{key}"] = value
 
-        # Combine all activations for feature_dict
-        feature_dict = {
-            "state": state_curr,
-            **actor_activations,
-            **critic_activations,
-        }
-
         # optimize the model
         loss = actor_loss + critic_loss
         self.optimizer.zero_grad()
@@ -317,26 +310,10 @@ class SacAgent:
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
 
-        # Gradient norms
-        grad_metrics = {
-            key: compute_gradient_norm(model) for key, model in self.monitoring_targets.items()
-        }
-        for key, value in grad_metrics.items():
-            info_dict[f"gradients/{key}"] = value
-
-        # Parameter norms
-        param_metrics = {
-            key: compute_parameter_norm(model) for key, model in self.monitoring_targets.items()
-        }
-        for key, value in param_metrics.items():
-            info_dict[f"parameters/{key}"] = value
-
-        # Activation norms
-        activation_norms = {
-            key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
-        }
-        for key, value in activation_norms.items():
-            info_dict[f"activation_norms/{key}"] = value
+        # Gradient and parameter norms
+        for key, value in self.monitoring_targets.items():
+            info_dict[f"gradients/{key}"] = compute_gradient_norm(value)
+            info_dict[f"parameters/{key}"] = compute_parameter_norm(value)
 
         self.optimizer.step()
 
@@ -350,8 +327,15 @@ class SacAgent:
             apply_masks_during_training(self.network.actor)
             apply_masks_during_training(self.network.critic)
 
-        # Trigger statistical metrics computation
+        # Feature metrics
+        feature_dict = {
+            "state": state_curr,
+            **actor_activations,
+            **critic_activations,
+        }
         for feature_name, feature in feature_dict.items():
+            info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
+
             result_dict = self.metrics_computers[feature_name](feature)
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
