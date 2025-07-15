@@ -13,7 +13,7 @@ from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
-from sequence_modeling import SequenceModelingHelper, SequenceModelingModule
+from sequence_modeling import SequenceModelingModule
 
 
 class Network(nn.Module):
@@ -193,8 +193,6 @@ class SacAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         seq_len = 2
-        if args.enable_sequence_modeling:
-            assert seq_len >= 2, "seq_len must be >= 2 for sequence modeling"
 
         # action properties
         self.action_space = action_space
@@ -204,7 +202,6 @@ class SacAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
 
-        self.enable_sequence_modeling = args.enable_sequence_modeling
         self.learning_starts = args.learning_starts
         self.action_noise = args.action_noise
         self.batch_size = args.batch_size
@@ -215,7 +212,7 @@ class SacAgent:
             action_dim=self.action_dim,
             seq_len=seq_len,
             args=args,
-            enable_sequence_modeling=args.enable_sequence_modeling,
+            enable_sequence_modeling=False,
         ).to(self.device)
         lr = 1e-4
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
@@ -241,13 +238,6 @@ class SacAgent:
             self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
             self.weight_projection_norms["critic"] = get_initial_norms(self.network.critic)
 
-        if args.enable_sequence_modeling:
-            self.monitoring_targets["sequence_model"] = self.network.sequence_model
-            self.weight_projection_norms["sequence_model"] = get_initial_norms(
-                self.network.sequence_model
-            )
-            self.sequence_helper = SequenceModelingHelper(seq_len, self.device)
-
         self.metrics_computers = {
             "state": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
@@ -255,9 +245,7 @@ class SacAgent:
         }
 
     def initialize_for_episode(self):
-        # Initialize sequence modeling lists if enabled
-        if self.enable_sequence_modeling:
-            self.sequence_helper.initialize_lists(self.action_dim)
+        return
 
     @torch.inference_mode()
     def select_action(self, global_step, obs):
@@ -278,13 +266,6 @@ class SacAgent:
             action = (1 - c) * action + c * action_noise
             action = np.clip(action, self.action_low, self.action_high)
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
-
-        # Update sequence modeling lists
-        # if self.enable_sequence_modeling:
-        #     self.sequence_helper.update_lists(obs_tensor, reward, action)
-        #     curr_obs_float, pred_obs_float = self.sequence_helper.predict_next_state(
-        #         action, next_obs, self.network
-        #     )
 
         self.encoded_obs = output_enc
         return action, info_dict
@@ -347,18 +328,10 @@ class SacAgent:
             weight_project(self.network.actor, self.weight_projection_norms["actor"])
             weight_project(self.network.critic, self.weight_projection_norms["critic"])
 
-            if self.enable_sequence_modeling:
-                weight_project(
-                    self.network.sequence_model, self.weight_projection_norms["sequence_model"]
-                )
-
         # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
         if self.apply_masks_during_training:
             apply_masks_during_training(self.network.actor)
             apply_masks_during_training(self.network.critic)
-
-            if self.enable_sequence_modeling:
-                apply_masks_during_training(self.network.sequence_model)
 
         # Add loss information from compute methods
         for key, value in qf_info.items():

@@ -106,12 +106,11 @@ class AvgAgent:
 
         # Use SAC's Network class
         seq_len = 2
-        enable_sequence_modeling = False  # AVG doesn't use sequence modeling
         self.network = Network(
             action_dim=self.action_dim,
             seq_len=seq_len,
             args=args,
-            enable_sequence_modeling=enable_sequence_modeling,
+            enable_sequence_modeling=False,
         ).to(self.device)
 
         self.gamma = args.gamma
