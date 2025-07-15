@@ -33,7 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--critic_block_num", type=int, default=1)
     parser.add_argument("--num_bins", type=int, default=51)
     parser.add_argument("--sparsity", type=float, default=0.0)
-    parser.add_argument("--gamma", default=0.99, type=float)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--step_limit", type=int, default=200_000)
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
@@ -59,6 +60,7 @@ if __name__ == "__main__":
         args.off_wandb = True
         args.learning_starts = 10
         args.render = 0
+        args.step_limit = 100
 
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
@@ -101,7 +103,7 @@ if __name__ == "__main__":
     score_list = []
     obs, _ = env.reset(seed=seed)
     curr_image_dir = None
-    step_limit = 200_000
+    step_limit = args.step_limit
 
     # Initialize dummy prediction images
     curr_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
