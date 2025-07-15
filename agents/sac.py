@@ -105,7 +105,7 @@ class Network(nn.Module):
             "target_value": target_value.mean().item(),
         }
 
-        return critic_loss, delta, activations_dict, info_dict
+        return critic_loss, activations_dict, info_dict
 
     def compute_actor_loss(self, state_curr):
         pi, log_pi = self.actor.get_action(state_curr)
@@ -240,8 +240,8 @@ class SacAgent:
 
         self.metrics_computers = {
             "state": StatisticalMetricsComputer(),
-            "critic": StatisticalMetricsComputer(),
             "actor": StatisticalMetricsComputer(),
+            "critic": StatisticalMetricsComputer(),
         }
 
     def initialize_for_episode(self):
@@ -290,7 +290,7 @@ class SacAgent:
         # Compute all losses using refactored methods
         state_curr = data.observations[:, -2]
 
-        qf_loss, _, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
         seq_loss, seq_activations, seq_info = self.network.compute_sequence_loss(data)
 
