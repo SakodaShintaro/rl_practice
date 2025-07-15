@@ -290,36 +290,53 @@ class SacAgent:
         # Compute all losses using refactored methods
         state_curr = data.observations[:, -2]
 
-        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+        # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
-        seq_loss, seq_activations, seq_info = self.network.compute_sequence_loss(data)
+        for key, value in actor_info.items():
+            info_dict[f"losses/{key}"] = value
+
+        # Critic
+        critic_loss, critic_activations, critic_info = self.network.compute_critic_loss(
+            data, state_curr
+        )
+        for key, value in critic_info.items():
+            info_dict[f"losses/{key}"] = value
 
         # Combine all activations for feature_dict
         feature_dict = {
             "state": state_curr,
             **actor_activations,
-            **qf_activations,
-            **seq_activations,
+            **critic_activations,
         }
 
         # optimize the model
-        loss = actor_loss + qf_loss + seq_loss
+        loss = actor_loss + critic_loss
         self.optimizer.zero_grad()
         loss.backward()
 
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
 
-        # Compute gradient and parameter norms
+        # Gradient norms
         grad_metrics = {
             key: compute_gradient_norm(model) for key, model in self.monitoring_targets.items()
         }
+        for key, value in grad_metrics.items():
+            info_dict[f"gradients/{key}"] = value
+
+        # Parameter norms
         param_metrics = {
             key: compute_parameter_norm(model) for key, model in self.monitoring_targets.items()
         }
+        for key, value in param_metrics.items():
+            info_dict[f"parameters/{key}"] = value
+
+        # Activation norms
         activation_norms = {
             key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
         }
+        for key, value in activation_norms.items():
+            info_dict[f"activation_norms/{key}"] = value
 
         self.optimizer.step()
 
@@ -332,30 +349,6 @@ class SacAgent:
         if self.apply_masks_during_training:
             apply_masks_during_training(self.network.actor)
             apply_masks_during_training(self.network.critic)
-
-        # Add loss information from compute methods
-        for key, value in qf_info.items():
-            info_dict[f"losses/{key}"] = value
-
-        for key, value in actor_info.items():
-            info_dict[f"losses/{key}"] = value
-
-        for key, value in seq_info.items():
-            info_dict[f"losses/{key}"] = value
-
-        info_dict["losses/qf_loss"] = qf_loss
-
-        # Add gradient norm metrics
-        for key, value in grad_metrics.items():
-            info_dict[f"gradients/{key}"] = value
-
-        # Add parameter norm metrics
-        for key, value in param_metrics.items():
-            info_dict[f"parameters/{key}"] = value
-
-        # Add activation norms
-        for key, value in activation_norms.items():
-            info_dict[f"activation_norms/{key}"] = value
 
         # Trigger statistical metrics computation
         for feature_name, feature in feature_dict.items():
