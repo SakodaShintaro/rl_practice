@@ -103,6 +103,7 @@ class AvgAgent:
         self.action_high = action_space.high
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
+        self.action_norm_penalty = args.action_norm_penalty
 
         # Use SAC's Network class
         seq_len = 2
@@ -158,7 +159,10 @@ class AvgAgent:
     def process_env_feedback(self, global_step, next_obs, action, reward, termination, truncation):
         info_dict = {}
 
-        reward /= 10.0
+        action_norm = np.linalg.norm(action)
+        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
+        info_dict["action_norm"] = action_norm
+        info_dict["train_reward"] = train_reward
 
         done = termination or truncation
 
@@ -175,7 +179,9 @@ class AvgAgent:
             dim=0,
         ).unsqueeze(0)  # [batch_size=1, seq_len=2, action_dim]
 
-        rewards = torch.tensor([[reward, reward]], device=self.device, dtype=torch.float32)
+        rewards = torch.tensor(
+            [[train_reward, train_reward]], device=self.device, dtype=torch.float32
+        )
         dones = torch.tensor([[done, done]], device=self.device, dtype=torch.float32)
 
         data = ReplayBufferData(

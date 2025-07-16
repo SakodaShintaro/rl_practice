@@ -201,6 +201,7 @@ class SacAgent:
         self.action_high = action_space.high
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
+        self.action_norm_penalty = args.action_norm_penalty
 
         self.learning_starts = args.learning_starts
         self.action_noise = args.action_noise
@@ -275,9 +276,14 @@ class SacAgent:
     ) -> dict:
         info_dict = {}
 
-        reward /= 10.0
+        action_norm = np.linalg.norm(action)
+        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
+        info_dict["action_norm"] = action_norm
+        info_dict["train_reward"] = train_reward
 
-        self.rb.add(self.encoded_obs[0].cpu().numpy(), action, reward, termination or truncation)
+        self.rb.add(
+            self.encoded_obs[0].cpu().numpy(), action, train_reward, termination or truncation
+        )
 
         if global_step < self.learning_starts:
             return info_dict
