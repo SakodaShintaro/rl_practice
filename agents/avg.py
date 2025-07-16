@@ -184,60 +184,47 @@ class AvgAgent:
 
         # Encode current state
         state_curr = data.observations[:, -2]
-        qf_loss, qf_activations, qf_info = self.network.compute_critic_loss(data, state_curr)
+
+        # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
+        for key, value in actor_info.items():
+            info_dict[f"losses/{key}"] = value
 
-        feature_dict = {
-            "state": state_curr,
-            **actor_activations,
-            **qf_activations,
-        }
+        # Critic
+        critic_loss, critic_activations, critic_info = self.network.compute_critic_loss(
+            data, state_curr
+        )
+        for key, value in critic_info.items():
+            info_dict[f"losses/{key}"] = value
 
-        # Combine losses (no sequence modeling for AVG)
-        loss = actor_loss + qf_loss
-
+        # optimize the model
+        loss = actor_loss + critic_loss
         self.optimizer.zero_grad()
         loss.backward()
 
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
 
-        grad_metrics = {
-            key: compute_gradient_norm(model) for key, model in self.monitoring_targets.items()
-        }
-        param_metrics = {
-            key: compute_parameter_norm(model) for key, model in self.monitoring_targets.items()
-        }
-        activation_norms = {
-            key: value.norm(dim=1).mean().item() for key, value in feature_dict.items()
-        }
+        # Gradient and parameter norms
+        for key, value in self.monitoring_targets.items():
+            info_dict[f"gradients/{key}"] = compute_gradient_norm(value)
+            info_dict[f"parameters/{key}"] = compute_parameter_norm(value)
 
         if self.use_eligibility_trace:
-            delta = qf_info["delta"]
+            delta = critic_info["delta"]
             self.optimizer.step(delta, reset=done)
         else:
             self.optimizer.step()
 
-        # Combine info from both losses
-        for key, value in qf_info.items():
-            info_dict[f"losses/{key}"] = value
-        for key, value in actor_info.items():
-            info_dict[f"losses/{key}"] = value
-
-        # Add gradient norm metrics
-        for key, value in grad_metrics.items():
-            info_dict[f"gradients/{key}"] = value
-
-        # Add parameter norm metrics
-        for key, value in param_metrics.items():
-            info_dict[f"parameters/{key}"] = value
-
-        # Add activation norms
-        for key, value in activation_norms.items():
-            info_dict[f"activation_norms/{key}"] = value
-
-        # Trigger statistical metrics computation
+        # Feature metrics
+        feature_dict = {
+            "state": state_curr,
+            **actor_activations,
+            **critic_activations,
+        }
         for feature_name, feature in feature_dict.items():
+            info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
+
             result_dict = self.metrics_computers[feature_name](feature)
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
