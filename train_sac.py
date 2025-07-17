@@ -103,7 +103,6 @@ if __name__ == "__main__":
     global_step = 0
     score_list = []
     obs, _ = env.reset(seed=seed)
-    curr_image_dir = None
     step_limit = args.step_limit
 
     # Initialize dummy prediction images
@@ -118,15 +117,10 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
     for episode_id in range(10000):
-        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
-            curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
-            curr_image_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            curr_image_dir = None
-
         obs, _ = env.reset()
         agent.initialize_for_episode()
         reward_list = []
+        curr_image_list = [concat_images(env.render(), curr_obs_float, pred_obs_float)]
 
         while True:
             global_step += 1
@@ -138,14 +132,11 @@ if __name__ == "__main__":
             next_obs, reward, termination, truncation, env_info = env.step(action)
 
             # render
+            bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
+            curr_image_list.append(bgr_array)
             if args.render:
-                bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
                 cv2.imshow("CarRacing", bgr_array)
                 cv2.waitKey(1)
-
-            if curr_image_dir is not None:
-                bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
-                cv2.imwrite(str(curr_image_dir / f"{global_step:08d}.png"), bgr_array)
 
             if termination or truncation:
                 break
@@ -200,6 +191,12 @@ if __name__ == "__main__":
             print(
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
             )
+
+        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
+            curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
+            curr_image_dir.mkdir(parents=True, exist_ok=True)
+            for i, img in enumerate(curr_image_list):
+                cv2.imwrite(str(curr_image_dir / f"{i:08d}.png"), img)
 
         episode_id += 1
 
