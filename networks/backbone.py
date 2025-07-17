@@ -207,15 +207,6 @@ class SmolVLMEncoder(BaseSmolEncoder):
         )
 
 
-class SmolVLAEncoder(BaseSmolEncoder):
-    def __init__(self, device=None) -> None:
-        super().__init__(
-            model_id="HuggingFaceTB/SmolVLM-256M-Base",
-            model_class=AutoModelForVision2Seq,
-            device=device,
-        )
-
-
 if __name__ == "__main__":
     import torch
 
@@ -247,9 +238,4 @@ if __name__ == "__main__":
     model_smolvlm = SmolVLMEncoder(device=device)
     print(f"SmolVLMEncoder parameter count: {parameter_count(model_smolvlm):,}")
     output = model_smolvlm.encode(x)
-    print(output.shape)  # (1, 576)
-
-    model_smolvla = SmolVLAEncoder(device=device)
-    print(f"SmolVLAEncoder parameter count: {parameter_count(model_smolvla):,}")
-    output = model_smolvla.encode(x)
     print(output.shape)  # (1, 576)
