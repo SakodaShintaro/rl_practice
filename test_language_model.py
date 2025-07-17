@@ -45,41 +45,17 @@ print(f"Using device: {device}")
 print("Initializing SmolVLMEncoder...")
 encoder = SmolVLMEncoder(device=device)
 
-# 個別画像の説明を生成
-print("\nGenerating descriptions for individual images...")
-individual_descriptions = encoder.describe_image_sequence(images_sequence)
+# 説明を生成
+prompt = (
+    "This is a video of Gymnasium's CarRacing-v3. "
+    "You are the red car, and your goal is to follow the grey road. "
+    "You must not go off the road indicated by the green. "
+    "Choose your action from turn right, go straight, or turn left."
+)
+descriptions = encoder.describe(images_sequence, prompt)
 
-# 結果を表示
-print("\n" + "=" * 50)
-print("Individual Image Descriptions:")
-print("=" * 50)
-for i, (image_path, description) in enumerate(zip(image_path_list, individual_descriptions)):
-    print(f"\nImage {i + 1}: {image_path.name}")
-    print(f"Description: {description}")
-    print("-" * 30)
-
-# 累積シーケンスの説明を生成
-print("\n" + "=" * 50)
-print("Cumulative Sequence Descriptions:")
-print("=" * 50)
-cumulative_prompt = "Analyze these driving game screenshots and describe what happens"
-cumulative_descriptions = encoder.describe_cumulative_sequence(images_sequence, cumulative_prompt)
-
-for i, (description) in enumerate(cumulative_descriptions):
+for i, (description) in enumerate(descriptions):
     images_in_sequence = i + 1
     image_names = [path.name for path in image_path_list[:images_in_sequence]]
-    print(f"\nCumulative sequence {i + 1} (Images: {', '.join(image_names)}):")
     print(f"Description: {description}")
-    print("-" * 30)
-
-# カスタムプロンプトでの説明生成も試してみる
-print("\n" + "=" * 50)
-print("Custom Prompt Descriptions (Individual):")
-print("=" * 50)
-custom_prompt = "What is happening in this driving scene? <image>"
-custom_descriptions = encoder.describe_image_sequence(images_sequence, custom_prompt)
-
-for i, (image_path, description) in enumerate(zip(image_path_list, custom_descriptions)):
-    print(f"\nImage {i + 1}: {image_path.name}")
-    print(f"Custom Description: {description}")
     print("-" * 30)

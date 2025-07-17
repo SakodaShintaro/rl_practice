@@ -118,90 +118,7 @@ class BaseSmolEncoder(nn.Module):
         return self.encode(x)
 
     @torch.no_grad()
-    def generate_text(self, images: torch.Tensor, prompt: str = None) -> list[str]:
-        """Generate text descriptions from images.
-
-        Args:
-            images: Tensor of images with shape (batch_size, 3, height, width)
-            prompt: Optional custom prompt. If None, uses default prompt.
-
-        Returns:
-            List of generated text descriptions
-        """
-        device = images.device
-        batch_size = images.shape[0]
-
-        if prompt is None:
-            prompt = self.prompt
-
-        # Convert images to PIL format for processor
-        from PIL import Image
-
-        pil_images = []
-        for img in images:
-            # Convert tensor to PIL Image
-            img_np = img.permute(1, 2, 0).cpu().numpy()
-            img_np = (img_np * 255).astype("uint8")
-            pil_img = Image.fromarray(img_np)
-            pil_images.append(pil_img)
-
-        generated_texts = []
-
-        # Process each image individually
-        for i, pil_img in enumerate(pil_images):
-            model_inputs = self.processor(
-                text=prompt,
-                images=pil_img,
-                return_tensors="pt",
-                padding=True,
-            )
-
-            # Move all inputs to the same device as the model and convert to bfloat16
-            model_inputs = {
-                k: v.to(device).to(torch.bfloat16) if v.dtype == torch.float32 else v.to(device)
-                for k, v in model_inputs.items()
-            }
-
-            # Generate text
-            outputs = self.model.generate(
-                **model_inputs,
-                max_new_tokens=128,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                pad_token_id=self.processor.tokenizer.eos_token_id,
-            )
-
-            # Decode the generated text
-            input_length = model_inputs["input_ids"].shape[1]
-            generated_tokens = outputs[0][input_length:]
-            generated_text = self.processor.tokenizer.decode(
-                generated_tokens, skip_special_tokens=True
-            )
-            generated_texts.append(generated_text)
-
-        return generated_texts
-
-    @torch.no_grad()
-    def describe_image_sequence(self, images: torch.Tensor, custom_prompt: str = None) -> list[str]:
-        """Generate descriptions for a sequence of images.
-
-        Args:
-            images: Tensor of images with shape (batch_size, 3, height, width)
-            custom_prompt: Optional custom prompt for description generation
-
-        Returns:
-            List of generated descriptions for each image
-        """
-        if custom_prompt is None:
-            custom_prompt = "Describe what you see in this image: <image>"
-
-        return self.generate_text(images, custom_prompt)
-
-    @torch.no_grad()
-    def describe_cumulative_sequence(
-        self, images: torch.Tensor, custom_prompt: str = None
-    ) -> list[str]:
+    def describe(self, images: torch.Tensor, custom_prompt: str) -> list[str]:
         """Generate descriptions for cumulative image sequences.
 
         1st call: describes image 1
@@ -234,32 +151,23 @@ class BaseSmolEncoder(nn.Module):
 
         # Process cumulative sequences: 1 image, then 1-2 images, then 1-3 images, etc.
         for i in range(sequence_length):
-            current_images = pil_images[
-                : i + 1
-            ]  # 1st iteration: [0], 2nd: [0,1], 3rd: [0,1,2], etc.
-            num_images = len(current_images)
+            current_images = pil_images[: i + 1]
 
-            # Create prompt with appropriate number of <image> tokens
-            if custom_prompt is None:
-                if num_images == 1:
-                    prompt = "I will now show you a video of Gymnasium's CarRacing-v3. You are the red car, and your goal is to follow the grey road. You must not go off the road indicated by the green. Choose your action from turn right, go straight, or turn left.: <image>"
-                else:
-                    prompt = (
-                        f"I will now show you a video of Gymnasium's CarRacing-v3. You are the red car, and your goal is to follow the grey road. You must not go off the road indicated by the green. Choose your action from turn right, go straight, or turn left."
-                        + " <image>" * num_images
-                    )
-            else:
-                # Replace single <image> token with multiple tokens based on number of images
-                if "<image>" in custom_prompt:
-                    prompt = custom_prompt.replace("<image>", " <image>" * num_images)
-                else:
-                    prompt = custom_prompt + " <image>" * num_images
+            # Create messages in the correct chat format
+            content = []
+            for img in current_images:
+                content.append({"type": "image", "image": img})
+            content.append({"type": "text", "text": custom_prompt})
 
-            model_inputs = self.processor(
-                text=prompt,
-                images=current_images,
+            messages = [{"role": "user", "content": content}]
+
+            # Use apply_chat_template for proper formatting
+            model_inputs = self.processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
                 return_tensors="pt",
-                padding=True,
             )
 
             # Move all inputs to the same device as the model and convert to bfloat16
@@ -281,6 +189,7 @@ class BaseSmolEncoder(nn.Module):
             # Decode the generated text
             input_length = model_inputs["input_ids"].shape[1]
             generated_tokens = outputs[0][input_length:]
+
             generated_text = self.processor.tokenizer.decode(
                 generated_tokens, skip_special_tokens=True
             )
