@@ -63,9 +63,10 @@ class Network(nn.Module):
             self.sequence_model = None
 
         if self.num_bins > 1:
+            value_range = 60
             self.hl_gauss_loss = HLGaussLoss(
-                min_value=-30,
-                max_value=+30,
+                min_value=-value_range,
+                max_value=+value_range,
                 num_bins=self.num_bins,
                 clamp_to_range=True,
             )
