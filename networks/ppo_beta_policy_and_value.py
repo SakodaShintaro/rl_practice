@@ -2,14 +2,14 @@ import torch
 from torch import nn
 from torch.distributions import Beta
 
-from .sequence_processor import SequenceProcessor
+from .backbone import AE
 
 
 class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int, seq_len: int) -> None:
         super().__init__()
-        self.sequential_processor = SequenceProcessor(seq_len=seq_len)
-        seq_hidden_dim = self.sequential_processor.hidden_dim
+        self.encoder = AE()
+        seq_hidden_dim = self.encoder.output_dim
         rep_dim = 256
         hidden_dim = 100
         self.linear = nn.Linear(seq_hidden_dim, rep_dim)
@@ -27,16 +27,8 @@ class PpoBetaPolicyAndValue(nn.Module):
         a_seq: torch.Tensor,
         action: torch.Tensor | None = None,
     ) -> tuple:
-        # (batch_size, seq_len * 3 - 1, seq_hidden_dim)
-        before, after = self.sequential_processor(r_seq, s_seq, a_seq)
-
-        prediction = after[:, :-1]  # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
-        prediction[:, 3::3] += before[:, 1:-1:3].detach()
-
-        # (batch_size, seq_len * 3 - 2, seq_hidden_dim)
-        error = (prediction - before[:, 1:].detach()) ** 2
-
-        x = before[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
+        x = s_seq[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
+        x = self.encoder(x)
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
 
@@ -59,6 +51,4 @@ class PpoBetaPolicyAndValue(nn.Module):
             "x": x,
             "value_x": value_x,
             "policy_x": policy_x,
-            "error": error,
-            "predicted_s": prediction[:, -1],
         }

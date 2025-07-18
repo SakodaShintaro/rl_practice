@@ -3,7 +3,6 @@ import argparse
 import os
 import time
 from datetime import datetime
-from distutils.util import strtobool
 from pathlib import Path
 
 import cv2
@@ -26,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--buffer_capacity", type=int, default=2000)
-    parser.add_argument("--render", type=strtobool, default="True")
+    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--seq_len", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument(
@@ -66,11 +65,7 @@ class SequentialBatchSampler:
             return (num_samples + self.batch_size - 1) // self.batch_size
 
 
-class Agent:
-    """
-    Agent for training
-    """
-
+class PpoAgent:
     max_grad_norm = 0.5
     clip_param_policy = 0.1
     clip_param_value = 1.0
@@ -269,8 +264,8 @@ if __name__ == "__main__":
     with open(result_dir / "seed.txt", "w") as f:
         f.write(str(seed))
 
-    agent = Agent(args.buffer_capacity, args.seq_len, args.batch_size, args.model_name)
-    env = make_env(video_dir=video_dir)
+    agent = PpoAgent(args.buffer_capacity, args.seq_len, args.batch_size, args.model_name)
+    env = make_env()
 
     wandb.init(project="rl_practice", config=vars(args), name="PPO", save_code=True)
 
@@ -304,12 +299,8 @@ if __name__ == "__main__":
 
             # render
             if args.model_name == "default":
-                ae = agent.net.sequential_processor.state_encoder
-                predicted_s = net_out_dict["predicted_s"]
-                predicted_s = predicted_s.view(1, 4, 12, 12)
-                output_dec = ae.decode(predicted_s).detach().cpu().numpy()[0]
-                observation_img = np.transpose(state, (1, 2, 0))  # (96, 96, 3)
-                reconstructed_img = np.transpose(output_dec, (1, 2, 0))  # (96, 96, 3)
+                observation_img = np.zeros((96, 96, 3), dtype=np.float32)
+                reconstructed_img = np.zeros((96, 96, 3), dtype=np.float32)
                 bgr_array = concat_images(env.render(), observation_img, reconstructed_img)
             elif args.model_name == "paligemma":
                 rgb_array = env.render()
