@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--target_score", type=float, default=None)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--image_encoder", type=str, default="ae", choices=["ae", "smolvlm"])
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
@@ -97,6 +98,8 @@ if __name__ == "__main__":
     env = make_env()
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
+
+    target_score = args.target_score if args.target_score is not None else env.spec.reward_threshold
 
     start_time = time.time()
 
@@ -187,7 +190,7 @@ if __name__ == "__main__":
         log_episode_df = pd.DataFrame(log_episode)
         log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
 
-        is_solved = recent_average_score > env.spec.reward_threshold
+        is_solved = recent_average_score > target_score
 
         if episode_id % 5 == 0 or is_solved:
             print(
