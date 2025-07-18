@@ -102,6 +102,7 @@ if __name__ == "__main__":
     # start the game
     global_step = 0
     score_list = []
+    best_score = -float("inf")
     obs, _ = env.reset(seed=seed)
     step_limit = args.step_limit
 
@@ -192,7 +193,14 @@ if __name__ == "__main__":
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
             )
 
-        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
+        is_best = score > best_score
+
+        if is_best:
+            with open(result_dir / "best_score.txt", "w") as f:
+                f.write(f"{episode_id + 1}\t{score:.2f}")
+            best_score = score
+
+        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0 or is_best:
             curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
             curr_image_dir.mkdir(parents=True, exist_ok=True)
             for i, img in enumerate(curr_image_list):
