@@ -5,10 +5,10 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from shutil import rmtree
 
 import cv2
 import gymnasium as gym
+import imageio
 import numpy as np
 import pandas as pd
 import torch
@@ -88,8 +88,8 @@ if __name__ == "__main__":
     with open(result_dir / "seed.txt", "w") as f:
         f.write(str(seed))
 
-    image_dir = result_dir / "image"
-    image_dir.mkdir(parents=True, exist_ok=True)
+    video_dir = result_dir / "video"
+    video_dir.mkdir(parents=True, exist_ok=True)
     image_save_interval = 50
     log_step = []
     log_episode = []
@@ -203,17 +203,16 @@ if __name__ == "__main__":
             with open(result_dir / "best_score.txt", "w") as f:
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
-            curr_image_dir = image_dir / f"best_episode"
-            rmtree(curr_image_dir, ignore_errors=True)
-            curr_image_dir.mkdir(parents=True, exist_ok=True)
-            for i, img in enumerate(curr_image_list):
-                cv2.imwrite(str(curr_image_dir / f"{i:08d}.png"), img)
+            video_path = video_dir / f"best_episode.mp4"
+            if curr_image_list:
+                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in curr_image_list]
+                imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
         if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
-            curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
-            curr_image_dir.mkdir(parents=True, exist_ok=True)
-            for i, img in enumerate(curr_image_list):
-                cv2.imwrite(str(curr_image_dir / f"{i:08d}.png"), img)
+            video_path = video_dir / f"ep_{episode_id + 1:08d}.mp4"
+            if curr_image_list:
+                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in curr_image_list]
+                imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
         episode_id += 1
 
