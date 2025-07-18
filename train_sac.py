@@ -5,6 +5,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
+from shutil import rmtree
 
 import cv2
 import gymnasium as gym
@@ -199,8 +200,13 @@ if __name__ == "__main__":
             with open(result_dir / "best_score.txt", "w") as f:
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
+            curr_image_dir = image_dir / f"best_episode"
+            rmtree(curr_image_dir, ignore_errors=True)
+            curr_image_dir.mkdir(parents=True, exist_ok=True)
+            for i, img in enumerate(curr_image_list):
+                cv2.imwrite(str(curr_image_dir / f"{i:08d}.png"), img)
 
-        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0 or is_best:
+        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
             curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}"
             curr_image_dir.mkdir(parents=True, exist_ok=True)
             for i, img in enumerate(curr_image_list):
