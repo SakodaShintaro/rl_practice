@@ -229,6 +229,11 @@ class MMMambaEncoder:
             cache_dir="./cache",
             torch_dtype=torch.bfloat16,
         ).eval()
+        # type(self.model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba_chat.mmMambaChatModel'>
+        # print(f"{type(self.model)=}")
+
+        # type(self.model.language_model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba.mmMambaForCausalLM'>
+        # print(f"{type(self.model.language_model)=}")  # AutoModel
 
         # メタテンソルから適切にデバイスに移動
         if torch.cuda.is_available() and device != "cpu":
@@ -242,6 +247,8 @@ class MMMambaEncoder:
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_id, trust_remote_code=True, use_fast=False
         )
+        # type(self.tokenizer)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.tokenization_internlm2.InternLM2Tokenizer'>
+        # print(f"{type(self.tokenizer)=}")
 
         IMAGENET_MEAN = (0.485, 0.456, 0.406)
         IMAGENET_STD = (0.229, 0.224, 0.225)
