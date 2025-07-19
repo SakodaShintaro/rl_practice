@@ -1,7 +1,11 @@
 import torch
+import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
+from mamba_ssm.utils.generation import InferenceParams
+from PIL import Image
 from torch import nn
-from transformers import AutoModelForImageTextToText, AutoModelForVision2Seq, AutoProcessor
+from torchvision.transforms.functional import InterpolationMode
+from transformers import AutoModel, AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 
 class BaseCNN(nn.Module):
@@ -207,6 +211,113 @@ class SmolVLMEncoder(BaseSmolEncoder):
         )
 
 
+class MMMambaEncoder:
+    """
+    https://huggingface.co/hustvl/mmMamba-linear/blob/main/modeling_mmMamba_chat.py
+    """
+
+    def __init__(self, device=None) -> None:
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        model_id = "hustvl/mmMamba-linear"
+
+        self.model = AutoModel.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            cache_dir="./cache",
+            torch_dtype=torch.bfloat16,
+        ).eval()
+        self.model = self.model.to(device)
+        # type(self.model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba_chat.mmMambaChatModel'>
+        # print(f"{type(self.model)=}")
+
+        # type(self.model.language_model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba.mmMambaForCausalLM'>
+        # print(f"{type(self.model.language_model)=}")  # AutoModel
+
+        # print(f"{self.model.config.embedding_config.img_context_token_id=}")  # 92546=IMG_CONTEXT
+
+        self.device = device
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_id, trust_remote_code=True, use_fast=False
+        )
+        # type(self.tokenizer)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.tokenization_internlm2.InternLM2Tokenizer'>
+        # print(f"{type(self.tokenizer)=}")
+
+        IMAGENET_MEAN = (0.485, 0.456, 0.406)
+        IMAGENET_STD = (0.229, 0.224, 0.225)
+
+        self.input_size = 448
+
+        self.transform = T.Compose(
+            [
+                T.Resize(
+                    (self.input_size, self.input_size), interpolation=InterpolationMode.BICUBIC
+                ),
+                T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+            ]
+        )
+
+    @torch.no_grad()
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        device = images.device
+        batch_size = images.shape[0]
+        inference_params = InferenceParams(max_seqlen=1024, max_batch_size=4)
+        images = self.transform(images).to(device).to(torch.bfloat16)
+        model_inputs = self.tokenizer(
+            text=["Please describe" + "<IMG_CONTEXT>" * 256] * batch_size,
+            return_tensors="pt",
+            padding=True,
+        )
+        input_ids = model_inputs["input_ids"].to(device)
+        outputs = self.model.forward(
+            input_ids=input_ids,
+            pixel_values=images,
+            inference_params=inference_params,
+            output_hidden_states=True,
+        )
+        x = outputs["hidden_states"][-1][:, 0]
+        x = x.to(torch.float32)
+        return x
+
+    def forward(self, x):
+        return self.encode(x)
+
+    @torch.no_grad()
+    def describe(self, images: torch.Tensor) -> torch.Tensor:
+        device = images.device
+        batch_size = images.shape[0]
+        inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+        images = self.transform(images).to(device).to(torch.bfloat16)
+        model_inputs = self.tokenizer(
+            text=["Please describe" + "<IMG_CONTEXT>" * 256] * batch_size,
+            return_tensors="pt",
+            padding=True,
+        )
+        print(f"Before")
+        for k, v in inference_params.key_value_memory_dict.items():
+            print(f"{k}={v.shape} on {v.device}")
+        input_ids = model_inputs["input_ids"].to(device)
+
+        for itr in range(5):
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                pixel_values=images,
+                inference_params=inference_params,
+                output_hidden_states=True,
+            )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
+            print(f"After {itr}")
+            print(outputs["logits"].sum())
+            for k, v in inference_params.key_value_memory_dict.items():
+                print(f"{k}={type(v)}")
+                for tensor in v:
+                    print(f"  {tensor.shape} on {tensor.device} {torch.sum(tensor)}")
+
+        x = outputs["hidden_states"][-1][:, 0]
+        x = x.to(torch.float32)
+        return x
+
+
 if __name__ == "__main__":
     import torch
 
@@ -216,26 +327,33 @@ if __name__ == "__main__":
     device = torch.device("cuda")
     x = torch.rand(1, 3, 96, 96, device=device)
 
-    model_ae = AE().to(device)
-    print(f"AE parameter count: {parameter_count(model_ae):,}")
-    output_enc = model_ae.encode(x)
-    print(output_enc.shape)  # (1, 4, 12, 12)
-    output_dec = model_ae.decode(output_enc)
-    print(output_dec.shape)  # (1, 3, 96, 96)
+    # model_ae = AE().to(device)
+    # print(f"AE parameter count: {parameter_count(model_ae):,}")
+    # output_enc = model_ae.encode(x)
+    # print(output_enc.shape)  # (1, 4, 12, 12)
+    # output_dec = model_ae.decode(output_enc)
+    # print(output_dec.shape)  # (1, 3, 96, 96)
 
-    model_vae = VAE().to(device)
-    print(f"VAE parameter count: {parameter_count(model_vae):,}")
-    output_enc = model_vae.encode(x)
-    print(output_enc.shape)  # (1, 4, 12, 12)
-    output_dec = model_vae.decode(output_enc)
-    print(output_dec.shape)  # (1, 3, 96, 96)
+    # model_vae = VAE().to(device)
+    # print(f"VAE parameter count: {parameter_count(model_vae):,}")
+    # output_enc = model_vae.encode(x)
+    # print(output_enc.shape)  # (1, 4, 12, 12)
+    # output_dec = model_vae.decode(output_enc)
+    # print(output_dec.shape)  # (1, 3, 96, 96)
 
-    model_cnn = BaseCNN(in_channels=3).to(device)
-    print(f"CNN parameter count: {parameter_count(model_cnn):,}")
-    output = model_cnn(x)
-    print(output.shape)  # (1, 256)
+    # model_cnn = BaseCNN(in_channels=3).to(device)
+    # print(f"CNN parameter count: {parameter_count(model_cnn):,}")
+    # output = model_cnn(x)
+    # print(output.shape)  # (1, 256)
 
-    model_smolvlm = SmolVLMEncoder(device=device)
-    print(f"SmolVLMEncoder parameter count: {parameter_count(model_smolvlm):,}")
-    output = model_smolvlm.encode(x)
+    # model_smolvlm = SmolVLMEncoder(device=device)
+    # print(f"SmolVLMEncoder parameter count: {parameter_count(model_smolvlm):,}")
+    # output = model_smolvlm.encode(x)
+    # print(output.shape)  # (1, 576)
+
+    model_mmmamba = MMMambaEncoder()
+    print(f"MMMambaEncoder parameter count: {parameter_count(model_mmmamba.model):,}")
+    output = model_mmmamba.encode(x)
     print(output.shape)  # (1, 576)
+
+    descriptions = model_mmmamba.describe(x)
