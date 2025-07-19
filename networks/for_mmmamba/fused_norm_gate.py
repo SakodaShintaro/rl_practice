@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# ref. https://github.com/hustvl/mmMamba/blob/85143d03b62a8f8279ef8d019dc01a94674256fb/fla/modules/fused_norm_gate.py
+
 # Copyright (c) 2023, Tri Dao.
 # https://github.com/state-spaces/mamba/blob/fb7b5310fa865dbd62aa059b1e26f2b431363e2a/mamba_ssm/ops/triton/layernorm.py
 # Implement residual + layer_norm / rms_norm.
