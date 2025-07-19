@@ -229,18 +229,13 @@ class MMMambaEncoder:
             cache_dir="./cache",
             torch_dtype=torch.bfloat16,
         ).eval()
+        self.model = self.model.to(device)
         # type(self.model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba_chat.mmMambaChatModel'>
         # print(f"{type(self.model)=}")
 
         # type(self.model.language_model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba.mmMambaForCausalLM'>
         # print(f"{type(self.model.language_model)=}")  # AutoModel
 
-        # メタテンソルから適切にデバイスに移動
-        if torch.cuda.is_available() and device != "cpu":
-            # to_empty()を使ってメタテンソルを実際のテンソルに変換
-            self.model = self.model.to_empty(device=device).to(torch.bfloat16)
-        else:
-            self.model = self.model.to(device)
         # print(f"{self.model.config.embedding_config.img_context_token_id=}")  # 92546=IMG_CONTEXT
 
         self.device = device
