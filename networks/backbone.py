@@ -215,7 +215,7 @@ class MMMambaEncoder:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        model_id = "hustvl/mmMamba-hybrid"
+        model_id = "hustvl/mmMamba-linear"
 
         # メタテンソルの問題を回避するため、to_empty()を使用
         self.model = AutoModel.from_pretrained(
