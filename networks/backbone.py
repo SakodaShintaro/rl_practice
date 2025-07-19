@@ -1,7 +1,10 @@
 import torch
+import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
+from PIL import Image
 from torch import nn
-from transformers import AutoModelForImageTextToText, AutoModelForVision2Seq, AutoProcessor
+from torchvision.transforms.functional import InterpolationMode
+from transformers import AutoModel, AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 
 class BaseCNN(nn.Module):
@@ -207,6 +210,133 @@ class SmolVLMEncoder(BaseSmolEncoder):
         )
 
 
+class MMMambaEncoder:
+    def __init__(self, device=None) -> None:
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        model_id = "hustvl/mmMamba-hybrid"
+
+        # メタテンソルの問題を回避するため、to_empty()を使用
+        self.model = AutoModel.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            cache_dir="./cache",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        # メタテンソルから適切にデバイスに移動
+        if torch.cuda.is_available() and device != "cpu":
+            # to_empty()を使ってメタテンソルを実際のテンソルに変換
+            self.model = self.model.to_empty(device=device).to(torch.bfloat16)
+        else:
+            self.model = self.model.to(device)
+
+        self.device = device
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_id, trust_remote_code=True, use_fast=False
+        )
+
+        IMAGENET_MEAN = (0.485, 0.456, 0.406)
+        IMAGENET_STD = (0.229, 0.224, 0.225)
+
+        self.input_size = 448
+
+        self.transform = T.Compose(
+            [
+                T.Resize(
+                    (self.input_size, self.input_size), interpolation=InterpolationMode.BICUBIC
+                ),
+                T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+            ]
+        )
+
+    @torch.no_grad()
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        device = images.device
+        batch_size = images.shape[0]
+        images = self.transform(images).to(device)
+        model_inputs = self.tokenizer(
+            text=["Please describe <img>"] * batch_size,
+            images=images,
+            return_tensors="pt",
+            do_rescale=False,
+            padding=True,
+        )
+        model_inputs = model_inputs.unsqueeze(1)
+        outputs = self.model.forward(model_inputs)
+        x = outputs["hidden_states"][-1][:, 0]
+        x = x.to(torch.float32)
+        return x
+
+    def forward(self, x):
+        return self.encode(x)
+
+    def find_closest_aspect_ratio(self, aspect_ratio, target_ratios, width, height, image_size):
+        best_ratio_diff = float("inf")
+        best_ratio = (1, 1)
+        area = width * height
+        for ratio in target_ratios:
+            target_aspect_ratio = ratio[0] / ratio[1]
+            ratio_diff = abs(aspect_ratio - target_aspect_ratio)
+            if ratio_diff < best_ratio_diff:
+                best_ratio_diff = ratio_diff
+                best_ratio = ratio
+            elif ratio_diff == best_ratio_diff:
+                if area > 0.5 * image_size * image_size * ratio[0] * ratio[1]:
+                    best_ratio = ratio
+        return best_ratio
+
+    def dynamic_preprocess(self, image, min_num=1, max_num=12, image_size=448, use_thumbnail=False):
+        orig_width, orig_height = image.size
+        aspect_ratio = orig_width / orig_height
+        # calculate the existing image aspect ratio
+        target_ratios = set(
+            (i, j)
+            for n in range(min_num, max_num + 1)
+            for i in range(1, n + 1)
+            for j in range(1, n + 1)
+            if i * j <= max_num and i * j >= min_num
+        )
+        target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
+        # find the closest aspect ratio to the target
+        target_aspect_ratio = self.find_closest_aspect_ratio(
+            aspect_ratio, target_ratios, orig_width, orig_height, image_size
+        )
+        # calculate the target width and height
+        target_width = image_size * target_aspect_ratio[0]
+        target_height = image_size * target_aspect_ratio[1]
+        blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+        # resize the image
+        resized_img = image.resize((target_width, target_height))
+        processed_images = []
+        for i in range(blocks):
+            box = (
+                (i % (target_width // image_size)) * image_size,
+                (i // (target_width // image_size)) * image_size,
+                ((i % (target_width // image_size)) + 1) * image_size,
+                ((i // (target_width // image_size)) + 1) * image_size,
+            )
+            # split the image
+            split_img = resized_img.crop(box)
+            processed_images.append(split_img)
+        assert len(processed_images) == blocks
+        if use_thumbnail and len(processed_images) != 1:
+            thumbnail_img = image.resize((image_size, image_size))
+            processed_images.append(thumbnail_img)
+        return processed_images
+
+    def load_image(self, image_file, input_size=448, max_num=12):
+        image = Image.open(image_file).convert("RGB")
+        transform = self.build_transform(input_size=input_size)
+        images = self.dynamic_preprocess(
+            image, image_size=input_size, use_thumbnail=True, max_num=max_num
+        )
+        pixel_values = [transform(image) for image in images]
+        pixel_values = torch.stack(pixel_values)
+        return pixel_values
+
+
 if __name__ == "__main__":
     import torch
 
@@ -216,26 +346,31 @@ if __name__ == "__main__":
     device = torch.device("cuda")
     x = torch.rand(1, 3, 96, 96, device=device)
 
-    model_ae = AE().to(device)
-    print(f"AE parameter count: {parameter_count(model_ae):,}")
-    output_enc = model_ae.encode(x)
-    print(output_enc.shape)  # (1, 4, 12, 12)
-    output_dec = model_ae.decode(output_enc)
-    print(output_dec.shape)  # (1, 3, 96, 96)
+    # model_ae = AE().to(device)
+    # print(f"AE parameter count: {parameter_count(model_ae):,}")
+    # output_enc = model_ae.encode(x)
+    # print(output_enc.shape)  # (1, 4, 12, 12)
+    # output_dec = model_ae.decode(output_enc)
+    # print(output_dec.shape)  # (1, 3, 96, 96)
 
-    model_vae = VAE().to(device)
-    print(f"VAE parameter count: {parameter_count(model_vae):,}")
-    output_enc = model_vae.encode(x)
-    print(output_enc.shape)  # (1, 4, 12, 12)
-    output_dec = model_vae.decode(output_enc)
-    print(output_dec.shape)  # (1, 3, 96, 96)
+    # model_vae = VAE().to(device)
+    # print(f"VAE parameter count: {parameter_count(model_vae):,}")
+    # output_enc = model_vae.encode(x)
+    # print(output_enc.shape)  # (1, 4, 12, 12)
+    # output_dec = model_vae.decode(output_enc)
+    # print(output_dec.shape)  # (1, 3, 96, 96)
 
-    model_cnn = BaseCNN(in_channels=3).to(device)
-    print(f"CNN parameter count: {parameter_count(model_cnn):,}")
-    output = model_cnn(x)
-    print(output.shape)  # (1, 256)
+    # model_cnn = BaseCNN(in_channels=3).to(device)
+    # print(f"CNN parameter count: {parameter_count(model_cnn):,}")
+    # output = model_cnn(x)
+    # print(output.shape)  # (1, 256)
 
-    model_smolvlm = SmolVLMEncoder(device=device)
-    print(f"SmolVLMEncoder parameter count: {parameter_count(model_smolvlm):,}")
-    output = model_smolvlm.encode(x)
+    # model_smolvlm = SmolVLMEncoder(device=device)
+    # print(f"SmolVLMEncoder parameter count: {parameter_count(model_smolvlm):,}")
+    # output = model_smolvlm.encode(x)
+    # print(output.shape)  # (1, 576)
+
+    model_mmmamba = MMMambaEncoder()
+    print(f"MMMambaEncoder parameter count: {parameter_count(model_mmmamba.model):,}")
+    output = model_mmmamba.encode(x)
     print(output.shape)  # (1, 576)
