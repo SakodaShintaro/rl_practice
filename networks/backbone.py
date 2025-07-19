@@ -284,6 +284,40 @@ class MMMambaEncoder:
     def forward(self, x):
         return self.encode(x)
 
+    @torch.no_grad()
+    def describe(self, images: torch.Tensor) -> torch.Tensor:
+        device = images.device
+        batch_size = images.shape[0]
+        inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+        images = self.transform(images).to(device).to(torch.bfloat16)
+        model_inputs = self.tokenizer(
+            text=["Please describe" + "<IMG_CONTEXT>" * 256] * batch_size,
+            return_tensors="pt",
+            padding=True,
+        )
+        print(f"Before")
+        for k, v in inference_params.key_value_memory_dict.items():
+            print(f"{k}={v.shape} on {v.device}")
+        input_ids = model_inputs["input_ids"].to(device)
+
+        for itr in range(5):
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                pixel_values=images,
+                inference_params=inference_params,
+                output_hidden_states=True,
+            )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
+            print(f"After {itr}")
+            print(outputs["logits"].sum())
+            for k, v in inference_params.key_value_memory_dict.items():
+                print(f"{k}={type(v)}")
+                for tensor in v:
+                    print(f"  {tensor.shape} on {tensor.device} {torch.sum(tensor)}")
+
+        x = outputs["hidden_states"][-1][:, 0]
+        x = x.to(torch.float32)
+        return x
+
 
 if __name__ == "__main__":
     import torch
@@ -322,3 +356,5 @@ if __name__ == "__main__":
     print(f"MMMambaEncoder parameter count: {parameter_count(model_mmmamba.model):,}")
     output = model_mmmamba.encode(x)
     print(output.shape)  # (1, 576)
+
+    descriptions = model_mmmamba.describe(x)
