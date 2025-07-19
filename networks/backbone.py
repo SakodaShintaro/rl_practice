@@ -1,6 +1,7 @@
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
+from mamba_ssm.utils.generation import InferenceParams
 from PIL import Image
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
@@ -211,6 +212,10 @@ class SmolVLMEncoder(BaseSmolEncoder):
 
 
 class MMMambaEncoder:
+    """
+    https://huggingface.co/hustvl/mmMamba-linear/blob/main/modeling_mmMamba_chat.py
+    """
+
     def __init__(self, device=None) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -222,7 +227,7 @@ class MMMambaEncoder:
             model_id,
             trust_remote_code=True,
             cache_dir="./cache",
-            torch_dtype=torch.float32,
+            torch_dtype=torch.bfloat16,
         ).eval()
 
         # メタテンソルから適切にデバイスに移動
@@ -231,6 +236,7 @@ class MMMambaEncoder:
             self.model = self.model.to_empty(device=device).to(torch.bfloat16)
         else:
             self.model = self.model.to(device)
+        # print(f"{self.model.config.embedding_config.img_context_token_id=}")  # 92546=IMG_CONTEXT
 
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -255,16 +261,22 @@ class MMMambaEncoder:
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         device = images.device
         batch_size = images.shape[0]
-        images = self.transform(images).to(device)
+        inference_params = InferenceParams(max_seqlen=1024, max_batch_size=4)
+        images = self.transform(images).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
-            text=["Please describe <img>"] * batch_size,
+            text=["Please describe" + "<IMG_CONTEXT>" * 256] * batch_size,
             images=images,
             return_tensors="pt",
             do_rescale=False,
             padding=True,
         )
-        model_inputs = model_inputs.unsqueeze(1)
-        outputs = self.model.forward(model_inputs)
+        input_ids = model_inputs["input_ids"].to(device)
+        outputs = self.model.forward(
+            input_ids=input_ids,
+            pixel_values=images,
+            inference_params=inference_params,
+            output_hidden_states=True,
+        )
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
         return x
