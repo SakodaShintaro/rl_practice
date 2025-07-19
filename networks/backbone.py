@@ -222,7 +222,6 @@ class MMMambaEncoder:
 
         model_id = "hustvl/mmMamba-linear"
 
-        # メタテンソルの問題を回避するため、to_empty()を使用
         self.model = AutoModel.from_pretrained(
             model_id,
             trust_remote_code=True,
