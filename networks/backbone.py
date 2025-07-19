@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
@@ -221,6 +224,10 @@ class MMMambaEncoder:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
         model_id = "hustvl/mmMamba-linear"
+
+        # fused_norm_gate.pyが見える必要があるためpathに追加
+        fused_norm_gate_path = Path(__file__).parent / "for_mmmamba"
+        sys.path.append(str(fused_norm_gate_path))
 
         self.model = AutoModel.from_pretrained(
             model_id,

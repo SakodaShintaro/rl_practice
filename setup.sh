@@ -23,6 +23,3 @@ pip3 install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8
 pip install peft
 pip install fschat
 pip install sentencepiece
-
-# 現在のディレクトリをPYTHONPATHに追加してfused_norm_gate.pyを見つけられるようにする
-export PYTHONPATH="${PYTHONPATH}:$(readlink -f networks/for_mmmamba)"
