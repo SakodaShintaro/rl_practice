@@ -13,7 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" mmMamba model configuration"""
+"""mmMamba model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
@@ -26,7 +26,7 @@ mmMamba_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
 class mmMambaConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`mmMambaModel`]. It is used to instantiate
-    a mmMamba model according to the specified arguments, defining the model architecture. 
+    a mmMamba model according to the specified arguments, defining the model architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
@@ -69,8 +69,9 @@ class mmMambaConfig(PretrainedConfig):
         Example:
 
     """
-    model_type = 'mmMamba'
-    _auto_class = 'AutoConfig'
+
+    model_type = "mmMamba"
+    _auto_class = "AutoConfig"
 
     def __init__(  # pylint: disable=W0102
         self,
@@ -80,7 +81,7 @@ class mmMambaConfig(PretrainedConfig):
         num_hidden_layers=32,
         num_attention_heads=32,
         num_key_value_heads=None,
-        hidden_act='silu',
+        hidden_act="silu",
         max_position_embeddings=2048,
         initializer_range=0.02,
         rms_norm_eps=1e-6,
@@ -92,11 +93,34 @@ class mmMambaConfig(PretrainedConfig):
         bias=True,
         rope_theta=10000,
         rope_scaling=None,
-        attn_implementation='eager',
+        attn_implementation="eager",
         tie_qk_kernels=None,
-        layers_block_type = ["mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", 
-                            "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2",
-                            "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2"],
+        layers_block_type=[
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+        ],
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -124,7 +148,7 @@ class mmMambaConfig(PretrainedConfig):
 
         self.attn_implementation = attn_implementation
         if self.attn_implementation is None:
-            self.attn_implementation = 'eager'
+            self.attn_implementation = "eager"
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,
@@ -142,15 +166,20 @@ class mmMambaConfig(PretrainedConfig):
 
         if not isinstance(self.rope_scaling, dict) or len(self.rope_scaling) != 2:
             raise ValueError(
-                '`rope_scaling` must be a dictionary with with two fields, `type` and `factor`, '
-                f'got {self.rope_scaling}'
+                "`rope_scaling` must be a dictionary with with two fields, `type` and `factor`, "
+                f"got {self.rope_scaling}"
             )
-        rope_scaling_type = self.rope_scaling.get('type', None)
-        rope_scaling_factor = self.rope_scaling.get('factor', None)
-        if rope_scaling_type is None or rope_scaling_type not in ['linear', 'dynamic']:
+        rope_scaling_type = self.rope_scaling.get("type", None)
+        rope_scaling_factor = self.rope_scaling.get("factor", None)
+        if rope_scaling_type is None or rope_scaling_type not in ["linear", "dynamic"]:
             raise ValueError(
                 f"`rope_scaling`'s type field must be one of ['linear', 'dynamic'], got {rope_scaling_type}"
             )
-        if rope_scaling_factor is None or not isinstance(rope_scaling_factor, float) or rope_scaling_factor < 1.0:
-            raise ValueError(f"`rope_scaling`'s factor field must be a float >= 1, got {rope_scaling_factor}")
-        
+        if (
+            rope_scaling_factor is None
+            or not isinstance(rope_scaling_factor, float)
+            or rope_scaling_factor < 1.0
+        ):
+            raise ValueError(
+                f"`rope_scaling`'s factor field must be a float >= 1, got {rope_scaling_factor}"
+            )

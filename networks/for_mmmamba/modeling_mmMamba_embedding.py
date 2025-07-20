@@ -19,22 +19,19 @@ from typing import Optional, Tuple
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
 from einops import rearrange
+from mamba_ssm.ops.triton.selective_state_update import selective_state_update
+from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
+from timm.models.layers import DropPath
 from torch import nn
 from transformers.activations import ACT2FN
-
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
-from fused_norm_gate import FusedRMSNormSwishGate
+from .fused_norm_gate import FusedRMSNormSwishGate
 
-from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
-from mamba_ssm.ops.triton.selective_state_update import selective_state_update
-from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
-
-from timm.models.layers import DropPath
-
-compute_ARank = False # [ARank] Set this to True to compute attention rank
+compute_ARank = False  # [ARank] Set this to True to compute attention rank
 
 from .configuration_mmMamba_embedding import mmMambaEmbeddingConfig
 
@@ -58,18 +55,30 @@ _CONFIG_FOR_DOC = "mmMambaEmbeddingConfig"
 
 flash_attn_func, flash_attn_varlen_func = None, None
 pad_input, index_first_axis, unpad_input = None, None, None
+
+
 def _import_flash_attn():
     global flash_attn_func, flash_attn_varlen_func
     global pad_input, index_first_axis, unpad_input
     try:
-        from flash_attn import flash_attn_func as _flash_attn_func, flash_attn_varlen_func as _flash_attn_varlen_func
-        from flash_attn.bert_padding import pad_input as _pad_input, index_first_axis as _index_first_axis, unpad_input as _unpad_input
+        from flash_attn import (
+            flash_attn_func as _flash_attn_func,
+            flash_attn_varlen_func as _flash_attn_varlen_func,
+        )
+        from flash_attn.bert_padding import (
+            pad_input as _pad_input,
+            index_first_axis as _index_first_axis,
+            unpad_input as _unpad_input,
+        )
+
         flash_attn_func, flash_attn_varlen_func = _flash_attn_func, _flash_attn_varlen_func
         pad_input, index_first_axis, unpad_input = _pad_input, _index_first_axis, _unpad_input
     except ImportError:
         raise ImportError("flash_attn is not installed.")
 
+
 _import_flash_attn()
+
 
 def _update_kv_cache(kv, inference_params, layer_idx):
     """kv: (batch_size, seqlen, 2, nheads, head_dim) or (batch_size, 1, 2, nheads, head_dim)"""
@@ -120,7 +129,9 @@ class mmMambaRotaryEmbedding(nn.Module):
 
         # Build here to make `torch.jit.trace` work.
         self._set_cos_sin_cache(
-            seq_len=max_position_embeddings, device=self.inv_freq.device, dtype=torch.get_default_dtype()
+            seq_len=max_position_embeddings,
+            device=self.inv_freq.device,
+            dtype=torch.get_default_dtype(),
         )
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
@@ -132,8 +143,8 @@ class mmMambaRotaryEmbedding(nn.Module):
         emb = torch.cat((freqs, freqs), dim=-1)
         self.cos_cached = emb.cos().to(dtype)
         self.sin_cached = emb.sin().to(dtype)
-        #self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        #self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
+        # self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
+        # self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
@@ -150,7 +161,9 @@ class mmMambaRotaryEmbedding(nn.Module):
 class mmMambaLinearScalingRotaryEmbedding(mmMambaRotaryEmbedding):
     """mmMambaRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
 
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0):
+    def __init__(
+        self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0
+    ):
         self.scaling_factor = scaling_factor
         super().__init__(dim, max_position_embeddings, base, device)
 
@@ -172,7 +185,9 @@ class mmMambaDynamicNTKScalingRotaryEmbedding(mmMambaRotaryEmbedding):
     Credits to the Reddit users /u/bloc97 and /u/emozilla.
     """
 
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0):
+    def __init__(
+        self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0
+    ):
         self.scaling_factor = scaling_factor
         super().__init__(dim, max_position_embeddings, base, device)
 
@@ -181,7 +196,8 @@ class mmMambaDynamicNTKScalingRotaryEmbedding(mmMambaRotaryEmbedding):
 
         if seq_len > self.max_position_embeddings:
             base = self.base * (
-                (self.scaling_factor * seq_len / self.max_position_embeddings) - (self.scaling_factor - 1)
+                (self.scaling_factor * seq_len / self.max_position_embeddings)
+                - (self.scaling_factor - 1)
             ) ** (self.dim / (self.dim - 2))
             inv_freq = 1.0 / (base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
             self.register_buffer("inv_freq", inv_freq, persistent=False)
@@ -229,8 +245,11 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    hidden_states = hidden_states[:, :, None, :, :].expand(
+        batch, num_key_value_heads, n_rep, slen, head_dim
+    )
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
 
 def repeat_kv2(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -240,8 +259,9 @@ def repeat_kv2(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     batch, num_key_value_heads, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
-    hidden_states = hidden_states[:, :, None,  :].expand(batch, num_key_value_heads, n_rep, head_dim)
+    hidden_states = hidden_states[:, :, None, :].expand(batch, num_key_value_heads, n_rep, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, head_dim)
+
 
 class MHA_LM(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -260,7 +280,7 @@ class MHA_LM(nn.Module):
         self.rotary_emb_dim = self.head_dim
         self.softmax_scale = None
         self.causal = True
-        
+
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
                 f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
@@ -279,7 +299,7 @@ class MHA_LM(nn.Module):
             self.head_dim,
             base=self.config.rope_theta,
             interleaved=False,
-            device=self.wo.weight.device, 
+            device=self.wo.weight.device,
         )
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
@@ -326,22 +346,17 @@ class MHA_LM(nn.Module):
             causal=self.causal,
             rotary_interleaved=self.rotary_emb.interleaved if self.rotary_emb_dim > 0 else False,
         )
-        return context 
+        return context
 
     def _update_kvcache_attention(self, q, kv, inference_params):
         """Write kv to inference_params, then do attention"""
-        if (
-            inference_params.seqlen_offset == 0
-            or flash_attn_with_kvcache is None
-        ):
+        if inference_params.seqlen_offset == 0 or flash_attn_with_kvcache is None:
             # TODO: this only uses seqlen_offset and not lengths_per_sample.
             kv = self._update_kv_cache(kv, inference_params)
             k, v = kv.unbind(dim=-3)
-            #k = torch.repeat_interleave(k, dim=2, repeats=self.num_heads // self.num_key_value_heads)
-            #v = torch.repeat_interleave(v, dim=2, repeats=self.num_heads // self.num_key_value_heads)
-            attn_output = flash_attn_func(
-                q, k, v, 0.0, softmax_scale=None, causal=self.causal
-            )
+            # k = torch.repeat_interleave(k, dim=2, repeats=self.num_heads // self.num_key_value_heads)
+            # v = torch.repeat_interleave(v, dim=2, repeats=self.num_heads // self.num_key_value_heads)
+            attn_output = flash_attn_func(q, k, v, 0.0, softmax_scale=None, causal=self.causal)
             return attn_output
         else:
             batch = q.shape[0]
@@ -362,17 +377,22 @@ class MHA_LM(nn.Module):
                 softmax_scale=self.softmax_scale,
                 causal=self.causal,
             )
-            
+
     def forward(
         self,
         hidden_states: torch.Tensor,
-        inference_params = None,
+        inference_params=None,
         output_attentions: bool = False,
-        cache_position: Optional[torch.LongTensor] = None,#------------------------------------------------------------------------
+        cache_position: Optional[
+            torch.LongTensor
+        ] = None,  # ------------------------------------------------------------------------
         use_cache: bool = False,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        if inference_params is not None and self.layer_idx not in inference_params.key_value_memory_dict:
+        if (
+            inference_params is not None
+            and self.layer_idx not in inference_params.key_value_memory_dict
+        ):
             inference_params.key_value_memory_dict[self.layer_idx] = self.allocate_inference_cache(
                 hidden_states.shape[0], inference_params.max_seqlen, dtype=hidden_states.dtype
             )
@@ -399,10 +419,10 @@ class MHA_LM(nn.Module):
 
         q = qkv[..., : self.num_key_value_groups, :]
         q = rearrange(q, "b q h gs d -> b q (h gs) d")
-        kv = qkv[..., self.num_key_value_groups:, :].transpose(2,3)
-        #kv = rearrange(kv, "b q h gs d -> b q (h gs) d")
-        #kv = rearrange(kv, "... (two hkv d) -> ... two hkv d", two=2, d=self.head_dim)
-        
+        kv = qkv[..., self.num_key_value_groups :, :].transpose(2, 3)
+        # kv = rearrange(kv, "b q h gs d -> b q (h gs) d")
+        # kv = rearrange(kv, "... (two hkv d) -> ... two hkv d", two=2, d=self.head_dim)
+
         if (
             inference_params is None
             or inference_params.seqlen_offset == 0
@@ -410,14 +430,22 @@ class MHA_LM(nn.Module):
         ):
             if self.rotary_emb_dim > 0:
                 q, kv = self.rotary_emb(
-                    q, kv, seqlen_offset=seqlen_offset[:bsz,...], max_seqlen=rotary_max_seqlen
+                    q, kv, seqlen_offset=seqlen_offset[:bsz, ...], max_seqlen=rotary_max_seqlen
                 )
             if inference_params is None:
                 k, v = kv.unbind(dim=-3)
-                k = torch.repeat_interleave(k, dim=2, repeats=self.num_heads // self.num_key_value_heads)
-                v = torch.repeat_interleave(v, dim=2, repeats=self.num_heads // self.num_key_value_heads)
+                k = torch.repeat_interleave(
+                    k, dim=2, repeats=self.num_heads // self.num_key_value_heads
+                )
+                v = torch.repeat_interleave(
+                    v, dim=2, repeats=self.num_heads // self.num_key_value_heads
+                )
                 context = F.scaled_dot_product_attention(
-                    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True, scale=None
+                    q.transpose(1, 2),
+                    k.transpose(1, 2),
+                    v.transpose(1, 2),
+                    is_causal=True,
+                    scale=None,
                 ).transpose(1, 2)
             else:
                 context = self._update_kvcache_attention(q, kv, inference_params)
@@ -426,27 +454,38 @@ class MHA_LM(nn.Module):
         context = rearrange(context, "... h d -> ... (h d)")
         out = self.wo(context)
         return out
-    
+
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None):
         dtype = self.wo.weight.dtype if dtype is None else dtype
         device = self.wo.weight.device
         kv_cache = torch.empty(
-            batch_size, max_seqlen, 2, self.num_key_value_heads, self.head_dim, dtype=dtype, device=device,
+            batch_size,
+            max_seqlen,
+            2,
+            self.num_key_value_heads,
+            self.head_dim,
+            dtype=dtype,
+            device=device,
         )
         return kv_cache, None
 
+
 class Mamba2_LM(nn.Module):
     """
-    LoLCATs attention implementation initialized from a 
+    LoLCATs attention implementation initialized from a
     `LlamaAttention` or `MistralAttention` object (base_attn)
 
     Most of the arguments are directly tied to argparse args
     - For now we don't support padding.
     """
-    def __init__(self, config: mmMambaConfig, layer_idx: Optional[int] = None,
-                 elementwise_affine: Optional[bool] = True,
-                 norm_eps: float = 1e-5,
-                 ):
+
+    def __init__(
+        self,
+        config: mmMambaConfig,
+        layer_idx: Optional[int] = None,
+        elementwise_affine: Optional[bool] = True,
+        norm_eps: float = 1e-5,
+    ):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -461,14 +500,15 @@ class Mamba2_LM(nn.Module):
         conv_bias = True
         self.conv_bias = conv_bias
         self.d_conv = 2
-        self.activation="silu"
+        self.activation = "silu"
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
 
         self.wvkqgdt = nn.Linear(
             self.hidden_size,
-            (self.num_heads + 2 * self.num_key_value_heads + self.num_heads) * self.head_dim + self.num_heads,
-            bias=self.bias
+            (self.num_heads + 2 * self.num_key_value_heads + self.num_heads) * self.head_dim
+            + self.num_heads,
+            bias=self.bias,
         )
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
@@ -476,7 +516,7 @@ class Mamba2_LM(nn.Module):
         self.dtype = self.wvkqgdt.weight.dtype
 
         conv_dim = self.num_heads * self.head_dim + 2 * self.num_key_value_heads * self.head_dim
-            
+
         self.conv1d = nn.Conv1d(
             in_channels=conv_dim,
             out_channels=conv_dim,
@@ -484,13 +524,13 @@ class Mamba2_LM(nn.Module):
             kernel_size=self.d_conv,
             groups=conv_dim,
             padding=self.d_conv - 1,
-            device=self.device, 
-            dtype=self.dtype
+            device=self.device,
+            dtype=self.dtype,
         )
         with torch.no_grad():
-            self.conv1d.weight.zero_()  
-            self.conv1d.weight[:, 0, 1] = 1 
-            self.conv1d.bias.zero_()  
+            self.conv1d.weight.zero_()
+            self.conv1d.weight[:, 0, 1] = 1
+            self.conv1d.bias.zero_()
 
         # Activation after conv
         if self.activation == "identity":
@@ -499,11 +539,18 @@ class Mamba2_LM(nn.Module):
             self.act = nn.SiLU()
         else:
             raise ValueError(f"Unknown activation {self.activation}")
-        
-        self.g_norm_swish_gate = FusedRMSNormSwishGate(hidden_size=self.head_dim, elementwise_affine=elementwise_affine, eps=norm_eps).to(self.dtype).to(self.device)
+
+        self.g_norm_swish_gate = (
+            FusedRMSNormSwishGate(
+                hidden_size=self.head_dim, elementwise_affine=elementwise_affine, eps=norm_eps
+            )
+            .to(self.dtype)
+            .to(self.device)
+        )
 
         dt = torch.exp(
-            torch.rand(self.num_heads, dtype=self.dtype, device=self.device) * (math.log(0.1) - math.log(0.001))
+            torch.rand(self.num_heads, dtype=self.dtype, device=self.device)
+            * (math.log(0.1) - math.log(0.001))
             + math.log(0.001)
         )
         dt = torch.clamp(dt, min=0.001)
@@ -511,37 +558,38 @@ class Mamba2_LM(nn.Module):
         inv_dt = dt + torch.log(-torch.expm1(-dt))
         self.dt_bias = nn.Parameter(inv_dt)
         self.dt_bias._no_weight_decay = True
-        
+
         A_log_bias = torch.zeros(self.num_heads, dtype=self.dtype, device=self.device)
         self.A_log_bias = nn.Parameter(A_log_bias)
         self.A_log_bias._no_weight_decay = True
 
-    def forward(self,
-                hidden_states: torch.Tensor,
-                inference_params = None,
-                output_attentions: bool = False,
-                use_cache: bool = True,
-                **kwargs,
-               ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        inference_params=None,
+        output_attentions: bool = False,
+        use_cache: bool = True,
+        **kwargs,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         hidden_states = hidden_states.to(self.dtype)
         vkqgdt = self.wvkqgdt(hidden_states)
         vkq, g, dt = torch.split(
-                vkqgdt,
-                [
-                    (2*self.num_key_value_heads+self.num_heads) * self.head_dim,
-                    self.num_heads * self.head_dim,
-                    self.num_heads,
-                ],
-                dim=2,
-            )
+            vkqgdt,
+            [
+                (2 * self.num_key_value_heads + self.num_heads) * self.head_dim,
+                self.num_heads * self.head_dim,
+                self.num_heads,
+            ],
+            dim=2,
+        )
         batch, seqlen, _ = hidden_states.shape
         conv_state, ssm_state = None, None
         if inference_params is not None:
             conv_state, ssm_state = self._get_states_from_cache(inference_params, batch)
         conv_state = conv_state[:batch, ...]
         ssm_state = ssm_state[:batch, ...]
-        
-        if use_cache and inference_params.seqlen_offset==0:
+
+        if use_cache and inference_params.seqlen_offset == 0:
             vkq, new_conv_states = causal_conv1d_fn(
                 vkq.transpose(1, 2),
                 rearrange(self.conv1d.weight, "d 1 w -> d w"),
@@ -566,12 +614,12 @@ class Mamba2_LM(nn.Module):
             q = rearrange(q, "b (h n) l -> b l h n", h=self.num_heads)
             k = repeat_kv(k, self.num_key_value_groups).transpose(1, 2)
             v = repeat_kv(v, self.num_key_value_groups).transpose(1, 2)
-                
+
             A = -torch.exp(self.A_log_bias.float())
 
             y, new_ssm_states = mamba_chunk_scan_combined(
-                x = v,
-                #x = v / F.softplus(A_log).to(v.dtype).unsqueeze(-1),
+                x=v,
+                # x = v / F.softplus(A_log).to(v.dtype).unsqueeze(-1),
                 dt=dt,
                 dt_softplus=True,
                 A=A,
@@ -579,15 +627,14 @@ class Mamba2_LM(nn.Module):
                 C=q,
                 chunk_size=self.chunk_size,
                 dt_bias=self.dt_bias,
-                initial_states=None, # currently not supported by mamba_ssm.utils.generation
+                initial_states=None,  # currently not supported by mamba_ssm.utils.generation
                 return_final_states=True,
             )
 
             conv_state.copy_(new_conv_states)
             ssm_state.copy_(new_ssm_states)
 
-        elif use_cache and inference_params.seqlen_offset>0:
-            
+        elif use_cache and inference_params.seqlen_offset > 0:
             vkq = causal_conv1d_update(
                 vkq.transpose(1, 2).squeeze(-1),
                 conv_state,
@@ -616,7 +663,11 @@ class Mamba2_LM(nn.Module):
             dt = dt[:, :, None].expand(-1, -1, self.head_dim)
             dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
             A = -torch.exp(self.A_log_bias.float())
-            A = A[:, None, ...][:, :, None].expand(-1, self.head_dim, self.head_dim).to(dtype=torch.float32)
+            A = (
+                A[:, None, ...][:, :, None]
+                .expand(-1, self.head_dim, self.head_dim)
+                .to(dtype=torch.float32)
+            )
             D = torch.zeros((self.num_heads, self.head_dim), dtype=A.dtype, device=A.device)
 
             y = selective_state_update(
@@ -630,7 +681,7 @@ class Mamba2_LM(nn.Module):
                 dt_bias=dt_bias,
                 dt_softplus=True,
             )
-            
+
         else:
             vkq = causal_conv1d_fn(
                 vkq.transpose(1, 2),
@@ -656,11 +707,11 @@ class Mamba2_LM(nn.Module):
             q = rearrange(q, "b (h n) l -> b l h n", h=self.num_heads)
             k = repeat_kv(k, self.num_key_value_groups).transpose(1, 2)
             v = repeat_kv(v, self.num_key_value_groups).transpose(1, 2)
-                
+
             A = -torch.exp(self.A_log_bias.float())
 
             y = mamba_chunk_scan_combined(
-                x = v,
+                x=v,
                 dt=dt,
                 dt_softplus=True,
                 A=A,
@@ -668,17 +719,17 @@ class Mamba2_LM(nn.Module):
                 C=q,
                 chunk_size=self.chunk_size,
                 dt_bias=self.dt_bias,
-                initial_states=None, # currently not supported by mamba_ssm.utils.generation
+                initial_states=None,  # currently not supported by mamba_ssm.utils.generation
                 return_final_states=False,
             )
-        
-        g = rearrange(g, 'b l (h d) -> b l h d', h=self.num_heads)
+
+        g = rearrange(g, "b l (h d) -> b l h d", h=self.num_heads)
         y_true = self.g_norm_swish_gate(y, g)
         y_true = y_true.view(batch, seqlen, self.hidden_size)
         y_true = self.o_proj(y_true)
 
         return y_true
-        
+
     def _get_states_from_cache(self, inference_params, batch_size, initialize_states=False):
         device = self.conv1d.weight.device
         dtype = self.conv1d.weight.dtype
@@ -686,7 +737,7 @@ class Mamba2_LM(nn.Module):
         if self.layer_idx not in inference_params.key_value_memory_dict:
             batch_shape = (batch_size,)
             conv_state = torch.zeros(
-                batch_size, 2*self.hidden_size, self.d_conv-1, device=device, dtype=dtype
+                batch_size, 2 * self.hidden_size, self.d_conv - 1, device=device, dtype=dtype
             )
             ssm_state = torch.zeros(
                 batch_size, self.num_heads, self.head_dim, self.head_dim, device=device, dtype=dtype
@@ -700,24 +751,21 @@ class Mamba2_LM(nn.Module):
                 ssm_state.zero_()
         return conv_state, ssm_state
 
-            
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
         device = self.conv1d.weight.device
         dtype = self.conv1d.weight.dtype
         conv_state = torch.zeros(
-            batch_size, 2*self.hidden_size, self.d_conv-1, device=device, dtype=dtype
+            batch_size, 2 * self.hidden_size, self.d_conv - 1, device=device, dtype=dtype
         )
 
         ssm_state = torch.zeros(
             batch_size, self.num_heads, self.head_dim, self.head_dim, device=device, dtype=dtype
         )
         return conv_state, ssm_state
-    
 
-mmMamba_ATTENTION_CLASSES = {
-    'mha': MHA_LM,
-    "mamba2":Mamba2_LM
-}
+
+mmMamba_ATTENTION_CLASSES = {"mha": MHA_LM, "mamba2": Mamba2_LM}
+
 
 # Modified from transformers.model.llama.modeling_llama.LlamaDecoderLayer
 class mmMambaDecoderLayer(nn.Module):
@@ -726,20 +774,22 @@ class mmMambaDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         self.config = config
         self.layer_idx = layer_idx
-        
-        self.attention = mmMamba_ATTENTION_CLASSES[config.layers_block_type[layer_idx]](config=config, layer_idx=layer_idx)
+
+        self.attention = mmMamba_ATTENTION_CLASSES[config.layers_block_type[layer_idx]](
+            config=config, layer_idx=layer_idx
+        )
 
         self.feed_forward = mmMambaMLP(config)
         self.attention_norm = mmMambaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.ffn_norm = mmMambaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        
-        self.drop_path1 = DropPath(drop_path_rate) if drop_path_rate > 0. else nn.Identity()
-        self.drop_path2 = DropPath(drop_path_rate) if drop_path_rate > 0. else nn.Identity()
+
+        self.drop_path1 = DropPath(drop_path_rate) if drop_path_rate > 0.0 else nn.Identity()
+        self.drop_path2 = DropPath(drop_path_rate) if drop_path_rate > 0.0 else nn.Identity()
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        inference_params = None,
+        inference_params=None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = True,
         **kwargs,
@@ -777,11 +827,13 @@ class mmMambaDecoderLayer(nn.Module):
 
         if output_attentions:
             outputs += (self_attn_weights,)
-        
+
         return outputs
-    
+
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
-        return self.attention.allocate_inference_cache(batch_size, max_seqlen, dtype=dtype, **kwargs)
+        return self.attention.allocate_inference_cache(
+            batch_size, max_seqlen, dtype=dtype, **kwargs
+        )
 
 
 class VisionEmbeddings(nn.Module):
@@ -797,16 +849,19 @@ class VisionEmbeddings(nn.Module):
         )
 
         self.patch_embedding = nn.Conv2d(
-            in_channels=self.config.num_channels, out_channels=self.embed_dim, kernel_size=self.patch_size, stride=self.patch_size
+            in_channels=self.config.num_channels,
+            out_channels=self.embed_dim,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
         )
 
         self.num_patches = (self.image_size // self.patch_size) ** 2
         self.num_positions = self.num_patches + 1
 
         self.position_embedding = nn.Parameter(torch.randn(1, self.num_positions, self.embed_dim))
-        
+
         self.post_init()
-    
+
     def post_init(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -820,15 +875,24 @@ class VisionEmbeddings(nn.Module):
 
     def _get_pos_embed(self, pos_embed, H, W):
         target_dtype = pos_embed.dtype
-        pos_embed = pos_embed.float().reshape(
-            1, self.image_size // self.patch_size, self.image_size // self.patch_size, -1).permute(0, 3, 1, 2)
-        pos_embed = F.interpolate(pos_embed, size=(H, W), mode='bicubic', align_corners=False).\
-            reshape(1, -1, H * W).permute(0, 2, 1).to(target_dtype)
+        pos_embed = (
+            pos_embed.float()
+            .reshape(1, self.image_size // self.patch_size, self.image_size // self.patch_size, -1)
+            .permute(0, 3, 1, 2)
+        )
+        pos_embed = (
+            F.interpolate(pos_embed, size=(H, W), mode="bicubic", align_corners=False)
+            .reshape(1, -1, H * W)
+            .permute(0, 2, 1)
+            .to(target_dtype)
+        )
         return pos_embed
 
-    def forward(self, pixel_values: torch.FloatTensor, 
-                use_cls_token=False,
-                ) -> torch.Tensor:
+    def forward(
+        self,
+        pixel_values: torch.FloatTensor,
+        use_cls_token=False,
+    ) -> torch.Tensor:
         target_dtype = self.patch_embedding.weight.dtype
         pixel_values = pixel_values.to(target_dtype)
         patch_embeds = self.patch_embedding(pixel_values)  # shape = [*, channel, width, height]
@@ -837,14 +901,21 @@ class VisionEmbeddings(nn.Module):
         if use_cls_token:
             class_embeds = self.class_embedding.expand(batch_size, 1, -1).to(target_dtype)
             embeddings = torch.cat([class_embeds, patch_embeds], dim=1)
-            assert not self.config.use_2d_sincos_pos_embed, '2D SinCos pos embed is not supported with use_cls_token'
-            position_embedding = torch.cat([
-                self.position_embedding[:, :1, :],
-                self._get_pos_embed(self.position_embedding[:, 1:, :], height, width)
-            ], dim=1)
+            assert not self.config.use_2d_sincos_pos_embed, (
+                "2D SinCos pos embed is not supported with use_cls_token"
+            )
+            position_embedding = torch.cat(
+                [
+                    self.position_embedding[:, :1, :],
+                    self._get_pos_embed(self.position_embedding[:, 1:, :], height, width),
+                ],
+                dim=1,
+            )
             embeddings = embeddings + position_embedding
         else:
-            position_embedding = self._get_pos_embed(self.position_embedding[:, 1:, :], height, width).to(target_dtype)
+            position_embedding = self._get_pos_embed(
+                self.position_embedding[:, 1:, :], height, width
+            ).to(target_dtype)
             embeddings = patch_embeds + position_embedding
 
         return embeddings
@@ -861,29 +932,38 @@ class mmMambaEmbedding(PreTrainedModel):
         self.gradient_checkpointing = True
 
         self.vision_embeddings = VisionEmbeddings(config)
-        self.llm_text_embeddings = nn.Embedding(self.config.llm_vocab_size, self.config.llm_hidden_size)
+        self.llm_text_embeddings = nn.Embedding(
+            self.config.llm_vocab_size, self.config.llm_hidden_size
+        )
         self.special_token_maps = config.special_token_maps
         if len(self.special_token_maps) > 0:
-            self.special_text_embeddings = nn.Embedding(len(config.special_token_maps), self.config.llm_hidden_size)
+            self.special_text_embeddings = nn.Embedding(
+                len(config.special_token_maps), self.config.llm_hidden_size
+            )
 
-        assert self.config.use_ls is False, 'LS is not supported in mmMamba'
-        if hasattr(config, 'drop_path_rate'):
-            dpr = [x.item() for x in torch.linspace(0, config.drop_path_rate, config.num_hidden_layers)]
+        assert self.config.use_ls is False, "LS is not supported in mmMamba"
+        if hasattr(config, "drop_path_rate"):
+            dpr = [
+                x.item() for x in torch.linspace(0, config.drop_path_rate, config.num_hidden_layers)
+            ]
         else:
             dpr = [0.0] * config.num_hidden_layers
-        self.encoder = nn.ModuleList([
-            mmMambaDecoderLayer(config, idx, dpr[idx]) for idx in range(config.num_hidden_layers)
-        ])
-        
+        self.encoder = nn.ModuleList(
+            [mmMambaDecoderLayer(config, idx, dpr[idx]) for idx in range(config.num_hidden_layers)]
+        )
+
         if self.config.use_pixel_shuffle_proj:
             self.pixel_shuffle_proj = nn.Sequential(
-                nn.Linear(int(config.hidden_size / (config.downsample_ratio * config.downsample_ratio)), config.hidden_size),
+                nn.Linear(
+                    int(config.hidden_size / (config.downsample_ratio * config.downsample_ratio)),
+                    config.hidden_size,
+                ),
                 nn.GELU(),
-                nn.Linear(config.hidden_size, config.hidden_size)
+                nn.Linear(config.hidden_size, config.hidden_size),
             )
-        
+
         self.num_img_tokens = (self.config.image_size // self.config.patch_size) ** 2
-        
+
     def set_gradient_checkpointing(self):
         self.gradient_checkpointing = True
         for layer in self.encoder:
@@ -893,130 +973,167 @@ class mmMambaEmbedding(PreTrainedModel):
         pos_emb = self.vision_embeddings.position_embedding
         _, num_positions, embed_dim = pos_emb.shape
         cls_emb = pos_emb[:, :1, :]
-        pos_emb = pos_emb[:, 1:, :].reshape(1, old_size // patch_size, old_size // patch_size, -1).permute(0, 3, 1, 2)
-        pos_emb = F.interpolate(pos_emb.float(), size=new_size // patch_size, mode='bicubic', align_corners=False)
+        pos_emb = (
+            pos_emb[:, 1:, :]
+            .reshape(1, old_size // patch_size, old_size // patch_size, -1)
+            .permute(0, 3, 1, 2)
+        )
+        pos_emb = F.interpolate(
+            pos_emb.float(), size=new_size // patch_size, mode="bicubic", align_corners=False
+        )
         pos_emb = pos_emb.to(cls_emb.dtype).reshape(1, embed_dim, -1).permute(0, 2, 1)
         pos_emb = torch.cat([cls_emb, pos_emb], dim=1)
         self.vision_embeddings.position_embedding = nn.Parameter(pos_emb)
         self.vision_embeddings.image_size = new_size
-        logger.info('Resized position embeddings from {} to {}'.format(old_size, new_size))
-    
+        logger.info("Resized position embeddings from {} to {}".format(old_size, new_size))
+
     def replace_img_tokens(self, input_ids, hidden_states, vision_hidden_states):
-        img_context_token_mask = (input_ids == self.config.img_context_token_id)
-        hidden_states[img_context_token_mask] = hidden_states[img_context_token_mask] * 0.0 + vision_hidden_states.flatten(0, 1)
+        img_context_token_mask = input_ids == self.config.img_context_token_id
+        hidden_states[img_context_token_mask] = hidden_states[
+            img_context_token_mask
+        ] * 0.0 + vision_hidden_states.flatten(0, 1)
 
         return hidden_states
-    
+
     def get_ignore_mask(self, input_ids):
         ignore_ids = torch.tensor(
-            [self.special_token_maps[token] for token in [IMG_START_TOKEN, IMG_END_TOKEN]], 
-            device=input_ids.device)
+            [self.special_token_maps[token] for token in [IMG_START_TOKEN, IMG_END_TOKEN]],
+            device=input_ids.device,
+        )
         ignore_mask = torch.isin(input_ids, ignore_ids)
 
         return ignore_mask
-    
+
     def get_text_mask(self, input_ids):
-        txt_mask = (input_ids != self.config.img_context_token_id)
+        txt_mask = input_ids != self.config.img_context_token_id
 
         return txt_mask
-    
+
     def get_input_embeddings(self, input_ids):
         special_mask = input_ids > self.llm_text_embeddings.weight.shape[0] - 1
         llm_embeddings = self.llm_text_embeddings(input_ids * (~special_mask).to(input_ids))
 
         if len(self.special_token_maps) > 0:
-            special_embeddings = self.special_text_embeddings((input_ids - self.llm_text_embeddings.weight.shape[0]) * special_mask.to(input_ids))
+            special_embeddings = self.special_text_embeddings(
+                (input_ids - self.llm_text_embeddings.weight.shape[0]) * special_mask.to(input_ids)
+            )
             special_mask = special_mask.unsqueeze(-1)
-            text_embeddings = llm_embeddings * (~special_mask).to(llm_embeddings) + \
-                                special_embeddings * special_mask.to(llm_embeddings)
+            text_embeddings = llm_embeddings * (~special_mask).to(
+                llm_embeddings
+            ) + special_embeddings * special_mask.to(llm_embeddings)
         else:
             text_embeddings = llm_embeddings
 
         return text_embeddings
-    
+
     def get_txt_embeddings(self, input_ids):
         B, L = input_ids.shape
-        txt_mask = (input_ids != self.config.img_context_token_id)
+        txt_mask = input_ids != self.config.img_context_token_id
         txt_embeddings = self.llm_text_embeddings(input_ids[txt_mask])
         txt_embeddings = txt_embeddings.reshape(-1, txt_embeddings.shape[-1])
 
         return txt_embeddings
-    
+
     def get_txt_feature(self, input_ids, feature):
         B, L, C = feature.shape
-        txt_mask = (input_ids != self.config.img_context_token_id)
+        txt_mask = input_ids != self.config.img_context_token_id
         txt_feature = feature[txt_mask].reshape(-1, C)
 
         return txt_feature
-    
+
     def get_img_feature(self, input_ids, feature):
         B, L, C = feature.shape
-        img_mask = (input_ids == self.config.img_context_token_id)
+        img_mask = input_ids == self.config.img_context_token_id
         img_feature = feature[img_mask].reshape(-1, C)
 
         return img_feature
-    
+
     def pixel_shuffle(self, x, scale_factor=0.5):
-        if getattr(self.config, 'pixel_shuffle_loc', 'pre') == 'post':
-            x = x.view(x.shape[0]//self.num_img_tokens, self.num_img_tokens, -1)
+        if getattr(self.config, "pixel_shuffle_loc", "pre") == "post":
+            x = x.view(x.shape[0] // self.num_img_tokens, self.num_img_tokens, -1)
 
         n, l, c = x.size()
-        h = w = int(l ** 0.5)
+        h = w = int(l**0.5)
         # N, W, H, C --> N, W, H * scale, C // scale
         x = x.reshape(n, w, int(h * scale_factor), int(c / scale_factor))
         # N, W, H * scale, C // scale --> N, H * scale, W, C // scale
         x = x.permute(0, 2, 1, 3).contiguous()
         # N, H * scale, W, C // scale --> N, H * scale, W * scale, C // (scale ** 2)
-        x = x.view(n, int(h * scale_factor), int(w * scale_factor),
-                   int(c / (scale_factor * scale_factor)))
-        x = x.permute(0, 2, 1, 3).reshape(n, int(l * scale_factor * scale_factor), int(c / (scale_factor * scale_factor))).contiguous()
-        
-        if getattr(self.config, 'pixel_shuffle_loc', 'pre') == 'post':
-            x = x.view(int(x.shape[0]*self.num_img_tokens*(self.config.downsample_ratio**2)), -1)
+        x = x.view(
+            n, int(h * scale_factor), int(w * scale_factor), int(c / (scale_factor * scale_factor))
+        )
+        x = (
+            x.permute(0, 2, 1, 3)
+            .reshape(
+                n, int(l * scale_factor * scale_factor), int(c / (scale_factor * scale_factor))
+            )
+            .contiguous()
+        )
+
+        if getattr(self.config, "pixel_shuffle_loc", "pre") == "post":
+            x = x.view(
+                int(x.shape[0] * self.num_img_tokens * (self.config.downsample_ratio**2)), -1
+            )
         return x
 
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         pixel_values: Optional[torch.FloatTensor] = None,
-        inference_params = None,
+        inference_params=None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         use_cache: Optional[bool] = True,
     ):
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         if pixel_values is not None:
             if len(pixel_values.shape) == 4:
                 if self.gradient_checkpointing and self.training:
-                    vision_hidden_states = torch.utils.checkpoint.checkpoint(self.vision_embeddings, pixel_values)
+                    vision_hidden_states = torch.utils.checkpoint.checkpoint(
+                        self.vision_embeddings, pixel_values
+                    )
                 else:
                     vision_hidden_states = self.vision_embeddings(pixel_values)
 
-                if self.config.use_pixel_shuffle_proj and getattr(self.config, 'pixel_shuffle_loc', 'pre') == 'pre':
-                    vision_hidden_states = self.pixel_shuffle(vision_hidden_states, scale_factor=self.config.downsample_ratio)
+                if (
+                    self.config.use_pixel_shuffle_proj
+                    and getattr(self.config, "pixel_shuffle_loc", "pre") == "pre"
+                ):
+                    vision_hidden_states = self.pixel_shuffle(
+                        vision_hidden_states, scale_factor=self.config.downsample_ratio
+                    )
                     if self.gradient_checkpointing and self.training:
-                        vision_hidden_states = torch.utils.checkpoint.checkpoint(self.pixel_shuffle_proj, vision_hidden_states)
+                        vision_hidden_states = torch.utils.checkpoint.checkpoint(
+                            self.pixel_shuffle_proj, vision_hidden_states
+                        )
                     else:
                         vision_hidden_states = self.pixel_shuffle_proj(vision_hidden_states)
 
                 hidden_states = self.get_input_embeddings(input_ids)
-                hidden_states = self.replace_img_tokens(input_ids, hidden_states, vision_hidden_states)
+                hidden_states = self.replace_img_tokens(
+                    input_ids, hidden_states, vision_hidden_states
+                )
             else:
-                raise ValueError(f'wrong pixel_values size: {pixel_values.shape}')
+                raise ValueError(f"wrong pixel_values size: {pixel_values.shape}")
         else:
             hidden_states = self.get_input_embeddings(input_ids)
 
         for layer_idx, layer_module in enumerate(self.encoder):
             if self.gradient_checkpointing and self.training:
-                assert use_cache is None, 'Gradient checkpointing is not compatible with cache'
-                outputs = torch.utils.checkpoint.checkpoint(layer_module, 
-                                                            hidden_states,
-                                                            inference_params,
-                                                            None, False, False,
-                                                            )
+                assert use_cache is None, "Gradient checkpointing is not compatible with cache"
+                outputs = torch.utils.checkpoint.checkpoint(
+                    layer_module,
+                    hidden_states,
+                    inference_params,
+                    None,
+                    False,
+                    False,
+                )
                 hidden_states = outputs[0]
             else:
                 outputs = layer_module(
@@ -1026,18 +1143,21 @@ class mmMambaEmbedding(PreTrainedModel):
                 )
                 hidden_states = outputs[0]
 
-
         img_feature = self.get_img_feature(input_ids, hidden_states)
-        
-        if self.config.use_pixel_shuffle_proj and getattr(self.config, 'pixel_shuffle_loc', 'pre') == 'post':
+
+        if (
+            self.config.use_pixel_shuffle_proj
+            and getattr(self.config, "pixel_shuffle_loc", "pre") == "post"
+        ):
             img_feature = self.pixel_shuffle(img_feature, scale_factor=self.config.downsample_ratio)
             img_feature = self.pixel_shuffle_proj(img_feature)
-        
+
         return img_feature, hidden_states
-            
+
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
         return {
-            layer.layer_idx: layer.allocate_inference_cache(batch_size, max_seqlen, dtype=dtype, **kwargs)
+            layer.layer_idx: layer.allocate_inference_cache(
+                batch_size, max_seqlen, dtype=dtype, **kwargs
+            )
             for layer in self.encoder
         }
-        

@@ -1,6 +1,6 @@
+import json
 import os
 from typing import Union
-import json
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
@@ -9,46 +9,54 @@ logger = logging.get_logger(__name__)
 
 
 class mmMambaEmbeddingConfig(PretrainedConfig):
-
-    model_type = 'mmMamba_embedding'
+    model_type = "mmMamba_embedding"
 
     def __init__(
-            self,
-            num_hidden_layers=32,
-            initializer_factor=1e-5,
-            use_autoregressive_loss=False,
-            # vision embedding
-            num_channels=3,
-            patch_size=14,
-            image_size=224,
-            # attention layer
-            hidden_size=4096,
-            num_attention_heads=32,
-            num_key_value_heads=32,
-            attention_bias=False,
-            attention_dropout=0.0,
-            max_position_embeddings=4096,
-            rope_theta=10000.0,
-            rope_scaling=None,
-            # mlp layer
-            intermediate_size=11008,
-            mlp_bias=False,
-            hidden_act='silu',
-            # rms norm
-            rms_norm_eps=1e-5,
-            # pretraining
-            pretraining_tp=1,
-            use_ls=True,
-            use_img_start_end_tokens=True,
-            special_token_maps={},
-            llm_vocab_size=92553,
-            llm_hidden_size=2048,
-            attn_implementation='flash_attention_2',
-            downsample_ratio=0.5,
-            img_context_token_id=92546,
-            pixel_shuffle_loc="pre",
-            layers_block_type = ["mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2", "mamba2"],
-            **kwargs,
+        self,
+        num_hidden_layers=32,
+        initializer_factor=1e-5,
+        use_autoregressive_loss=False,
+        # vision embedding
+        num_channels=3,
+        patch_size=14,
+        image_size=224,
+        # attention layer
+        hidden_size=4096,
+        num_attention_heads=32,
+        num_key_value_heads=32,
+        attention_bias=False,
+        attention_dropout=0.0,
+        max_position_embeddings=4096,
+        rope_theta=10000.0,
+        rope_scaling=None,
+        # mlp layer
+        intermediate_size=11008,
+        mlp_bias=False,
+        hidden_act="silu",
+        # rms norm
+        rms_norm_eps=1e-5,
+        # pretraining
+        pretraining_tp=1,
+        use_ls=True,
+        use_img_start_end_tokens=True,
+        special_token_maps={},
+        llm_vocab_size=92553,
+        llm_hidden_size=2048,
+        attn_implementation="flash_attention_2",
+        downsample_ratio=0.5,
+        img_context_token_id=92546,
+        pixel_shuffle_loc="pre",
+        layers_block_type=[
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+            "mamba2",
+        ],
+        **kwargs,
     ):
         super().__init__(**kwargs)
 
@@ -76,10 +84,10 @@ class mmMambaEmbeddingConfig(PretrainedConfig):
 
         self.rms_norm_eps = rms_norm_eps
 
-        self.pretraining_tp = pretraining_tp   
+        self.pretraining_tp = pretraining_tp
         self.use_ls = use_ls
         self.use_img_start_end_tokens = use_img_start_end_tokens
-        
+
         self.special_token_maps = special_token_maps
         self.llm_vocab_size = llm_vocab_size
         self.llm_hidden_size = llm_hidden_size
@@ -89,23 +97,29 @@ class mmMambaEmbeddingConfig(PretrainedConfig):
         self.pixel_shuffle_loc = pixel_shuffle_loc
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> 'PretrainedConfig':
+    def from_pretrained(
+        cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs
+    ) -> "PretrainedConfig":
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
-        if 'vision_config' in config_dict:
-            config_dict = config_dict['vision_config']
+        if "vision_config" in config_dict:
+            config_dict = config_dict["vision_config"]
 
-        if 'model_type' in config_dict and hasattr(cls, 'model_type') and config_dict['model_type'] != cls.model_type:
+        if (
+            "model_type" in config_dict
+            and hasattr(cls, "model_type")
+            and config_dict["model_type"] != cls.model_type
+        ):
             logger.warning(
                 f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f'{cls.model_type}. This is not supported for all configurations of models and can yield errors.'
+                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
             )
 
         return cls.from_dict(config_dict, **kwargs)
-    
+
     @classmethod
     def from_dict_path(cls, config_path):
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             config_dict = json.load(f)
 
         return cls.from_dict(config_dict)

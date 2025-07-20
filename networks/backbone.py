@@ -5,7 +5,7 @@ import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
 from mamba_ssm.utils.generation import InferenceParams
-from PIL import Image
+from for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModel, AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
@@ -229,9 +229,8 @@ class MMMambaEncoder:
         fused_norm_gate_path = Path(__file__).parent / "for_mmmamba"
         sys.path.append(str(fused_norm_gate_path))
 
-        self.model = AutoModel.from_pretrained(
+        self.model = mmMambaChatModel.from_pretrained(
             model_id,
-            trust_remote_code=True,
             cache_dir="./cache",
             torch_dtype=torch.bfloat16,
         ).eval()
