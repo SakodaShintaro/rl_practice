@@ -305,6 +305,7 @@ class MMMambaEncoder:
         for k, v in inference_params.key_value_memory_dict.items():
             print(f"{k}={v.shape} on {v.device}")
         input_ids = model_inputs["input_ids"].to(device)
+        print(f"{input_ids.shape=}")
 
         for itr in range(5):
             outputs = self.model.forward(
@@ -319,6 +320,9 @@ class MMMambaEncoder:
                 print(f"{k}={type(v)}")
                 for tensor in v:
                     print(f"  {tensor.shape} on {tensor.device} {torch.sum(tensor)}")
+                    tensor = tensor[:]
+            # inference_params.seqlen_offset += input_ids.shape[1]
+            inference_params.seqlen_offset += 1
 
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
