@@ -4,11 +4,11 @@ from pathlib import Path
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
-from mamba_ssm.utils.generation import InferenceParams
 from for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
+from mamba_ssm.utils.generation import InferenceParams
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
-from transformers import AutoModel, AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
+from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 
 class BaseCNN(nn.Module):
@@ -225,18 +225,12 @@ class MMMambaEncoder:
 
         model_id = "hustvl/mmMamba-linear"
 
-        # fused_norm_gate.pyが見える必要があるためpathに追加
-        fused_norm_gate_path = Path(__file__).parent / "for_mmmamba"
-        sys.path.append(str(fused_norm_gate_path))
-
         self.model = mmMambaChatModel.from_pretrained(
             model_id,
             cache_dir="./cache",
             torch_dtype=torch.bfloat16,
         ).eval()
         self.model = self.model.to(device)
-        # type(self.model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba_chat.mmMambaChatModel'>
-        # print(f"{type(self.model)=}")
 
         # type(self.model.language_model)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.modeling_mmMamba.mmMambaForCausalLM'>
         # print(f"{type(self.model.language_model)=}")  # AutoModel

@@ -1,22 +1,10 @@
-import warnings
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
+import torch
 import torch.distributed as dist
-import torch.nn as nn
-import torch.utils.checkpoint
 import transformers
-from peft import LoraConfig, get_peft_model
-from torch import nn
 from torch.nn import CrossEntropyLoss
-from transformers import (
-    AutoModel,
-    GenerationConfig,
-    LlamaForCausalLM,
-    LlamaTokenizer,
-    Qwen2ForCausalLM,
-)
 from transformers.generation import (
     GreedySearchDecoderOnlyOutput,
     SampleDecoderOnlyOutput,
@@ -29,24 +17,16 @@ from transformers.utils import logging as hf_logging
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
+from mamba_ssm.utils.generation import (
+    modify_logit_for_repetition_penalty,
+    sample,
+    update_graph_cache,
+)
+
 from .configuration_mmMamba_chat import mmMambaChatConfig
 from .conversation import get_conv_template
 from .modeling_mmMamba import mmMambaForCausalLM
 from .modeling_mmMamba_embedding import mmMambaEmbedding
-from transformers.cache_utils import Cache, DynamicCache
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import sys
-
-from mamba_ssm.utils.generation import InferenceParams
-from mamba_ssm.utils.generation import (
-    sample,
-    update_graph_cache,
-    modify_logit_for_repetition_penalty,
-)
-
-import time
-import logging
 
 logger = hf_logging.get_logger(__name__)
 

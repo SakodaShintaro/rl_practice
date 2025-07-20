@@ -16,7 +16,6 @@
 import math
 import queue
 import threading
-import warnings
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -823,9 +822,6 @@ class mmMambaDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
-
-        if output_attentions:
-            outputs += self_attn_weights
 
         # end_time = time.time()
         # print("language_model_time:", end_time-start_time)

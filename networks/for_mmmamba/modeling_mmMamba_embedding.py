@@ -33,9 +33,8 @@ from .fused_norm_gate import FusedRMSNormSwishGate
 
 compute_ARank = False  # [ARank] Set this to True to compute attention rank
 
-from .configuration_mmMamba_embedding import mmMambaEmbeddingConfig
-
 from .configuration_mmMamba import mmMambaConfig
+from .configuration_mmMamba_embedding import mmMambaEmbeddingConfig
 
 try:
     from flash_attn import flash_attn_with_kvcache
@@ -63,11 +62,17 @@ def _import_flash_attn():
     try:
         from flash_attn import (
             flash_attn_func as _flash_attn_func,
+        )
+        from flash_attn import (
             flash_attn_varlen_func as _flash_attn_varlen_func,
         )
         from flash_attn.bert_padding import (
-            pad_input as _pad_input,
             index_first_axis as _index_first_axis,
+        )
+        from flash_attn.bert_padding import (
+            pad_input as _pad_input,
+        )
+        from flash_attn.bert_padding import (
             unpad_input as _unpad_input,
         )
 
@@ -825,9 +830,6 @@ class mmMambaDecoderLayer(nn.Module):
 
         outputs = (hidden_states,)
 
-        if output_attentions:
-            outputs += (self_attn_weights,)
-
         return outputs
 
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
@@ -994,15 +996,6 @@ class mmMambaEmbedding(PreTrainedModel):
         ] * 0.0 + vision_hidden_states.flatten(0, 1)
 
         return hidden_states
-
-    def get_ignore_mask(self, input_ids):
-        ignore_ids = torch.tensor(
-            [self.special_token_maps[token] for token in [IMG_START_TOKEN, IMG_END_TOKEN]],
-            device=input_ids.device,
-        )
-        ignore_mask = torch.isin(input_ids, ignore_ids)
-
-        return ignore_mask
 
     def get_text_mask(self, input_ids):
         txt_mask = input_ids != self.config.img_context_token_id
