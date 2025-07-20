@@ -21,11 +21,15 @@ from wrappers import make_env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("exp_name", type=str)
     parser.add_argument("--seed", type=int, default=-1)
-    parser.add_argument("--log_interval", type=int, default=10)
-    parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--step_limit", type=int, default=200_000)
+    parser.add_argument("--debug", action="store_true")
+
+    parser.add_argument("--log_interval", type=int, default=10)
+    parser.add_argument("--buffer_capacity", type=int, default=2000)
     parser.add_argument("--seq_len", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument(
@@ -243,6 +247,11 @@ class PpoAgent:
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.debug:
+        args.off_wandb = True
+        args.render = 0
+        args.step_limit = 100
+        args.buffer_capacity = args.batch_size = 32
 
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
