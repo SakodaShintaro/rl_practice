@@ -1,6 +1,7 @@
 # Reference: https://github.com/xtma/pytorch_car_caring
 import argparse
 import os
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
+    parser.add_argument("--agent_type", type=str, default="ppo", choices=["ppo"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
@@ -256,27 +258,35 @@ if __name__ == "__main__":
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
+    exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
+    wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
+
+    # seeding
+    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.cuda.set_device(0)
+
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_PPO"
+    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
     result_dir.mkdir(parents=True, exist_ok=True)
+
+    # save seed to file
+    with open(result_dir / "seed.txt", "w") as f:
+        f.write(str(seed))
+
     video_dir = result_dir / "video"
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
     image_save_interval = 100
 
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
-    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
-    torch.manual_seed(seed)
-    if use_cuda:
-        torch.cuda.manual_seed(seed)
-    with open(result_dir / "seed.txt", "w") as f:
-        f.write(str(seed))
+    device = torch.device("cuda")
 
     agent = PpoAgent(args.buffer_capacity, args.seq_len, args.batch_size, args.model_name)
     env = make_env()
-
-    wandb.init(project="rl_practice", config=vars(args), name="PPO", save_code=True)
 
     log_episode = []
     log_step = []
@@ -284,7 +294,7 @@ if __name__ == "__main__":
     global_step = 0
     reward = 0.0
     start = time.time()
-    for i_ep in range(100000):
+    for i_ep in range(args.step_limit):
         state, _ = env.reset()
 
         if i_ep % image_save_interval == 0:
