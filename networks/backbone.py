@@ -306,7 +306,6 @@ class MMMambaEncoder:
         ]
 
         for itr in range(50):
-            print(f"{input_ids.shape=}")  # input_ids.shape=torch.Size([1, len])
             outputs = self.model.forward(
                 input_ids=input_ids,
                 pixel_values=(images if itr == 0 else None),
