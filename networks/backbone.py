@@ -288,7 +288,8 @@ class MMMambaEncoder:
         inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         images = self.transform(images).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
-            text=["Please describe" + "<IMG_CONTEXT>" * 256] * batch_size,
+            text=["Please describe" + "<img>" + "<IMG_CONTEXT>" * 256 + "</img><|im_end|>"]
+            * batch_size,
             return_tensors="pt",
             padding=True,
         )
@@ -299,7 +300,7 @@ class MMMambaEncoder:
 
         output_ids = []
 
-        for itr in range(5):
+        for itr in range(50):
             print(f"{input_ids.shape=}")  # input_ids.shape=torch.Size([1, len])
             outputs = self.model.forward(
                 input_ids=input_ids,
@@ -308,11 +309,12 @@ class MMMambaEncoder:
                 output_hidden_states=True,
             )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
             logits = outputs["logits"]
-            print(f"{logits.shape=}")  # logits.shape=torch.Size([1, 259, 92553])
+            # print(f"{logits.shape=}")  # logits.shape=torch.Size([1, len, 92553])
             last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
             token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
-            print(f"{token.shape=}")  # token.shape=torch.Size([1])
-            print(f"Token: {self.tokenizer.decode(token)}")
+            if itr > 1 and token.item() == 92542:
+                break
+            print(f"{token=}, Token: {self.tokenizer.decode(token)}")
             output_ids.append(token)
             inference_params.seqlen_offset += input_ids.shape[1]
             # input_ids = torch.cat([input_ids, token.unsqueeze(1)], dim=1)  # Append the new token
