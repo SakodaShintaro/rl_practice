@@ -218,13 +218,6 @@ class MambaGenerationMixin:
 class mmMambaChatModel(PreTrainedModel):
     config_class = mmMambaChatConfig
     # main_input_name = 'pixel_values'
-    _no_split_modules = [
-        "InternVisionModel",
-        "LlamaDecoderLayer",
-        "InternLM2DecoderLayer",
-        "Phi3DecoderLayer",
-        "Qwen2DecoderLayer",
-    ]
     _supports_flash_attn_2 = True
 
     def __init__(self, config: mmMambaChatConfig, embedding_model=None, language_model=None):
