@@ -13,27 +13,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import math
 from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
 from einops import rearrange
-from mamba_ssm.ops.triton.selective_state_update import selective_state_update
-from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
 from timm.models.layers import DropPath
 from torch import nn
 from transformers.activations import ACT2FN
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
-from .fused_norm_gate import FusedRMSNormSwishGate
-
 compute_ARank = False  # [ARank] Set this to True to compute attention rank
 
-from .configuration_mmMamba import mmMambaConfig
 from .configuration_mmMamba_embedding import mmMambaEmbeddingConfig
 from .modeling_mmMamba import Mamba2_LM
 
@@ -50,8 +43,6 @@ except ImportError:
 import torch.nn.functional as F
 
 logger = logging.get_logger(__name__)
-
-_CONFIG_FOR_DOC = "mmMambaEmbeddingConfig"
 
 flash_attn_func, flash_attn_varlen_func = None, None
 pad_input, index_first_axis, unpad_input = None, None, None
