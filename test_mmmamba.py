@@ -61,7 +61,7 @@ if __name__ == "__main__":
         "You must not go off the road indicated by the green. "
         "Choose your action from turn right, go straight, or turn left."
     )
-    descriptions = encoder.describe(images_sequence, prompt)
+    descriptions = encoder.describe(images_sequence[0:1])
 
     for i, (description) in enumerate(descriptions):
         image_names = [path.name for path in image_path_list[: i + 1]]

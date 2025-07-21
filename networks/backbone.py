@@ -263,7 +263,7 @@ class MMMambaEncoder:
         inference_params = InferenceParams(max_seqlen=1024, max_batch_size=4)
         images = self.transform(images).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
-            text=["Please describe" + "<IMG_CONTEXT>" * 256] * batch_size,
+            text=["Please describe: " + "<img>" + "<IMG_CONTEXT>" * 256 + "</img>"] * batch_size,
             return_tensors="pt",
             padding=True,
         )
@@ -296,24 +296,27 @@ class MMMambaEncoder:
         for k, v in inference_params.key_value_memory_dict.items():
             print(f"{k}={v.shape} on {v.device}")
         input_ids = model_inputs["input_ids"].to(device)
-        print(f"{input_ids.shape=}")
+
+        output_ids = []
 
         for itr in range(5):
+            print(f"{input_ids.shape=}")  # input_ids.shape=torch.Size([1, len])
             outputs = self.model.forward(
                 input_ids=input_ids,
-                pixel_values=images,
+                pixel_values=(images if itr == 0 else None),
                 inference_params=inference_params,
                 output_hidden_states=True,
             )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
-            print(f"After {itr}")
-            print(outputs["logits"].sum())
-            for k, v in inference_params.key_value_memory_dict.items():
-                print(f"{k}={type(v)}")
-                for tensor in v:
-                    print(f"  {tensor.shape} on {tensor.device} {torch.sum(tensor)}")
-                    tensor = tensor[:]
-            # inference_params.seqlen_offset += input_ids.shape[1]
-            inference_params.seqlen_offset += 1
+            logits = outputs["logits"]
+            print(f"{logits.shape=}")  # logits.shape=torch.Size([1, 259, 92553])
+            last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
+            token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
+            print(f"{token.shape=}")  # token.shape=torch.Size([1])
+            print(f"Token: {self.tokenizer.decode(token)}")
+            output_ids.append(token)
+            inference_params.seqlen_offset += input_ids.shape[1]
+            # input_ids = torch.cat([input_ids, token.unsqueeze(1)], dim=1)  # Append the new token
+            input_ids = token.unsqueeze(1)  # Append the new token
 
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
