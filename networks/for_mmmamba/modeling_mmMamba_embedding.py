@@ -28,7 +28,7 @@ from transformers.utils import logging
 compute_ARank = False  # [ARank] Set this to True to compute attention rank
 
 from .configuration_mmMamba_embedding import mmMambaEmbeddingConfig
-from .modeling_mmMamba import MHA_LM, Mamba2_LM
+from .modeling_mmMamba import MHA_LM, Mamba2_LM, mmMambaDecoderLayer
 
 try:
     from flash_attn import flash_attn_with_kvcache
@@ -263,72 +263,6 @@ def repeat_kv2(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 mmMamba_ATTENTION_CLASSES = {"mha": MHA_LM, "mamba2": Mamba2_LM}
 
 
-# Modified from transformers.model.llama.modeling_llama.LlamaDecoderLayer
-class mmMambaDecoderLayer(nn.Module):
-    def __init__(self, config: mmMambaEmbeddingConfig, layer_idx: int, drop_path_rate=0.0):
-        super().__init__()
-        self.hidden_size = config.hidden_size
-        self.config = config
-        self.layer_idx = layer_idx
-
-        self.attention = mmMamba_ATTENTION_CLASSES[config.layers_block_type[layer_idx]](
-            config=config, layer_idx=layer_idx
-        )
-
-        self.feed_forward = mmMambaMLP(config)
-        self.attention_norm = mmMambaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.ffn_norm = mmMambaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-
-        self.drop_path1 = DropPath(drop_path_rate) if drop_path_rate > 0.0 else nn.Identity()
-        self.drop_path2 = DropPath(drop_path_rate) if drop_path_rate > 0.0 else nn.Identity()
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        inference_params=None,
-        output_attentions: Optional[bool] = False,
-        use_cache: Optional[bool] = True,
-        **kwargs,
-    ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        """
-        Args:
-            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
-            output_attentions (`bool`, *optional*):
-                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
-                returned tensors for more detail.
-            use_cache (`bool`, *optional*)
-        """
-        residual = hidden_states
-
-        hidden_states = self.attention_norm(hidden_states)
-
-        # Self Attention
-        hidden_states = self.attention(
-            hidden_states=hidden_states,
-            inference_params=inference_params,
-            output_attentions=output_attentions,
-            use_cache=use_cache,
-            **kwargs,
-        )
-        hidden_states = residual + self.drop_path1(hidden_states)
-
-        # Fully Connected
-        residual = hidden_states
-        hidden_states = self.ffn_norm(hidden_states)
-        hidden_states = self.feed_forward(hidden_states)
-
-        hidden_states = residual + self.drop_path2(hidden_states)
-
-        outputs = (hidden_states,)
-
-        return outputs
-
-    def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
-        return self.attention.allocate_inference_cache(
-            batch_size, max_seqlen, dtype=dtype, **kwargs
-        )
-
-
 class VisionEmbeddings(nn.Module):
     def __init__(self, config: mmMambaEmbeddingConfig):
         super().__init__()
@@ -435,14 +369,8 @@ class mmMambaEmbedding(PreTrainedModel):
             )
 
         assert self.config.use_ls is False, "LS is not supported in mmMamba"
-        if hasattr(config, "drop_path_rate"):
-            dpr = [
-                x.item() for x in torch.linspace(0, config.drop_path_rate, config.num_hidden_layers)
-            ]
-        else:
-            dpr = [0.0] * config.num_hidden_layers
         self.encoder = nn.ModuleList(
-            [mmMambaDecoderLayer(config, idx, dpr[idx]) for idx in range(config.num_hidden_layers)]
+            [mmMambaDecoderLayer(config, idx) for idx in range(config.num_hidden_layers)]
         )
 
         if self.config.use_pixel_shuffle_proj:
