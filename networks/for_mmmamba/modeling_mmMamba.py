@@ -636,52 +636,30 @@ class Mamba2_LM(nn.Module):
             ssm_state.copy_(new_ssm_states)
 
         elif use_cache and inference_params.seqlen_offset > 0:
-            vkq = causal_conv1d_update(
-                vkq.transpose(1, 2).squeeze(-1),
-                conv_state,
-                self.conv1d.weight.squeeze(1),
-                self.conv1d.bias,
-                self.activation,
-            )
-
-            v, k, q = torch.split(
-                vkq,
-                [
-                    self.num_key_value_heads * self.head_dim,
-                    self.num_key_value_heads * self.head_dim,
-                    self.num_heads * self.head_dim,
-                ],
-                dim=1,
-            )
-
-            v = rearrange(v, "b (h n) -> b h n", h=self.num_key_value_heads)
-            k = rearrange(k, "b (h n) -> b h n", h=self.num_key_value_heads)
-            q = rearrange(q, "b (h n) -> b h n", h=self.num_heads)
-            k = repeat_kv2(k, self.num_key_value_groups)
-            v = repeat_kv2(v, self.num_key_value_groups)
-
-            dt = dt.transpose(1, 2).squeeze(-1)
-            dt = dt[:, :, None].expand(-1, -1, self.head_dim)
-            dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
-            A = -torch.exp(self.A_log_bias.float())
-            A = (
-                A[:, None, ...][:, :, None]
-                .expand(-1, self.head_dim, self.head_dim)
-                .to(dtype=torch.float32)
-            )
-            D = torch.zeros((self.num_heads, self.head_dim), dtype=A.dtype, device=A.device)
-
-            y = selective_state_update(
-                ssm_state,
-                v,
-                dt,
-                A=A,
-                B=k,
-                C=q,
-                D=D,
-                dt_bias=dt_bias,
-                dt_softplus=True,
-            )
+            if vkq.shape[1] == 1:
+                # vkq.shape=torch.Size([1, 1, 4096])
+                # conv_state.shape=torch.Size([1, 4096, 1])
+                # ssm_state.shape=torch.Size([1, 16, 128, 128])
+                # dt.shape=torch.Size([1, 1, 16])
+                y = self._single_step(
+                    vkq=vkq,
+                    conv_state=conv_state,
+                    ssm_state=ssm_state,
+                    dt=dt,
+                )
+                print(f"{y.shape=}")
+            else:
+                # vkq.shape=torch.Size([1, len, 4096])
+                # conv_state.shape=torch.Size([1, 4096, 1])
+                # ssm_state.shape=torch.Size([1, 16, 128, 128])
+                # dt.shape=torch.Size([1, len, 16])
+                y = self._multi_step(
+                    vkq=vkq,
+                    conv_state=conv_state,
+                    ssm_state=ssm_state,
+                    dt=dt,
+                )
+                print(f"{y.shape=}")
 
         else:
             vkq = causal_conv1d_fn(
@@ -730,6 +708,83 @@ class Mamba2_LM(nn.Module):
         y_true = self.o_proj(y_true)
 
         return y_true
+
+    def _single_step(self, vkq, conv_state, ssm_state, dt):
+        vkq = causal_conv1d_update(
+            vkq.transpose(1, 2).squeeze(-1),
+            conv_state,
+            self.conv1d.weight.squeeze(1),
+            self.conv1d.bias,
+            self.activation,
+        )
+
+        v, k, q = torch.split(
+            vkq,
+            [
+                self.num_key_value_heads * self.head_dim,
+                self.num_key_value_heads * self.head_dim,
+                self.num_heads * self.head_dim,
+            ],
+            dim=1,
+        )
+
+        v = rearrange(v, "b (h n) -> b h n", h=self.num_key_value_heads)
+        k = rearrange(k, "b (h n) -> b h n", h=self.num_key_value_heads)
+        q = rearrange(q, "b (h n) -> b h n", h=self.num_heads)
+        k = repeat_kv2(k, self.num_key_value_groups)
+        v = repeat_kv2(v, self.num_key_value_groups)
+
+        dt = dt.transpose(1, 2).squeeze(-1)
+        dt = dt[:, :, None].expand(-1, -1, self.head_dim)
+        dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
+        A = -torch.exp(self.A_log_bias.float())
+        A = (
+            A[:, None, ...][:, :, None]
+            .expand(-1, self.head_dim, self.head_dim)
+            .to(dtype=torch.float32)
+        )
+        D = torch.zeros((self.num_heads, self.head_dim), dtype=A.dtype, device=A.device)
+
+        y = selective_state_update(
+            ssm_state,
+            v,
+            dt,
+            A=A,
+            B=k,
+            C=q,
+            D=D,
+            dt_bias=dt_bias,
+            dt_softplus=True,
+        )
+        return y
+
+    def _multi_step(self, vkq, conv_state, ssm_state, dt):
+        """
+        Args:
+            vkq: (B, L, C)
+            dt: (B, L, H)
+            Returns:
+                y: (B, L, H, D)
+        """
+        B, L, C = vkq.shape
+
+        y_list = []
+
+        for t in range(L):
+            vkq_t = vkq[:, t : t + 1, :]  # (B, 1, C)
+            dt_t = dt[:, t : t + 1, :]  # (B, 1, H)
+
+            y_t = self._single_step(
+                vkq=vkq_t,
+                conv_state=conv_state,
+                ssm_state=ssm_state,
+                dt=dt_t,  # (B, 1, H)
+            )  # returns (B, H, D)
+
+            y_list.append(y_t.unsqueeze(1))  # → (B, 1, H, D)
+
+        y = torch.cat(y_list, dim=1)  # → (B, L, H, D)
+        return y
 
     def _get_states_from_cache(self, inference_params, batch_size, initialize_states=False):
         device = self.conv1d.weight.device

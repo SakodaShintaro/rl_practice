@@ -328,6 +328,54 @@ class MMMambaEncoder:
         x = x.to(torch.float32)
         return x
 
+    @torch.no_grad()
+    def step(self, image: torch.Tensor, inference_params: InferenceParams) -> tuple[torch.Tensor, InferenceParams]:
+        device = image.device
+        batch_size = image.shape[0]
+        assert batch_size == 1, "Batch size must be 1 for stepwise inference"
+        image = self.transform(image).to(device).to(torch.bfloat16)
+        model_inputs = self.tokenizer(
+            text=["Please describe" + "<IMG_CONTEXT>" * 256 + "<|im_end|><|im_end|>"] * batch_size,
+            return_tensors="pt",
+            padding=True,
+        )
+        # print(f"Before")
+        # for k, v in inference_params.key_value_memory_dict.items():
+        #     for tensor in v:
+        #         print(f"{k}={tensor.shape} on {tensor.device} {tensor.sum()=}")
+        input_ids = model_inputs["input_ids"].to(device)
+
+        output_ids = []
+        stop_token_ids = [
+            2,
+            1163,
+            92543,
+            92542,
+        ]
+
+        for itr in range(1):
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                pixel_values=(image if itr == 0 else None),
+                inference_params=inference_params,
+                output_hidden_states=True,
+            )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
+            logits = outputs["logits"]
+            # print(f"{logits.shape=}")  # logits.shape=torch.Size([1, len, 92553])
+            last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
+            token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
+            if token.item() in stop_token_ids:
+                break
+            print(f"{token=}, Token: {self.tokenizer.decode(token)}")
+            output_ids.append(token)
+            inference_params.seqlen_offset += input_ids.shape[1]
+            # input_ids = torch.cat([input_ids, token.unsqueeze(1)], dim=1)  # Append the new token
+            input_ids = token.unsqueeze(1)  # Append the new token
+
+        x = outputs["hidden_states"][-1][:, 0]
+        x = x.to(torch.float32)
+        return x, inference_params
+
 
 if __name__ == "__main__":
     import torch

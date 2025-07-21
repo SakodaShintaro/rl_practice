@@ -3,6 +3,7 @@ from pathlib import Path
 
 import cv2
 import torch
+from mamba_ssm.utils.generation import InferenceParams
 from torchvision import transforms
 
 from networks.backbone import MMMambaEncoder
@@ -67,3 +68,11 @@ if __name__ == "__main__":
         image_names = [path.name for path in image_path_list[: i + 1]]
         print(f"Description {i + 1}: {description}")
         print("-" * 30)
+
+    # Test step
+    inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+
+    for i, image_tensor in enumerate(images_sequence):
+        print(f"start {i=}")
+        image_tensor = image_tensor.unsqueeze(0)
+        encoder.step(image_tensor, inference_params)
