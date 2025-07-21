@@ -13,76 +13,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from einops import rearrange
-from timm.models.layers import DropPath
 from torch import nn
-from transformers.activations import ACT2FN
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
-compute_ARank = False  # [ARank] Set this to True to compute attention rank
-
 from .configuration_mmMamba_embedding import mmMambaEmbeddingConfig
-from .modeling_mmMamba import (
-    MHA_LM,
-    Mamba2_LM,
-    mmMambaDecoderLayer,
-    mmMambaRotaryEmbedding,
-)
-
-try:
-    from flash_attn import flash_attn_with_kvcache
-except ImportError:
-    flash_attn_with_kvcache = None
-
-try:
-    from flash_attn.layers.rotary import RotaryEmbedding
-except ImportError:
-    RotaryEmbedding = None
-
-import torch.nn.functional as F
+from .modeling_mmMamba import mmMambaDecoderLayer
 
 logger = logging.get_logger(__name__)
-
-flash_attn_func, flash_attn_varlen_func = None, None
-pad_input, index_first_axis, unpad_input = None, None, None
-
-
-def _import_flash_attn():
-    global flash_attn_func, flash_attn_varlen_func
-    global pad_input, index_first_axis, unpad_input
-    try:
-        from flash_attn import (
-            flash_attn_func as _flash_attn_func,
-        )
-        from flash_attn import (
-            flash_attn_varlen_func as _flash_attn_varlen_func,
-        )
-        from flash_attn.bert_padding import (
-            index_first_axis as _index_first_axis,
-        )
-        from flash_attn.bert_padding import (
-            pad_input as _pad_input,
-        )
-        from flash_attn.bert_padding import (
-            unpad_input as _unpad_input,
-        )
-
-        flash_attn_func, flash_attn_varlen_func = _flash_attn_func, _flash_attn_varlen_func
-        pad_input, index_first_axis, unpad_input = _pad_input, _index_first_axis, _unpad_input
-    except ImportError:
-        raise ImportError("flash_attn is not installed.")
-
-
-_import_flash_attn()
-
-
-mmMamba_ATTENTION_CLASSES = {"mha": MHA_LM, "mamba2": Mamba2_LM}
 
 
 class VisionEmbeddings(nn.Module):
