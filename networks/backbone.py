@@ -288,8 +288,7 @@ class MMMambaEncoder:
         inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         images = self.transform(images).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
-            text=["Please describe" + "<img>" + "<IMG_CONTEXT>" * 256 + "</img><|im_end|>"]
-            * batch_size,
+            text=["Please describe" + "<IMG_CONTEXT>" * 256 + "<|im_end|><|im_end|>"] * batch_size,
             return_tensors="pt",
             padding=True,
         )
@@ -299,6 +298,12 @@ class MMMambaEncoder:
         input_ids = model_inputs["input_ids"].to(device)
 
         output_ids = []
+        stop_token_ids = [
+            2,
+            1163,
+            92543,
+            92542,
+        ]
 
         for itr in range(50):
             print(f"{input_ids.shape=}")  # input_ids.shape=torch.Size([1, len])
@@ -312,7 +317,7 @@ class MMMambaEncoder:
             # print(f"{logits.shape=}")  # logits.shape=torch.Size([1, len, 92553])
             last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
             token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
-            if itr > 1 and token.item() == 92542:
+            if token.item() in stop_token_ids:
                 break
             print(f"{token=}, Token: {self.tokenizer.decode(token)}")
             output_ids.append(token)
