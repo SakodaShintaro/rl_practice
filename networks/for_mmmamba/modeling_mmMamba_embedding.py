@@ -32,7 +32,6 @@ from .modeling_mmMamba import (
     MHA_LM,
     Mamba2_LM,
     mmMambaDecoderLayer,
-    mmMambaRMSNorm,
     mmMambaRotaryEmbedding,
 )
 
@@ -99,28 +98,6 @@ def _update_kv_cache(kv, inference_params, layer_idx):
     assert kv_cache is not None
     kv_cache[batch_start:batch_end, sequence_start:sequence_end, ...] = kv
     return kv_cache[batch_start:batch_end, :sequence_end, ...]
-
-
-# Copied from transformers.model.llama.modeling_llama.LlamaLinearScalingRotaryEmbedding with Llama->mmMamba
-class mmMambaLinearScalingRotaryEmbedding(mmMambaRotaryEmbedding):
-    """mmMambaRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
-
-    def __init__(
-        self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0
-    ):
-        self.scaling_factor = scaling_factor
-        super().__init__(dim, max_position_embeddings, base, device)
-
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
-        self.max_seq_len_cached = seq_len
-        t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
-        t = t / self.scaling_factor
-
-        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
 
 # Copied from transformers.model.llama.modeling_llama.LlamaDynamicNTKScalingRotaryEmbedding with Llama->mmMamba
