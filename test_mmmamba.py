@@ -1,4 +1,5 @@
 import argparse
+import time
 from pathlib import Path
 
 import cv2
@@ -22,7 +23,7 @@ if __name__ == "__main__":
     image_path_list = sorted(images_dir.glob("*.png"))
     print(f"{len(image_path_list)=}")
 
-    NUM = 10
+    NUM = 20
     image_path_list = image_path_list[:NUM]
     image_list = []
 
@@ -72,7 +73,13 @@ if __name__ == "__main__":
     # Test step
     inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
 
+    start = time.time()
+
     for i, image_tensor in enumerate(images_sequence):
         print(f"start {i=}")
         image_tensor = image_tensor.unsqueeze(0)
         encoder.step(image_tensor, inference_params)
+        end = time.time()
+        elapsed_msec = (end - start) * 1000
+        average_msec = elapsed_msec / (i + 1)
+        print(f"Step {i + 1}/{len(images_sequence)}: {average_msec=:.1f} ms")
