@@ -80,15 +80,23 @@ class PpoAgent:
     ppo_epoch = 10
     gamma = 0.99
 
-    def __init__(self, buffer_capacity, seq_len, batch_size, model_name) -> None:
-        self.buffer_capacity = buffer_capacity
-        self.seq_len = seq_len
-        self.batch_size = batch_size
+    def __init__(self, args, observation_space, action_space) -> None:
+        # action properties
+        self.action_space = action_space
+        self.action_dim = np.prod(action_space.shape)
+        self.action_low = action_space.low
+        self.action_high = action_space.high
+        self.action_scale = (action_space.high - action_space.low) / 2.0
+        self.action_bias = (action_space.high + action_space.low) / 2.0
+
+        self.buffer_capacity = args.buffer_capacity
+        self.seq_len = args.seq_len
+        self.batch_size = args.batch_size
         self.training_step = 0
         self.net = {
-            "default": PpoBetaPolicyAndValue(3, seq_len).to(device),
+            "default": PpoBetaPolicyAndValue(3, self.seq_len).to(device),
             "paligemma": PpoPaligemmaPolicyAndValue(3).to(device),
-        }[model_name]
+        }[args.model_name]
         num_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
         self.buffer = np.empty(
@@ -289,11 +297,12 @@ if __name__ == "__main__":
 
     device = torch.device("cuda")
 
-    agent = PpoAgent(args.buffer_capacity, args.seq_len, args.batch_size, args.model_name)
     # env setup
     env = make_env()
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
+
+    agent = PpoAgent(args, env.observation_space, env.action_space)
 
     target_score = args.target_score if args.target_score is not None else env.spec.reward_threshold
 
