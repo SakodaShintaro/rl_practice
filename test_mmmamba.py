@@ -11,7 +11,7 @@ from networks.backbone import MMMambaEncoder
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("images_dir", type=Path)
+    parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
     return parser.parse_args()
 
 
