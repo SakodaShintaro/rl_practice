@@ -636,30 +636,16 @@ class Mamba2_LM(nn.Module):
             ssm_state.copy_(new_ssm_states)
 
         elif use_cache and inference_params.seqlen_offset > 0:
-            if vkq.shape[1] == 1:
-                # vkq.shape=torch.Size([1, 1, 4096])
-                # conv_state.shape=torch.Size([1, 4096, 1])
-                # ssm_state.shape=torch.Size([1, 16, 128, 128])
-                # dt.shape=torch.Size([1, 1, 16])
-                y = self._single_step(
-                    vkq=vkq,
-                    conv_state=conv_state,
-                    ssm_state=ssm_state,
-                    dt=dt,
-                )
-                print(f"{y.shape=}")
-            else:
-                # vkq.shape=torch.Size([1, len, 4096])
-                # conv_state.shape=torch.Size([1, 4096, 1])
-                # ssm_state.shape=torch.Size([1, 16, 128, 128])
-                # dt.shape=torch.Size([1, len, 16])
-                y = self._multi_step(
-                    vkq=vkq,
-                    conv_state=conv_state,
-                    ssm_state=ssm_state,
-                    dt=dt,
-                )
-                print(f"{y.shape=}")
+            # vkq.shape=torch.Size([1, len, 4096])
+            # conv_state.shape=torch.Size([1, 4096, 1])
+            # ssm_state.shape=torch.Size([1, 16, 128, 128])
+            # dt.shape=torch.Size([1, len, 16])
+            y = self._multi_step(
+                vkq=vkq,
+                conv_state=conv_state,
+                ssm_state=ssm_state,
+                dt=dt,
+            )
 
         else:
             vkq = causal_conv1d_fn(
