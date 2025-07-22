@@ -245,7 +245,8 @@ class MMMambaEncoder:
         IMAGENET_MEAN = (0.485, 0.456, 0.406)
         IMAGENET_STD = (0.229, 0.224, 0.225)
 
-        self.input_size = 448
+        self.input_size = 224
+        self.image_token_num = (self.input_size // 14 // 2) ** 2
 
         self.transform = T.Compose(
             [
@@ -288,7 +289,10 @@ class MMMambaEncoder:
         inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         images = self.transform(images).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
-            text=["Please describe" + "<IMG_CONTEXT>" * 256 + "<|im_end|><|im_end|>"] * batch_size,
+            text=[
+                "Please describe" + "<IMG_CONTEXT>" * self.image_token_num + "<|im_end|><|im_end|>"
+            ]
+            * batch_size,
             return_tensors="pt",
             padding=True,
         )
@@ -335,7 +339,10 @@ class MMMambaEncoder:
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
         image = self.transform(image).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
-            text=["Please describe" + "<IMG_CONTEXT>" * 256 + "<|im_end|><|im_end|>"] * batch_size,
+            text=[
+                "Please describe" + "<IMG_CONTEXT>" * self.image_token_num + "<|im_end|><|im_end|>"
+            ]
+            * batch_size,
             return_tensors="pt",
             padding=True,
         )
