@@ -356,7 +356,7 @@ class MMMambaEncoder:
         for itr in range(1):
             outputs = self.model.forward(
                 input_ids=input_ids,
-                pixel_values=(image if itr == 0 else None),
+                pixel_values=image,
                 inference_params=inference_params,
                 output_hidden_states=True,
             )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
