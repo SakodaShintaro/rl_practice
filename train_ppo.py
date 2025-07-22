@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import gymnasium as gym
 import numpy as np
 import pandas as pd
 import torch
@@ -26,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent_type", type=str, default="ppo", choices=["ppo"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--target_score", type=float, default=None)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument("--step_limit", type=int, default=200_000)
     parser.add_argument("--debug", action="store_true")
@@ -282,18 +284,26 @@ if __name__ == "__main__":
     image_dir = result_dir / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
     image_save_interval = 100
+    log_step = []
+    log_episode = []
 
     device = torch.device("cuda")
 
     agent = PpoAgent(args.buffer_capacity, args.seq_len, args.batch_size, args.model_name)
+    # env setup
     env = make_env()
+    env.action_space.seed(seed)
+    assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    log_episode = []
-    log_step = []
-    score_list = []
-    global_step = 0
-    reward = 0.0
+    target_score = args.target_score if args.target_score is not None else env.spec.reward_threshold
+
     start = time.time()
+
+    global_step = 0
+    score_list = []
+    step_limit = args.step_limit
+    reward = 0.0
+
     for i_ep in range(args.step_limit):
         state, _ = env.reset()
 
@@ -363,11 +373,18 @@ if __name__ == "__main__":
             state = state_
             if done or die:
                 break
+
+            if global_step >= step_limit:
+                break
+
+        if global_step >= step_limit:
+            break
+
         score = info["episode"]["r"]
         score_list.append(score)
         score_list = score_list[-20:]
         recent_average_score = np.mean(score_list)
-        is_solved = recent_average_score > env.spec.reward_threshold
+        is_solved = recent_average_score > target_score
 
         weighted_reward = 0.0
         coeff = 1.0
