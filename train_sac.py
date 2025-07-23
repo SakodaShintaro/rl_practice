@@ -15,6 +15,7 @@ import torch
 
 import wandb
 from agents.avg import AvgAgent
+from agents.ppo import PpoAgent
 from agents.sac import SacAgent
 from utils import concat_images
 from wrappers import make_env
@@ -23,7 +24,7 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
-    parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg"])
+    parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--target_score", type=float, default=None)
@@ -54,6 +55,14 @@ def parse_args() -> argparse.Namespace:
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.8, type=float)
+
+    # for PPO
+    parser.add_argument("--buffer_capacity", type=int, default=2000)
+    parser.add_argument("--seq_len", type=int, default=2)
+    parser.add_argument(
+        "--model_name", type=str, default="default", choices=["default", "paligemma"]
+    )
+
     return parser.parse_args()
 
 
@@ -118,6 +127,8 @@ if __name__ == "__main__":
         agent = SacAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "avg":
         agent = AvgAgent(args, env.observation_space, env.action_space)
+    elif args.agent_type == "ppo":
+        agent = PpoAgent(args, env.observation_space, env.action_space)
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
