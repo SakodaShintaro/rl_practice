@@ -244,6 +244,8 @@ class PpoAgent:
         action_info = {
             "a_logp": a_logp,
             "value": value,
+            "reward": reward,
+            "normed_reward": reward / 10.0,
         }
 
         for key in ["x", "value_x", "policy_x"]:
@@ -252,6 +254,10 @@ class PpoAgent:
                 action_info[f"activation/{key}_norm"] = value_tensor.norm(dim=1).mean().item()
                 action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
                 action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
+
+        # パラメータのnorm値を追加
+        for name, p in self.net.named_parameters():
+            action_info[f"params/{name}"] = p.norm().item()
 
         self.episode_states.append(obs)
         self.episode_actions.append(action)
@@ -263,6 +269,8 @@ class PpoAgent:
     def process_env_feedback(self, global_step, next_obs, action, reward, termination, truncation):
         self.episode_reward += reward
         normed_reward = reward / 10.0
+
+        feedback_info = {}
 
         if len(self.episode_states) > 0:
             prev_obs = self.episode_states[-1]
@@ -281,6 +289,12 @@ class PpoAgent:
                 )
             ):
                 train_result = self.update()
-                return train_result
+                feedback_info.update(train_result)
 
-        return {}
+        if termination or truncation:
+            # エピソード終了時の統計情報を追加
+            if len(self.episode_values) > 0:
+                feedback_info["first_value"] = self.episode_values[0]
+                feedback_info["weighted_reward"] = getattr(self, 'episode_reward', 0.0)
+
+        return feedback_info
