@@ -86,8 +86,8 @@ class PpoAgent:
         self.action_dim = np.prod(action_space.shape)
         self.action_low = action_space.low
         self.action_high = action_space.high
-        self.action_scale = (action_space.high - action_space.low) / 2.0
-        self.action_bias = (action_space.high + action_space.low) / 2.0
+        self.action_scale = action_space.high - action_space.low
+        self.action_bias = (action_space.high + action_space.low) / 2.0 - 0.5 * self.action_scale
 
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
@@ -158,6 +158,10 @@ class PpoAgent:
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
         value = value.item()
+
+        action = action * self.action_scale + self.action_bias
+        action = np.clip(action, self.action_low, self.action_high)
+
         return action, a_logp, value, result_dict
 
     def store(self, transition: tuple) -> bool:
@@ -178,6 +182,10 @@ class PpoAgent:
         v = torch.tensor(self.buffer["v"]).to(device).view(-1, 1)
         old_a_logp = torch.tensor(self.buffer["a_logp"]).to(device).view(-1, 1)
         done = torch.tensor(self.buffer["done"]).to(device).view(-1, 1)
+
+        bias = torch.tensor(self.action_bias, device=device).view(1, -1)
+        scale = torch.tensor(self.action_scale, device=device).view(1, -1)
+        a = (a - bias) / scale
 
         target_v = r[:-1] + (1 - done[:-1]) * self.gamma * v[1:]
         adv = target_v - v[:-1]
@@ -326,9 +334,7 @@ if __name__ == "__main__":
         while True:
             global_step += 1
             action, a_logp, value, net_out_dict = agent.select_action(reward, state)
-            state_, reward, done, die, info = env.step(
-                action * np.array([2.0, 1.0, 1.0]) + np.array([-1.0, 0.0, 0.0])
-            )
+            state_, reward, done, die, info = env.step(action)
             done = bool(done or die)
             normed_reward = reward / 10.0
             if len(reward_list) == 0:
