@@ -126,7 +126,7 @@ class PpoAgent:
         self.episode_reward += reward
         normed_reward = reward / 10.0
 
-        feedback_info = {}
+        info_dict = {}
 
         if len(self.episode_states) > 0:
             prev_obs = self.episode_states[-1]
@@ -145,16 +145,20 @@ class PpoAgent:
             self.counter += 1
             if self.counter == self.buffer_capacity:
                 train_result = self._update()
-                feedback_info.update(train_result)
+                info_dict.update(train_result)
                 self.counter = 0
 
         if termination or truncation:
             # エピソード終了時の統計情報を追加
             if len(self.episode_values) > 0:
-                feedback_info["first_value"] = self.episode_values[0]
-                feedback_info["weighted_reward"] = getattr(self, "episode_reward", 0.0)
+                info_dict["first_value"] = self.episode_values[0]
+                info_dict["weighted_reward"] = getattr(self, "episode_reward", 0.0)
 
-        return feedback_info
+        # make decision
+        action, action_info = self.select_action(global_step, obs)
+        info_dict.update(action_info)
+
+        return action, info_dict
 
     ####################
     # Internal methods #
