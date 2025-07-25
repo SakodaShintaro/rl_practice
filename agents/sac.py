@@ -251,13 +251,12 @@ class SacAgent:
         self.encoded_obs = None
         self.prev_action = None
 
-    def initialize_for_episode(self):
+    def initialize_for_episode(self) -> None:
         self.encoded_obs = None
         self.prev_action = None
-        return
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs):
+    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
