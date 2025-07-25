@@ -173,7 +173,8 @@ class AvgAgent:
         action, action_info = self.select_action(global_step, obs)
         info_dict.update(action_info)
 
-        done = termination or truncation
+        # done = termination or truncation
+        done = False
 
         obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
         curr_obs = self.network.encoder_image.encode(obs)

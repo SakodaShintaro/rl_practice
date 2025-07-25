@@ -84,8 +84,7 @@ class Network(nn.Module):
             else:
                 next_critic_value = next_critic_value.view(-1)
             curr_reward = data.rewards[:, -2].flatten()
-            # curr_continue = 1 - data.dones[:, -2].flatten()
-            curr_continue = 1.0  # It is better not to use dones for now
+            curr_continue = 1 - data.dones[:, -2].flatten()
             target_value = curr_reward + curr_continue * self.gamma * next_critic_value
 
         curr_critic_output_dict = self.critic(state_curr, data.actions[:, -2])
@@ -291,7 +290,7 @@ class SacAgent:
             self.encoded_obs[0].cpu().numpy(),
             self.prev_action,
             train_reward,
-            termination or truncation,
+            False,
         )
 
         if global_step < self.learning_starts:
