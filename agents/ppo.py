@@ -130,15 +130,6 @@ class PpoAgent:
 
         return action, a_logp, value, result_dict
 
-    def store(self, transition: tuple) -> bool:
-        self.buffer[self.counter] = transition
-        self.counter += 1
-        if self.counter == self.buffer_capacity:
-            self.counter = 0
-            return True
-        else:
-            return False
-
     def update(self) -> None:
         self.training_step += 1
 
@@ -278,18 +269,19 @@ class PpoAgent:
             prev_value = self.episode_values[-1]
             prev_logp = self.episode_logps[-1]
 
-            if self.store(
-                (
-                    prev_obs,
-                    prev_action,
-                    prev_logp,
-                    normed_reward,
-                    prev_value,
-                    termination or truncation,
-                )
-            ):
+            self.buffer[self.counter] = (
+                prev_obs,
+                prev_action,
+                prev_logp,
+                normed_reward,
+                prev_value,
+                termination or truncation,
+            )
+            self.counter += 1
+            if self.counter == self.buffer_capacity:
                 train_result = self.update()
                 feedback_info.update(train_result)
+                self.counter = 0
 
         if termination or truncation:
             # エピソード終了時の統計情報を追加
