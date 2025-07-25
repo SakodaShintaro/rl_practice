@@ -84,7 +84,8 @@ class Network(nn.Module):
             else:
                 next_critic_value = next_critic_value.view(-1)
             curr_reward = data.rewards[:, -2].flatten()
-            curr_continue = 1 - data.dones[:, -2].flatten()
+            # curr_continue = 1 - data.dones[:, -2].flatten()
+            curr_continue = 1.0  # It is better not to use dones for now
             target_value = curr_reward + curr_continue * self.gamma * next_critic_value
 
         curr_critic_output_dict = self.critic(state_curr, data.actions[:, -2])
@@ -247,8 +248,12 @@ class SacAgent:
             "actor": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
         }
+        self.encoded_obs = None
+        self.prev_action = None
 
     def initialize_for_episode(self):
+        self.encoded_obs = None
+        self.prev_action = None
         return
 
     @torch.inference_mode()
@@ -272,24 +277,28 @@ class SacAgent:
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
 
         self.encoded_obs = output_enc
+        self.prev_action = action
         return action, info_dict
 
-    def process_env_feedback(
-        self, global_step, next_obs, action, reward, termination, truncation
-    ) -> dict:
+    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        action_norm = np.linalg.norm(action)
+        action_norm = np.linalg.norm(self.prev_action)
         train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
         self.rb.add(
-            self.encoded_obs[0].cpu().numpy(), action, train_reward, termination or truncation
+            self.encoded_obs[0].cpu().numpy(),
+            self.prev_action,
+            train_reward,
+            termination or truncation,
         )
 
         if global_step < self.learning_starts:
-            return info_dict
+            action, action_info = self.select_action(global_step, obs)
+            info_dict.update(action_info)
+            return action, info_dict
         elif global_step == self.learning_starts:
             print(f"Start training at global step {global_step}.")
 
@@ -349,4 +358,8 @@ class SacAgent:
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
 
-        return info_dict
+        # make decision
+        action, action_info = self.select_action(global_step, obs)
+        info_dict.update(action_info)
+
+        return action, info_dict

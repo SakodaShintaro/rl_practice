@@ -133,19 +133,18 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
     for episode_id in range(10000):
+        # initialize episode
         obs, _ = env.reset()
-        agent.initialize_for_episode()
-        reward_list = []
         curr_image_list = [concat_images(env.render(), curr_obs_float, pred_obs_float)]
+        agent.initialize_for_episode()
+        action, agent_info = agent.select_action(global_step, obs)
 
         while True:
             global_step += 1
 
-            # select action
-            action, action_info = agent.select_action(global_step, obs)
-
             # step
-            next_obs, reward, termination, truncation, env_info = env.step(action)
+            obs, reward, termination, truncation, env_info = env.step(action)
+            action, agent_info = agent.step(global_step, obs, reward, termination, truncation)
 
             # render
             bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
@@ -160,13 +159,6 @@ if __name__ == "__main__":
             if global_step >= step_limit:
                 break
 
-            # process environment feedback
-            feedback_info = agent.process_env_feedback(
-                global_step, next_obs, action, reward, termination, truncation
-            )
-
-            obs = next_obs
-
             if global_step % 10 == 0:
                 elapsed_time = time.time() - start_time
                 data_dict = {
@@ -174,8 +166,7 @@ if __name__ == "__main__":
                     "charts/elapse_time_sec": elapsed_time,
                     "charts/SPS": global_step / elapsed_time,
                     "reward": reward,
-                    **action_info,
-                    **feedback_info,
+                    **agent_info,
                 }
 
                 wandb.log(data_dict)
