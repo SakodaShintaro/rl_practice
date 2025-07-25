@@ -86,8 +86,82 @@ class PpoAgent:
         self.s_list = []
         self.a_list = []
 
+    def initialize_for_episode(self) -> None:
+        self.episode_reward = 0.0
+        self.episode_states = []
+        self.episode_actions = []
+        self.episode_values = []
+        self.episode_logps = []
+
+    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
+        reward = getattr(self, "episode_reward", 0.0)
+        action, a_logp, value, result_dict = self._select_action_original(reward, obs)
+
+        action_info = {
+            "a_logp": a_logp,
+            "value": value,
+            "reward": reward,
+            "normed_reward": reward / 10.0,
+        }
+
+        for key in ["x", "value_x", "policy_x"]:
+            if key in result_dict:
+                value_tensor = result_dict[key]
+                action_info[f"activation/{key}_norm"] = value_tensor.norm(dim=1).mean().item()
+                action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
+                action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
+
+        # パラメータのnorm値を追加
+        for name, p in self.net.named_parameters():
+            action_info[f"params/{name}"] = p.norm().item()
+
+        self.episode_states.append(obs)
+        self.episode_actions.append(action)
+        self.episode_values.append(value)
+        self.episode_logps.append(a_logp)
+
+        return action, action_info
+
+    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
+        self.episode_reward += reward
+        normed_reward = reward / 10.0
+
+        feedback_info = {}
+
+        if len(self.episode_states) > 0:
+            prev_obs = self.episode_states[-1]
+            prev_action = self.episode_actions[-1]
+            prev_value = self.episode_values[-1]
+            prev_logp = self.episode_logps[-1]
+
+            self.buffer[self.counter] = (
+                prev_obs,
+                prev_action,
+                prev_logp,
+                normed_reward,
+                prev_value,
+                termination or truncation,
+            )
+            self.counter += 1
+            if self.counter == self.buffer_capacity:
+                train_result = self._update()
+                feedback_info.update(train_result)
+                self.counter = 0
+
+        if termination or truncation:
+            # エピソード終了時の統計情報を追加
+            if len(self.episode_values) > 0:
+                feedback_info["first_value"] = self.episode_values[0]
+                feedback_info["weighted_reward"] = getattr(self, "episode_reward", 0.0)
+
+        return feedback_info
+
+    ####################
+    # Internal methods #
+    ####################
+
     @torch.inference_mode()
-    def select_action_original(self, reward: float, state: np.ndarray) -> tuple:
+    def _select_action_original(self, reward: float, state: np.ndarray) -> tuple:
         reward = torch.from_numpy(np.array(reward)).to(self.device).unsqueeze(0)
         state = torch.from_numpy(state).to(self.device).unsqueeze(0)
         self.r_list.append(reward)
@@ -130,7 +204,7 @@ class PpoAgent:
 
         return action, a_logp, value, result_dict
 
-    def update(self) -> None:
+    def _update(self) -> None:
         self.training_step += 1
 
         s = torch.tensor(self.buffer["s"]).to(self.device)
@@ -220,73 +294,3 @@ class PpoAgent:
         result_dict["ppo/average_target_v"] = target_v.mean().item()
         result_dict["ppo/average_adv"] = adv.mean().item()
         return result_dict
-
-    def initialize_for_episode(self):
-        self.episode_reward = 0.0
-        self.episode_states = []
-        self.episode_actions = []
-        self.episode_values = []
-        self.episode_logps = []
-
-    def select_action(self, global_step, obs):
-        reward = getattr(self, "episode_reward", 0.0)
-        action, a_logp, value, result_dict = self.select_action_original(reward, obs)
-
-        action_info = {
-            "a_logp": a_logp,
-            "value": value,
-            "reward": reward,
-            "normed_reward": reward / 10.0,
-        }
-
-        for key in ["x", "value_x", "policy_x"]:
-            if key in result_dict:
-                value_tensor = result_dict[key]
-                action_info[f"activation/{key}_norm"] = value_tensor.norm(dim=1).mean().item()
-                action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
-                action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
-
-        # パラメータのnorm値を追加
-        for name, p in self.net.named_parameters():
-            action_info[f"params/{name}"] = p.norm().item()
-
-        self.episode_states.append(obs)
-        self.episode_actions.append(action)
-        self.episode_values.append(value)
-        self.episode_logps.append(a_logp)
-
-        return action, action_info
-
-    def process_env_feedback(self, global_step, next_obs, action, reward, termination, truncation):
-        self.episode_reward += reward
-        normed_reward = reward / 10.0
-
-        feedback_info = {}
-
-        if len(self.episode_states) > 0:
-            prev_obs = self.episode_states[-1]
-            prev_action = self.episode_actions[-1]
-            prev_value = self.episode_values[-1]
-            prev_logp = self.episode_logps[-1]
-
-            self.buffer[self.counter] = (
-                prev_obs,
-                prev_action,
-                prev_logp,
-                normed_reward,
-                prev_value,
-                termination or truncation,
-            )
-            self.counter += 1
-            if self.counter == self.buffer_capacity:
-                train_result = self.update()
-                feedback_info.update(train_result)
-                self.counter = 0
-
-        if termination or truncation:
-            # エピソード終了時の統計情報を追加
-            if len(self.episode_values) > 0:
-                feedback_info["first_value"] = self.episode_values[0]
-                feedback_info["weighted_reward"] = getattr(self, 'episode_reward', 0.0)
-
-        return feedback_info
