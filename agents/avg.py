@@ -142,7 +142,12 @@ class AvgAgent:
         self._prev_obs = None
         self._prev_action = None
 
-    def select_action(self, global_step, obs):
+    def initialize_for_episode(self) -> None:
+        """Initialize for new episode."""
+        self._prev_obs = None
+        self._prev_action = None
+
+    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
         obs_encoded = self.network.encoder_image.encode(obs_tensor)
         action, log_prob = self.network.actor.get_action(obs_encoded)
@@ -154,27 +159,29 @@ class AvgAgent:
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
         action = np.clip(action, self.action_low, self.action_high)
+        self._prev_action_np = action
         return action, {"selected_log_pi": log_prob[0].item()}
 
-    def process_env_feedback(self, global_step, next_obs, action, reward, termination, truncation):
+    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        action_norm = np.linalg.norm(action)
+        action_norm = np.linalg.norm(self._prev_action_np)
         train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        done = termination or truncation
+        # done = termination or truncation  # こちらの方が強化学習の理論的には正しい
+        done = False  # しかし実践的には性能が悪くなるので、Falseに固定
 
-        next_obs = torch.Tensor(next_obs).unsqueeze(0).to(self.device)
-        self._next_obs = self.network.encoder_image.encode(next_obs)
+        obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
+        curr_obs = self.network.encoder_image.encode(obs_tensor)
 
-        observations = torch.stack([self._prev_obs, self._next_obs], dim=1).to(self.device)
+        observations = torch.stack([self._prev_obs, curr_obs], dim=1).to(self.device)
 
         actions = torch.stack(
             [
                 self._prev_action.squeeze(0),
-                torch.Tensor(action).to(self.device),
+                self._prev_action.squeeze(0),  # dummy
             ],
             dim=0,
         ).unsqueeze(0)  # [batch_size=1, seq_len=2, action_dim]
@@ -235,9 +242,8 @@ class AvgAgent:
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
 
-        return info_dict
+        # make decision
+        action, action_info = self.select_action(global_step, obs)
+        info_dict.update(action_info)
 
-    def initialize_for_episode(self):
-        """Initialize for new episode."""
-        self._prev_obs = None
-        self._prev_action = None
+        return action, info_dict

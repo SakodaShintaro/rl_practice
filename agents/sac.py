@@ -247,12 +247,15 @@ class SacAgent:
             "actor": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
         }
+        self.encoded_obs = None
+        self.prev_action = None
 
-    def initialize_for_episode(self):
-        return
+    def initialize_for_episode(self) -> None:
+        self.encoded_obs = None
+        self.prev_action = None
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs):
+    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
@@ -272,24 +275,29 @@ class SacAgent:
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
 
         self.encoded_obs = output_enc
+        self.prev_action = action
         return action, info_dict
 
-    def process_env_feedback(
-        self, global_step, next_obs, action, reward, termination, truncation
-    ) -> dict:
+    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        action_norm = np.linalg.norm(action)
+        action_norm = np.linalg.norm(self.prev_action)
         train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
         self.rb.add(
-            self.encoded_obs[0].cpu().numpy(), action, train_reward, termination or truncation
+            self.encoded_obs[0].cpu().numpy(),
+            self.prev_action,
+            train_reward,
+            # termination or truncation,  # こちらの方が強化学習の理論的には正しい
+            False,  # しかし実践的には性能が悪くなるので、Falseに固定
         )
 
         if global_step < self.learning_starts:
-            return info_dict
+            action, action_info = self.select_action(global_step, obs)
+            info_dict.update(action_info)
+            return action, info_dict
         elif global_step == self.learning_starts:
             print(f"Start training at global step {global_step}.")
 
@@ -349,4 +357,8 @@ class SacAgent:
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
 
-        return info_dict
+        # make decision
+        action, action_info = self.select_action(global_step, obs)
+        info_dict.update(action_info)
+
+        return action, info_dict
