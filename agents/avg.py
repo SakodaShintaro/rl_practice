@@ -170,7 +170,8 @@ class AvgAgent:
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        done = termination or truncation
+        # done = termination or truncation  # こちらの方が強化学習の理論的には正しい
+        done = False  # しかし実践的には性能が悪くなるので、Falseに固定
 
         obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
         curr_obs = self.network.encoder_image.encode(obs_tensor)
