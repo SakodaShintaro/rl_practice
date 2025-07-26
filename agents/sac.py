@@ -290,7 +290,7 @@ class SacAgent:
             self.encoded_obs[0].cpu().numpy(),
             self.prev_action,
             train_reward,
-            False,
+            termination or truncation,
         )
 
         if global_step < self.learning_starts:
