@@ -10,7 +10,6 @@ def make_env():
     env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
     env = ActionRepeatWrapper(env, repeat=REPEAT)
     env = AverageRewardEarlyStopWrapper(env)
-    env = DieStateRewardWrapper(env)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = TransposeAndNormalizeObs(env)
     return env
@@ -60,24 +59,6 @@ class AverageRewardEarlyStopWrapper(gym.Wrapper):
             count = sum(r < 0.0 for r in self.recent_rewards)
             if count == self.window_size:
                 terminated = True
-
-        return obs, reward, terminated, truncated, info
-
-
-class DieStateRewardWrapper(gym.Wrapper):
-    """
-    Don't penalize "die state" and add bonus reward if terminated
-    """
-
-    def __init__(self, env, bonus_reward=100):
-        super().__init__(env)
-        self.bonus_reward = bonus_reward
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-
-        if terminated or truncated:
-            reward += self.bonus_reward
 
         return obs, reward, terminated, truncated, info
 
