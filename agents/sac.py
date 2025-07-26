@@ -278,7 +278,7 @@ class SacAgent:
         self.prev_action = action
         return action, info_dict
 
-    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
+    def train(self, global_step, obs, reward, termination, truncation) -> dict:
         info_dict = {}
 
         action_norm = np.linalg.norm(self.prev_action)
@@ -295,9 +295,7 @@ class SacAgent:
         )
 
         if global_step < self.learning_starts:
-            action, action_info = self.select_action(global_step, obs)
-            info_dict.update(action_info)
-            return action, info_dict
+            return info_dict
         elif global_step == self.learning_starts:
             print(f"Start training at global step {global_step}.")
 
@@ -356,6 +354,15 @@ class SacAgent:
             result_dict = self.metrics_computers[feature_name](feature)
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
+
+        return info_dict
+
+    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
+        info_dict = {}
+
+        # train
+        train_info = self.train(global_step, obs, reward, termination, truncation)
+        info_dict.update(train_info)
 
         # make decision
         action, action_info = self.select_action(global_step, obs)
