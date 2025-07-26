@@ -154,37 +154,33 @@ class AvgAgent:
 
         # Store current state and action for next update
         self._prev_obs = obs_encoded
+        self._prev_action = action
 
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
         action = np.clip(action, self.action_low, self.action_high)
-        self._prev_action = action
+        self._prev_action_np = action
         return action, {"selected_log_pi": log_prob[0].item()}
 
     def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        action_norm = np.linalg.norm(self._prev_action)
+        action_norm = np.linalg.norm(self._prev_action_np)
         train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        # make decision
-        action, action_info = self.select_action(global_step, obs)
-        info_dict.update(action_info)
+        done = termination or truncation
 
-        # done = termination or truncation
-        done = False
-
-        obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
-        curr_obs = self.network.encoder_image.encode(obs)
+        obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
+        curr_obs = self.network.encoder_image.encode(obs_tensor)
 
         observations = torch.stack([self._prev_obs, curr_obs], dim=1).to(self.device)
 
         actions = torch.stack(
             [
-                torch.Tensor(self._prev_action).to(self.device),
-                torch.Tensor(action).to(self.device),
+                self._prev_action.squeeze(0),
+                self._prev_action.squeeze(0),  # dummy
             ],
             dim=0,
         ).unsqueeze(0)  # [batch_size=1, seq_len=2, action_dim]
@@ -244,5 +240,9 @@ class AvgAgent:
             result_dict = self.metrics_computers[feature_name](feature)
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
+
+        # make decision
+        action, action_info = self.select_action(global_step, obs)
+        info_dict.update(action_info)
 
         return action, info_dict
