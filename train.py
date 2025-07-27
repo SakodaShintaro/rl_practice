@@ -97,6 +97,11 @@ if __name__ == "__main__":
     with open(result_dir / "seed.txt", "w") as f:
         f.write(str(seed))
 
+    # git show -sの結果とgit diffの結果を保存
+    with open(result_dir / "git_info.txt", "w") as f:
+        f.write(f"git show -s:\n{os.popen('git show -s').read()}\n")
+        f.write(f"git diff:\n{os.popen('git diff').read()}\n")
+
     video_dir = result_dir / "video"
     video_dir.mkdir(parents=True, exist_ok=True)
     image_save_interval = 50
