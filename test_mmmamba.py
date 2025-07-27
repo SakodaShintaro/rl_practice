@@ -23,7 +23,7 @@ if __name__ == "__main__":
     image_path_list = sorted(images_dir.glob("*.png"))
     print(f"{len(image_path_list)=}")
 
-    NUM = 20
+    NUM = 40
     image_path_list = image_path_list[:NUM]
     image_list = []
 
@@ -56,21 +56,9 @@ if __name__ == "__main__":
     print("Initializing MMMambaEncoder...")
     encoder = MMMambaEncoder(device=device)
 
-    # 説明を生成
-    prompt = (
-        "This is a video of Gymnasium's CarRacing-v3. "
-        "You are the red car, and your goal is to follow the grey road. "
-        "You must not go off the road indicated by the green. "
-        "Choose your action from turn right, go straight, or turn left."
-    )
-    descriptions = encoder.describe(images_sequence[0:1])
-
-    for i, (description) in enumerate(descriptions):
-        image_names = [path.name for path in image_path_list[: i + 1]]
-        print(f"Description {i + 1}: {description}")
-        print("-" * 30)
-
     # Test step
+    inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+    encoder.encode(images_sequence[0:1], inference_params)
     inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
 
     start = time.time()
@@ -78,7 +66,7 @@ if __name__ == "__main__":
     for i, image_tensor in enumerate(images_sequence):
         print(f"start {i=}")
         image_tensor = image_tensor.unsqueeze(0)
-        encoder.step(image_tensor, inference_params)
+        encoder.encode(image_tensor, inference_params)
         end = time.time()
         elapsed_msec = (end - start) * 1000
         average_msec = elapsed_msec / (i + 1)
