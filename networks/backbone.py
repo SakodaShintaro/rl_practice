@@ -269,7 +269,9 @@ class MMMambaEncoder(nn.Module):
         image = self.transform(image).to(device).to(torch.bfloat16)
         model_inputs = self.tokenizer(
             text=[
-                "Please describe" + "<IMG_CONTEXT>" * self.image_token_num + "<|im_end|><|im_end|>"
+                "Please describe the following image: <|im_start|>"
+                + "<IMG_CONTEXT>" * self.image_token_num
+                + "<|im_end|>"
             ]
             * batch_size,
             return_tensors="pt",
