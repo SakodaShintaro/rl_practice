@@ -245,7 +245,7 @@ class MMMambaEncoder:
         IMAGENET_MEAN = (0.485, 0.456, 0.406)
         IMAGENET_STD = (0.229, 0.224, 0.225)
 
-        self.input_size = 224
+        self.input_size = 96
         self.image_token_num = (self.input_size // 14 // 2) ** 2
 
         self.transform = T.Compose(
