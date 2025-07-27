@@ -30,9 +30,6 @@ class Network(nn.Module):
         self.sparsity = args.sparsity
 
         self.action_dim = action_dim
-        self.cnn_dim = 4 * 12 * 12  # 576
-        self.reward_dim = 32
-        self.token_dim = self.cnn_dim + self.reward_dim  # 608
 
         if args.image_encoder == "ae":
             self.encoder_image = AE()
@@ -42,15 +39,20 @@ class Network(nn.Module):
             self.encoder_image = MMMambaEncoder()
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
+
+        self.state_dim = self.encoder_image.output_dim
+        self.reward_dim = 32
+        self.token_dim = self.state_dim + self.reward_dim  # 608
+
         self.actor = DiffusionPolicy(
-            state_dim=self.cnn_dim,
+            state_dim=self.state_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
         self.critic = SacQ(
-            in_channels=self.cnn_dim,
+            in_channels=self.state_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -60,7 +62,7 @@ class Network(nn.Module):
 
         # Sequence modeling components (optional)
         if enable_sequence_modeling:
-            self.sequence_model = SequenceModelingModule(self.cnn_dim, action_dim, seq_len, args)
+            self.sequence_model = SequenceModelingModule(self.state_dim, action_dim, seq_len, args)
         else:
             self.sequence_model = None
 
@@ -224,7 +226,7 @@ class SacAgent:
         self.rb = ReplayBuffer(
             args.buffer_size,
             seq_len,
-            (self.network.cnn_dim,),
+            (self.network.state_dim,),
             action_space.shape,
             self.device,
         )

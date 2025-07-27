@@ -260,6 +260,7 @@ class MMMambaEncoder(nn.Module):
         )
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+        self.output_dim = 2048
 
     def reset_inference_params(self):
         """Reset inference parameters to default values."""
@@ -301,7 +302,6 @@ class MMMambaEncoder(nn.Module):
         # print(f"{logits.shape=}")  # logits.shape=torch.Size([1, len, vocab_size=92553])
         last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
         token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
-        print(f"{token=}, Token: {self.tokenizer.decode(token)}")
         output_ids.append(token)
         self.inference_params.seqlen_offset += input_ids.shape[1]
         input_ids = token.unsqueeze(1)  # Append the new token
