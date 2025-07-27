@@ -58,7 +58,7 @@ class AverageRewardEarlyStopWrapper(gym.Wrapper):
         if len(self.recent_rewards) >= self.window_size:
             count = sum(r < 0.0 for r in self.recent_rewards)
             if count == self.window_size:
-                terminated = True
+                truncated = True
 
         return obs, reward, terminated, truncated, info
 

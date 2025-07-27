@@ -290,8 +290,7 @@ class SacAgent:
             self.encoded_obs[0].cpu().numpy(),
             self.prev_action,
             train_reward,
-            # termination or truncation,  # こちらの方が強化学習の理論的には正しい
-            False,  # しかし実践的には性能が悪くなるので、Falseに固定
+            termination,
         )
 
         if global_step < self.learning_starts:

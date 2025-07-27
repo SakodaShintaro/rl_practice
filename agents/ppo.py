@@ -140,8 +140,7 @@ class PpoAgent:
                 prev_logp,
                 normed_reward,
                 prev_value,
-                # termination or truncation,  # こちらの方が強化学習の理論的には正しい
-                False,  # しかし実践的には性能が悪くなるので、Falseに固定
+                termination,
             )
             self.counter += 1
             if self.counter == self.buffer_capacity:
