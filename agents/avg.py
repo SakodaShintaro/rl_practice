@@ -186,7 +186,7 @@ class AvgAgent:
         rewards = torch.tensor(
             [[train_reward, train_reward]], device=self.device, dtype=torch.float32
         )
-        dones = torch.tensor([[termination, termination]], device=self.device, dtype=torch.float32)
+        dones = torch.tensor([[False, False]], device=self.device, dtype=torch.float32)
 
         data = ReplayBufferData(
             observations=observations, actions=actions, rewards=rewards, dones=dones

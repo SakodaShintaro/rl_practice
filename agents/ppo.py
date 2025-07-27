@@ -140,7 +140,7 @@ class PpoAgent:
                 prev_logp,
                 normed_reward,
                 prev_value,
-                termination,
+                False,
             )
             self.counter += 1
             if self.counter == self.buffer_capacity:
