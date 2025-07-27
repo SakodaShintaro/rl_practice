@@ -107,7 +107,6 @@ if __name__ == "__main__":
     video_dir = result_dir / "video"
     video_dir.mkdir(parents=True, exist_ok=True)
     image_save_interval = 50
-    log_step = []
     log_episode = []
 
     # env setup
@@ -154,18 +153,15 @@ if __name__ == "__main__":
             action, agent_info = agent.step(global_step, obs, reward, termination, truncation)
 
             # log
-            if global_step % 10 == 0:
-                elapsed_time = time.time() - start_time
-                data_dict = {
-                    "global_step": global_step,
-                    "charts/elapse_time_sec": elapsed_time,
-                    "charts/SPS": global_step / elapsed_time,
-                    "reward": reward,
-                    **agent_info,
-                }
-
-                wandb.log(data_dict)
-                log_step.append(data_dict)
+            elapsed_time = time.time() - start_time
+            data_dict = {
+                "global_step": global_step,
+                "charts/elapse_time_sec": elapsed_time,
+                "charts/SPS": global_step / elapsed_time,
+                "reward": reward,
+                **agent_info,
+            }
+            wandb.log(data_dict)
 
             # render
             bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
