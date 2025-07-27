@@ -57,16 +57,16 @@ if __name__ == "__main__":
     encoder = MMMambaEncoder(device=device)
 
     # Test step
-    inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
-    encoder.encode(images_sequence[0:1], inference_params)
-    inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+    encoder.reset_inference_params()
+    encoder.encode(images_sequence[0:1])
+    encoder.reset_inference_params()
 
     start = time.time()
 
     for i, image_tensor in enumerate(images_sequence):
         print(f"start {i=}")
         image_tensor = image_tensor.unsqueeze(0)
-        encoder.encode(image_tensor, inference_params)
+        encoder.encode(image_tensor)
         end = time.time()
         elapsed_msec = (end - start) * 1000
         average_msec = elapsed_msec / (i + 1)

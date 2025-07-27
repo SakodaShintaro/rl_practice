@@ -259,10 +259,14 @@ class MMMambaEncoder(nn.Module):
             ]
         )
 
+        self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+
+    def reset_inference_params(self):
+        """Reset inference parameters to default values."""
+        self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+
     @torch.inference_mode()
-    def encode(
-        self, image: torch.Tensor, inference_params: InferenceParams
-    ) -> tuple[torch.Tensor, InferenceParams]:
+    def encode(self, image: torch.Tensor) -> torch.Tensor:
         device = image.device
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
@@ -290,7 +294,7 @@ class MMMambaEncoder(nn.Module):
         outputs = self.model.forward(
             input_ids=input_ids,
             pixel_values=image,
-            inference_params=inference_params,
+            inference_params=self.inference_params,
             output_hidden_states=True,
         )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
         logits = outputs["logits"]
@@ -299,12 +303,12 @@ class MMMambaEncoder(nn.Module):
         token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
         print(f"{token=}, Token: {self.tokenizer.decode(token)}")
         output_ids.append(token)
-        inference_params.seqlen_offset += input_ids.shape[1]
+        self.inference_params.seqlen_offset += input_ids.shape[1]
         input_ids = token.unsqueeze(1)  # Append the new token
 
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
-        return x, inference_params
+        return x
 
 
 if __name__ == "__main__":
