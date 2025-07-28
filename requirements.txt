@@ -13,3 +13,4 @@ wheel
 flash-attn==2.7.3
 num2words
 imageio[ffmpeg]
+minigrid
