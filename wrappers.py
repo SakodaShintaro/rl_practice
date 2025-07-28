@@ -1,18 +1,53 @@
+import cv2
 import gymnasium as gym
+import minigrid
 import numpy as np
 
 REPEAT = 8
 
 
-def make_env():
-    env = gym.make("CarRacing-v3", render_mode="rgb_array")
-    env = env.env  # Unwrap the original TimeLimit wrapper
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
-    env = ActionRepeatWrapper(env, repeat=REPEAT)
-    env = AverageRewardEarlyStopWrapper(env)
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = TransposeAndNormalizeObs(env)
-    return env
+def make_env(env_id="MiniGrid-Empty-5x5-v0"):
+    if env_id.startswith("MiniGrid"):
+        env = gym.make("MiniGrid-Empty-5x5-v0", render_mode="rgb_array")
+        env = minigrid.wrappers.RGBImgObsWrapper(env)
+        env = minigrid.wrappers.ImgObsWrapper(env)
+        env = DiscreteToContinuousWrapper(env)
+        env = ResizeObs(env, shape=(3, 96, 96))
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        return env
+
+    elif env_id.startswith("CarRacing"):
+        env = gym.make("CarRacing-v3", render_mode="rgb_array")
+        env = env.env  # Unwrap the original TimeLimit wrapper
+        env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
+        env = ActionRepeatWrapper(env, repeat=REPEAT)
+        env = AverageRewardEarlyStopWrapper(env)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        return env
+
+    else:
+        raise ValueError(f"Unsupported environment: {env_id}")
+
+
+class DiscreteToContinuousWrapper(gym.Wrapper):
+    """
+    Convert discrete action space to continuous.
+    Example: Discrete(4) -> Box(-1.0, 1.0, (4,))
+    The max action is selected.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.action_space = gym.spaces.Box(
+            low=-1.0, high=1.0, shape=(env.action_space.n,), dtype=np.float32
+        )
+
+    def step(self, action):
+        # Convert continuous action to discrete by selecting the max action
+        discrete_action = np.argmax(action)
+        return self.env.step(discrete_action)
 
 
 class ActionRepeatWrapper(gym.Wrapper):
@@ -76,3 +111,13 @@ class TransposeAndNormalizeObs(gym.ObservationWrapper):
         o = obs.astype(np.float32) / 255.0
         o = np.transpose(o, (2, 0, 1))  # (3, H, W)
         return o
+
+
+class ResizeObs(gym.ObservationWrapper):
+    def __init__(self, env, shape):
+        super().__init__(env)
+        self.shape = shape
+        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=shape, dtype=np.float32)
+
+    def observation(self, obs):
+        return cv2.resize(obs, self.shape[1:], interpolation=cv2.INTER_AREA)

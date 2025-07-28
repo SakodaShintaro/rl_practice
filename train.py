@@ -24,6 +24,12 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
+    parser.add_argument(
+        "--env_id",
+        type=str,
+        default="CarRacing-v3",
+        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
+    )
     parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -36,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
-    parser.add_argument("--num_bins", type=int, default=51)
+    parser.add_argument("--num_bins", type=int, default=1)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--step_limit", type=int, default=200_000)
@@ -110,7 +116,7 @@ if __name__ == "__main__":
     log_episode = []
 
     # env setup
-    env = make_env()
+    env = make_env(args.env_id)
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -141,7 +147,7 @@ if __name__ == "__main__":
     for episode_id in range(10000):
         # initialize episode
         obs, _ = env.reset()
-        curr_image_list = [concat_images(env.render(), curr_obs_float, pred_obs_float)]
+        bgr_image_list = [concat_images(env.render(), curr_obs_float, pred_obs_float)]
         agent.initialize_for_episode()
         action, agent_info = agent.select_action(global_step, obs)
 
@@ -164,10 +170,10 @@ if __name__ == "__main__":
             wandb.log(data_dict)
 
             # render
-            bgr_array = concat_images(env.render(), curr_obs_float, pred_obs_float)
-            curr_image_list.append(bgr_array)
+            bgr_image = concat_images(env.render(), curr_obs_float, pred_obs_float)
+            bgr_image_list.append(bgr_image)
             if args.render:
-                cv2.imshow("CarRacing", bgr_array)
+                cv2.imshow("CarRacing", bgr_image)
                 cv2.waitKey(1)
 
             if termination or truncation:
@@ -210,14 +216,14 @@ if __name__ == "__main__":
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
             video_path = video_dir / f"best_episode.mp4"
-            if curr_image_list:
-                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in curr_image_list]
+            if bgr_image_list:
+                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
                 imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
         if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
             video_path = video_dir / f"ep_{episode_id + 1:08d}.mp4"
-            if curr_image_list:
-                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in curr_image_list]
+            if bgr_image_list:
+                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
                 imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
         episode_id += 1

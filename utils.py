@@ -18,6 +18,8 @@ def concat_images(main, sub1, sub2):
     Returns:
         np.ndarray: The concatenated image.
     """
+    bgr_array = cv2.cvtColor(main, cv2.COLOR_RGB2BGR)
+    return bgr_array
     concat = cv2.vconcat([sub1, sub2])  # (192, 96, 3)
     rem = main.shape[0] - concat.shape[0]
     concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
