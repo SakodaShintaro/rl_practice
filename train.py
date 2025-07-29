@@ -28,8 +28,9 @@ def parse_args() -> argparse.Namespace:
         "--env_id",
         type=str,
         default="CarRacing-v3",
-        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
+        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0", "MiniGrid-MemoryS11-v0"],
     )
+    parser.add_argument("--partial_obs", type=int, default=0, choices=[0, 1])
     parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     log_episode = []
 
     # env setup
-    env = make_env(args.env_id)
+    env = make_env(args.env_id, args.partial_obs)
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 

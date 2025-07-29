@@ -6,11 +6,14 @@ import numpy as np
 REPEAT = 8
 
 
-def make_env(env_id: str) -> gym.Env:
+def make_env(env_id: str, partial_obs: bool) -> gym.Env:
     env = gym.make(env_id, render_mode="rgb_array")
 
     if env_id.startswith("MiniGrid"):
-        env = minigrid.wrappers.RGBImgObsWrapper(env)
+        if partial_obs:
+            env = minigrid.wrappers.RGBImgPartialObsWrapper(env)
+        else:
+            env = minigrid.wrappers.RGBImgObsWrapper(env)
         env = minigrid.wrappers.ImgObsWrapper(env)
         env = DiscreteToContinuousWrapper(env)
         env = ResizeObs(env, shape=(3, 96, 96))
