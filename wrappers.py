@@ -6,9 +6,10 @@ import numpy as np
 REPEAT = 8
 
 
-def make_env(env_id="MiniGrid-Empty-5x5-v0"):
+def make_env(env_id: str) -> gym.Env:
+    env = gym.make(env_id, render_mode="rgb_array")
+
     if env_id.startswith("MiniGrid"):
-        env = gym.make("MiniGrid-Empty-5x5-v0", render_mode="rgb_array")
         env = minigrid.wrappers.RGBImgObsWrapper(env)
         env = minigrid.wrappers.ImgObsWrapper(env)
         env = DiscreteToContinuousWrapper(env)
@@ -18,7 +19,6 @@ def make_env(env_id="MiniGrid-Empty-5x5-v0"):
         return env
 
     elif env_id.startswith("CarRacing"):
-        env = gym.make("CarRacing-v3", render_mode="rgb_array")
         env = env.env  # Unwrap the original TimeLimit wrapper
         env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
         env = ActionRepeatWrapper(env, repeat=REPEAT)
