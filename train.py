@@ -131,10 +131,6 @@ if __name__ == "__main__":
     obs, _ = env.reset(seed=seed)
     step_limit = args.step_limit
 
-    # Initialize dummy prediction images
-    curr_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
-    pred_obs_float = np.zeros((96, 96, 3), dtype=np.float32)
-
     if args.agent_type == "sac":
         agent = SacAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "avg":
@@ -147,7 +143,8 @@ if __name__ == "__main__":
     for episode_id in range(10000):
         # initialize episode
         obs, _ = env.reset()
-        bgr_image_list = [concat_images(env.render(), curr_obs_float, pred_obs_float)]
+        obs_for_render = obs.copy().transpose(1, 2, 0)
+        bgr_image_list = [concat_images(env.render(), [obs_for_render])]
         agent.initialize_for_episode()
         action, agent_info = agent.select_action(global_step, obs)
 
@@ -170,7 +167,8 @@ if __name__ == "__main__":
             wandb.log(data_dict)
 
             # render
-            bgr_image = concat_images(env.render(), curr_obs_float, pred_obs_float)
+            obs_for_render = obs.copy().transpose(1, 2, 0)
+            bgr_image = concat_images(env.render(), [obs_for_render])
             bgr_image_list.append(bgr_image)
             if args.render:
                 cv2.imshow("CarRacing", bgr_image)
