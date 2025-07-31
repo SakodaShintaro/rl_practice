@@ -77,16 +77,17 @@ class VAE(nn.Module):
         return self.vae.decode(x / self.scale).sample
 
 
-class BaseSmolEncoder(nn.Module):
-    def __init__(self, model_id: str, model_class, device=None) -> None:
+class SmolVLMEncoder(nn.Module):
+    def __init__(self, device=None) -> None:
         super().__init__()
+        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.model = model_class.from_pretrained(
+        self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
@@ -204,15 +205,6 @@ class BaseSmolEncoder(nn.Module):
             generated_texts.append(generated_text)
 
         return generated_texts
-
-
-class SmolVLMEncoder(BaseSmolEncoder):
-    def __init__(self, device=None) -> None:
-        super().__init__(
-            model_id="HuggingFaceTB/SmolVLM2-256M-Video-Instruct",
-            model_class=AutoModelForImageTextToText,
-            device=device,
-        )
 
 
 class MMMambaEncoder(nn.Module):
