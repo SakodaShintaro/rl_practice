@@ -6,12 +6,12 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import MMMambaEncoder, SmolVLMEncoder
+from networks.backbone import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("encoder", type=str, choices=["mmmamba", "smolvlm"])
+    parser.add_argument("encoder", type=str, choices=["mmmamba", "smolvlm", "qwenvl"])
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
     return parser.parse_args()
 
@@ -58,6 +58,8 @@ if __name__ == "__main__":
         encoder = MMMambaEncoder(device=device)
     elif args.encoder == "smolvlm":
         encoder = SmolVLMEncoder(device=device)
+    elif args.encoder == "qwenvl":
+        encoder = QwenVLEncoder(device=device)
     else:
         raise ValueError(f"Unknown encoder type: {args.encoder}")
 

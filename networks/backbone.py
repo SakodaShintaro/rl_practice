@@ -304,3 +304,145 @@ class MMMambaEncoder(nn.Module):
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
         return x
+
+
+class QwenVLEncoder(nn.Module):
+    def __init__(self, device=None) -> None:
+        super().__init__()
+        model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
+
+        attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            model_id,
+            torch_dtype=torch.bfloat16,
+            _attn_implementation=attn_impl,
+            cache_dir="./cache",
+            device_map=device,
+        )
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.prompt = (
+            "Drive the red car along the gray road. Do not leave the road or touch the green areas."
+        )
+        self.output_dim = 1536
+
+    @torch.no_grad()
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        device = images.device
+
+        from PIL import Image
+
+        pil_images = []
+        for img in images:
+            img_np = img.permute(1, 2, 0).cpu().numpy()
+            img_np = (img_np * 255).astype("uint8")
+            pil_img = Image.fromarray(img_np)
+            pil_images.append(pil_img)
+
+        messages = []
+        for pil_img in pil_images:
+            content = [{"type": "image", "image": pil_img}, {"type": "text", "text": self.prompt}]
+            messages.append([{"role": "user", "content": content}])
+
+        model_inputs_list = []
+        for msg in messages:
+            model_input = self.processor.apply_chat_template(
+                msg,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+            model_inputs_list.append(model_input)
+
+        outputs_list = []
+        for model_input in model_inputs_list:
+            model_input = {
+                k: v.to(device).to(torch.bfloat16) if v.dtype == torch.float32 else v.to(device)
+                for k, v in model_input.items()
+            }
+
+            input_len = model_input["input_ids"].shape[-1]
+            output = self.model.forward(**model_input, output_hidden_states=True)
+            hidden = output["hidden_states"][-1]
+            x = hidden[:, input_len - 1]
+            x = x.to(torch.float32)
+            outputs_list.append(x)
+
+        return torch.cat(outputs_list, dim=0)
+
+    def forward(self, x):
+        return self.encode(x)
+
+    def reset_inference_params(self):
+        pass
+
+    @torch.no_grad()
+    def describe(self, images: torch.Tensor, custom_prompt: str) -> list[str]:
+        """Generate descriptions for cumulative image sequences.
+
+        Args:
+            images: Tensor of images with shape (sequence_length, 3, height, width)
+            custom_prompt: Optional custom prompt for description generation
+
+        Returns:
+            List of generated descriptions for each cumulative sequence
+        """
+        device = images.device
+        sequence_length = images.shape[0]
+
+        from PIL import Image
+
+        pil_images = []
+        for img in images:
+            img_np = img.permute(1, 2, 0).cpu().numpy()
+            img_np = (img_np * 255).astype("uint8")
+            pil_img = Image.fromarray(img_np)
+            pil_images.append(pil_img)
+
+        generated_texts = []
+
+        for i in range(sequence_length):
+            current_images = pil_images[: i + 1]
+
+            content = []
+            for img in current_images:
+                content.append({"type": "image", "image": img})
+            content.append({"type": "text", "text": custom_prompt})
+
+            messages = [{"role": "user", "content": content}]
+
+            model_inputs = self.processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            model_inputs = {
+                k: v.to(device).to(torch.bfloat16) if v.dtype == torch.float32 else v.to(device)
+                for k, v in model_inputs.items()
+            }
+
+            outputs = self.model.generate(
+                **model_inputs,
+                max_new_tokens=128,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9,
+                pad_token_id=self.processor.tokenizer.eos_token_id,
+            )
+
+            input_length = model_inputs["input_ids"].shape[1]
+            generated_tokens = outputs[0][input_length:]
+
+            generated_text = self.processor.tokenizer.decode(
+                generated_tokens, skip_special_tokens=True
+            )
+            generated_texts.append(generated_text)
+
+        return generated_texts
