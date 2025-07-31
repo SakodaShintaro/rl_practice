@@ -4,14 +4,14 @@ from pathlib import Path
 
 import cv2
 import torch
-from mamba_ssm.utils.generation import InferenceParams
 from torchvision import transforms
 
-from networks.backbone import MMMambaEncoder
+from networks.backbone import MMMambaEncoder, SmolVLMEncoder
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("encoder", type=str, choices=["mmmamba", "smolvlm"])
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
     return parser.parse_args()
 
@@ -53,8 +53,13 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # VLMエンコーダーの初期化
-    print("Initializing MMMambaEncoder...")
-    encoder = MMMambaEncoder(device=device)
+    print("Initializing Encoder")
+    if args.encoder == "mmmamba":
+        encoder = MMMambaEncoder(device=device)
+    elif args.encoder == "smolvlm":
+        encoder = SmolVLMEncoder(device=device)
+    else:
+        raise ValueError(f"Unknown encoder type: {args.encoder}")
 
     # Test step
     encoder.reset_inference_params()

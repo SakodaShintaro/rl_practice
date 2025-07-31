@@ -122,6 +122,9 @@ class BaseSmolEncoder(nn.Module):
     def forward(self, x):
         return self.encode(x)
 
+    def reset_inference_params(self):
+        pass
+
     @torch.no_grad()
     def describe(self, images: torch.Tensor, custom_prompt: str) -> list[str]:
         """Generate descriptions for cumulative image sequences.
