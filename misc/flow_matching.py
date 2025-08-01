@@ -44,9 +44,9 @@ class FlowMatching(nn.Module):
 
         self.sigma = sigma
 
-        assert (
-            prob_path in ["icfm", "fm"]
-        ), f"Error: The probability path could be either Independent CFM (icfm) or Lipman's Flow Matching (fm) but {prob_path} was provided."
+        assert prob_path in ["icfm", "fm"], (
+            f"Error: The probability path could be either Independent CFM (icfm) or Lipman's Flow Matching (fm) but {prob_path} was provided."
+        )
         self.prob_path = prob_path
 
         self.PI = torch.from_numpy(np.asarray(np.pi))
