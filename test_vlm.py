@@ -20,13 +20,6 @@ if __name__ == "__main__":
     args = parse_args()
     images_dir = args.images_dir
 
-    image_path_list = sorted(images_dir.glob("*.png"))
-    print(f"{len(image_path_list)=}")
-
-    NUM = 40
-    image_path_list = image_path_list[:NUM]
-    image_list = []
-
     # 画像の前処理用のtransform
     transform = transforms.Compose(
         [
@@ -36,16 +29,31 @@ if __name__ == "__main__":
         ]
     )
 
-    print(f"Loading {len(image_path_list)} images...")
+    NUM = 40
+    image_list = []
 
-    for i, image_path in enumerate(image_path_list):
-        image = cv2.imread(str(image_path))
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # BGRからRGBに変換
-        image_tensor = transform(image)
-        image_list.append(image_tensor)
-        print(f"Loaded image {i + 1}/{len(image_path_list)}: {image_path.name}")
+    if images_dir.is_file():
+        cap = cv2.VideoCapture(str(images_dir))
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            image_list.append(frame)
+            if len(image_list) >= NUM:
+                break
+        cap.release()
+    else:
+        image_path_list = sorted(images_dir.glob("*.png"))
+        image_path_list = image_path_list[:NUM]
+        for i, image_path in enumerate(image_path_list):
+            image = cv2.imread(str(image_path))
+            image_list.append(image)
+
+    print(f"Loaded {len(image_list)} images from {images_dir}")
 
     # 画像をシーケンスとして結合し、GPUに移動
+    image_list = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in image_list]
+    image_list = [transform(image) for image in image_list]
     images_sequence = torch.stack(image_list)  # shape: (sequence_length, 3, height, width)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     images_sequence = images_sequence.to(device)
@@ -71,7 +79,6 @@ if __name__ == "__main__":
     start = time.time()
 
     for i, image_tensor in enumerate(images_sequence):
-        print(f"start {i=}")
         image_tensor = image_tensor.unsqueeze(0)
         encoder.encode(image_tensor)
         end = time.time()
