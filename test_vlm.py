@@ -74,14 +74,14 @@ if __name__ == "__main__":
 
     # Test step
     encoder.reset_inference_params()
-    encoder.encode(images_sequence[0:1])
+    encoder(images_sequence[0:1])
     encoder.reset_inference_params()
 
     start = time.time()
 
     for i, image_tensor in enumerate(images_sequence):
         image_tensor = image_tensor.unsqueeze(0)
-        representation, action_text = encoder.encode(image_tensor)
+        representation, action_text = encoder(image_tensor)
         end = time.time()
         elapsed_msec = (end - start) * 1000
         average_msec = elapsed_msec / (i + 1)

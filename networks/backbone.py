@@ -27,11 +27,8 @@ class AE(nn.Module):
         self.output_dim = 576
 
     @torch.no_grad()
-    def encode(self, x):
-        return self.ae.encode(x).latents.flatten(1)
-
-    def forward(self, x):
-        return self.encode(x)
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, str]:
+        return self.ae.encode(x).latents.flatten(1), ""
 
     @torch.no_grad()
     def decode(self, x):
@@ -72,7 +69,7 @@ class VLMEncoderBase(nn.Module):
         ]
 
     @torch.no_grad()
-    def encode(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
         assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
 
         # Convert tensor to PIL Image and add to buffer
@@ -160,9 +157,6 @@ class VLMEncoderBase(nn.Module):
         action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
         return action_text
 
-    def forward(self, x):
-        return self.encode(x)
-
     def reset_inference_params(self):
         self.frame_buffer = []
 
@@ -241,7 +235,7 @@ class MMMambaEncoder(nn.Module):
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
 
     @torch.inference_mode()
-    def encode(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
         device = image.device
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
