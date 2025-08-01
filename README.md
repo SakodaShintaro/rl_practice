@@ -14,9 +14,15 @@ sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip3 install .
+./setup.sh
 ```
 
 ```bash
 huggingface-cli login
+```
+
+## Blackwellの場合
+
+```bash
+pip3 install -U torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
