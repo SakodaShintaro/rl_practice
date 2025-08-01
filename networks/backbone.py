@@ -21,9 +21,11 @@ ACTION_PROMPT = (
 
 
 class AE(nn.Module):
-    def __init__(self):
+    def __init__(self, device=None) -> None:
         super().__init__()
-        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
+        self.ae = AutoencoderTiny.from_pretrained(
+            "madebyollin/taesd", cache_dir="./cache", device_map=device
+        )
         self.output_dim = 576
 
     @torch.no_grad()
@@ -34,6 +36,9 @@ class AE(nn.Module):
     def decode(self, x):
         x = x.view(x.size(0), 4, 12, 12)
         return self.ae.decode(x).sample
+
+    def reset_inference_params(self):
+        pass
 
 
 class VLMEncoderBase(nn.Module):
