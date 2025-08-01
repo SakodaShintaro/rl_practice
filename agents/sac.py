@@ -261,7 +261,7 @@ class SacAgent:
         info_dict = {}
 
         obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
-        output_enc = self.network.encoder_image.encode(obs_tensor)
+        output_enc, _ = self.network.encoder_image.forward(obs_tensor)
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
