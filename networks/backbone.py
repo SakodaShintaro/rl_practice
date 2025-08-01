@@ -82,7 +82,7 @@ class VAE(nn.Module):
 class VLMEncoderBase(nn.Module):
     """Base class for Vision-Language Model encoders"""
 
-    def __init__(self, model_id: str, output_dim: int, action_prompt: str, device=None):
+    def __init__(self, model_id: str, output_dim: int, device=None):
         super().__init__()
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
@@ -98,7 +98,13 @@ class VLMEncoderBase(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.action_prompt = action_prompt
+        self.action_prompt = (
+            "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
+            "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
+            "gas (0 to 1), braking (0 to 1). "
+            "Stay on the gray road and avoid green areas. "
+            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+        )
         self.output_dim = output_dim
         self.device = device
         self.max_frames = 100
@@ -144,8 +150,12 @@ class VLMEncoderBase(nn.Module):
             return_dict=True,
             return_tensors="pt",
         )
-        model_inputs = {k: v.to(self.device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(self.device) 
-                       for k, v in model_inputs.items()}
+        model_inputs = {
+            k: v.to(self.device).to(torch.bfloat16)
+            if v.dtype.is_floating_point
+            else v.to(self.device)
+            for k, v in model_inputs.items()
+        }
 
         # Get hidden state from forward pass
         input_len = model_inputs["input_ids"].shape[-1]
@@ -207,14 +217,15 @@ class VLMEncoderBase(nn.Module):
 class SmolVLMEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
         model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
-        action_prompt = (
-            "You are an AI driving assistant. Based on the video frames (from oldest to newest), determine the appropriate steering, gas, and braking values. "
-            "Action space: steering (-1 to +1), gas (0 to 1), braking (0 to 1). "
-            "Stay on the gray road and avoid green areas. "
-            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
-        )
         output_dim = 576
-        super().__init__(model_id, output_dim, action_prompt, device)
+        super().__init__(model_id, output_dim, device)
+
+
+class QwenVLEncoder(VLMEncoderBase):
+    def __init__(self, device=None) -> None:
+        model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
+        output_dim = 1536
+        super().__init__(model_id, output_dim, device)
 
 
 class MMMambaEncoder(nn.Module):
@@ -314,17 +325,3 @@ class MMMambaEncoder(nn.Module):
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
         return x
-
-
-class QwenVLEncoder(VLMEncoderBase):
-    def __init__(self, device=None) -> None:
-        model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
-        action_prompt = (
-            "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
-            "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
-            "gas (0 to 1), braking (0 to 1). "
-            "Stay on the gray road and avoid green areas. "
-            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
-        )
-        output_dim = 1536
-        super().__init__(model_id, output_dim, action_prompt, device)
