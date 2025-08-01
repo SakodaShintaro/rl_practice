@@ -262,7 +262,7 @@ class MMMambaEncoder(nn.Module):
 
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_id, trust_remote_code=True, use_fast=False
+            model_id, cache_dir="./cache", trust_remote_code=True, use_fast=False
         )
         # type(self.tokenizer)=<class 'transformers_modules.hustvl.mmMamba-linear.1198b4cf4cae76d9ea5d50e2c0b9724621d6f4f6.tokenization_internlm2.InternLM2Tokenizer'>
         # print(f"{type(self.tokenizer)=}")
