@@ -95,36 +95,98 @@ class SmolVLMEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = "Drive the red car along the gray road. Do not leave the road or touch the green areas. <image>"
+        self.action_prompt = (
+            "You are an AI driving assistant. Based on the video frames (from oldest to newest), determine the appropriate steering, gas, and braking values. "
+            "Action space: steering (-1 to +1), gas (0 to 1), braking (0 to 1). "
+            "Stay on the gray road and avoid green areas. "
+            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+        )
         self.output_dim = 576
+        self.device = device
+        self.max_frames = 100
+        self.frame_buffer = []
 
     @torch.no_grad()
-    def encode(self, images: torch.Tensor) -> torch.Tensor:
-        device = images.device
-        batch_size = images.shape[0]
+    def encode(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
+        assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
+
+        # Add current frame to buffer
+        self.frame_buffer.append(images[0])  # (3, H, W)
+
+        if len(self.frame_buffer) > self.max_frames:
+            self.frame_buffer.pop(0)
+
+        # Build prompt with image placeholders
+        prompt_text = f"{self.action_prompt} " + "<image>" * len(self.frame_buffer)
+
+        # Prepare video frames
+        video_frames = torch.stack(self.frame_buffer, dim=0)  # (num_frames, 3, H, W)
+
         model_inputs = (
             self.processor(
-                text=[self.prompt] * batch_size,
-                images=[[img] for img in images],
+                text=[prompt_text],
+                images=[video_frames],  # Pass as a list containing one video tensor
                 return_tensors="pt",
                 do_rescale=False,
                 padding=True,
             )
             .to(torch.bfloat16)
-            .to(device)
+            .to(self.device)
         )
+
+        # Get hidden state from forward pass
         input_len = model_inputs["input_ids"].shape[-1]
         outputs = self.model.forward(**model_inputs, output_hidden_states=True)
         hidden = outputs["hidden_states"][-1]
-        x = hidden[:, input_len - 1]
-        x = x.to(torch.float32)
-        return x
+        representation = hidden[:, input_len - 1].to(torch.float32)
+
+        # Generate action text
+        action_text = self._generate_action_text(outputs.logits, model_inputs)
+
+        return representation, action_text
+
+    def _generate_action_text(self, logits, model_inputs):
+        """Generate action text from logits without using model.generate()"""
+        generated_ids = []
+        stop_token_ids = [self.processor.tokenizer.eos_token_id]
+
+        # Get the next token from the initial logits
+        next_token_logits = logits[:, -1, :]
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+
+        input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
+
+        for _ in range(50):  # max_new_tokens
+            if next_token.item() in stop_token_ids:
+                break
+            generated_ids.append(next_token.item())
+
+            # Manually update attention mask
+            if "attention_mask" in model_inputs:
+                attention_mask = model_inputs["attention_mask"]
+                attention_mask = torch.cat(
+                    [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device)],
+                    dim=-1,
+                )
+                model_inputs["attention_mask"] = attention_mask
+
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                attention_mask=model_inputs.get("attention_mask"),
+                pixel_values=model_inputs.get("pixel_values"),
+            )
+            next_token_logits = outputs.logits[:, -1, :]
+            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
+
+        action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
+        return action_text
 
     def forward(self, x):
         return self.encode(x)
 
     def reset_inference_params(self):
-        pass
+        self.frame_buffer = []
 
 
 class MMMambaEncoder(nn.Module):
