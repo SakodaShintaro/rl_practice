@@ -244,58 +244,107 @@ class QwenVLEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.prompt = (
-            "Drive the red car along the gray road. Do not leave the road or touch the green areas."
+        self.action_prompt = (
+            "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
+            "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
+            "gas (0 to 1), braking (0 to 1). "
+            "Stay on the gray road and avoid green areas. "
+            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
         )
         self.output_dim = 1536
+        self.device = device
+        self.max_frames = 100
+        self.frame_buffer = []
 
     @torch.no_grad()
-    def encode(self, images: torch.Tensor) -> torch.Tensor:
-        device = images.device
+    def encode(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
+        assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
 
         from PIL import Image
 
-        pil_images = []
-        for img in images:
-            img_np = img.permute(1, 2, 0).cpu().numpy()
-            img_np = (img_np * 255).astype("uint8")
-            pil_img = Image.fromarray(img_np)
-            pil_images.append(pil_img)
+        # Convert tensor to PIL Image and add to buffer
+        img_tensor = images[0]
+        img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
+        img_np = (img_np * 255).astype("uint8")
+        pil_img = Image.fromarray(img_np)
+        self.frame_buffer.append(pil_img)
 
-        messages = []
-        for pil_img in pil_images:
-            content = [{"type": "image", "image": pil_img}, {"type": "text", "text": self.prompt}]
-            messages.append([{"role": "user", "content": content}])
+        if len(self.frame_buffer) > self.max_frames:
+            self.frame_buffer.pop(0)
 
-        model_inputs_list = []
-        for msg in messages:
-            model_input = self.processor.apply_chat_template(
-                msg,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                return_tensors="pt",
+        # Prepare content for chat template
+        content = []
+        for frame in self.frame_buffer:
+            content.append({"type": "image", "image": frame})
+        content.append({"type": "text", "text": self.action_prompt})
+
+        messages = [{"role": "user", "content": content}]
+
+        # Prepare model inputs
+        model_inputs = self.processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        model_inputs = {k: v.to(self.device) for k, v in model_inputs.items()}
+
+        # Get hidden state from forward pass
+        input_len = model_inputs["input_ids"].shape[-1]
+        output = self.model.forward(**model_inputs, output_hidden_states=True)
+        hidden = output["hidden_states"][-1]
+        x = hidden[:, input_len - 1].to(torch.float32)
+
+        # Generate action text using logits from forward pass
+        action_text = self._generate_action_text(output.logits, model_inputs)
+
+        return x, action_text
+
+    def _generate_action_text(self, logits, model_inputs) -> str:
+        """Generate action text from logits without using model.generate()"""
+        generated_ids = []
+        # The stop tokens for Qwen2.5-VL-Instruct are from the conversation template
+        stop_token_ids = [
+            self.processor.tokenizer.eos_token_id,
+            self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>"),
+            self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
+        ]
+
+        # Get the next token from the initial logits
+        next_token_logits = logits[:, -1, :]
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+
+        input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
+
+        for _ in range(50):  # max_new_tokens
+            if next_token.item() in stop_token_ids:
+                break
+            generated_ids.append(next_token.item())
+
+            # Manually update attention mask and position ids if they exist
+            if "attention_mask" in model_inputs:
+                attention_mask = model_inputs["attention_mask"]
+                attention_mask = torch.cat(
+                    [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device)],
+                    dim=-1,
+                )
+                model_inputs["attention_mask"] = attention_mask
+
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                attention_mask=model_inputs.get("attention_mask"),
+                output_hidden_states=False,
             )
-            model_inputs_list.append(model_input)
+            next_token_logits = outputs.logits[:, -1, :]
+            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
 
-        outputs_list = []
-        for model_input in model_inputs_list:
-            model_input = {
-                k: v.to(device).to(torch.bfloat16) if v.dtype == torch.float32 else v.to(device)
-                for k, v in model_input.items()
-            }
-
-            input_len = model_input["input_ids"].shape[-1]
-            output = self.model.forward(**model_input, output_hidden_states=True)
-            hidden = output["hidden_states"][-1]
-            x = hidden[:, input_len - 1]
-            x = x.to(torch.float32)
-            outputs_list.append(x)
-
-        return torch.cat(outputs_list, dim=0)
+        action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
+        return action_text
 
     def forward(self, x):
         return self.encode(x)
 
     def reset_inference_params(self):
-        pass
+        self.frame_buffer = []
