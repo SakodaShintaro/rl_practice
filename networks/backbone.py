@@ -283,14 +283,23 @@ class MMMambaEncoder(nn.Module):
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
 
     @torch.inference_mode()
-    def encode(self, image: torch.Tensor) -> torch.Tensor:
+    def encode(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
         device = image.device
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
         image = self.transform(image).to(device).to(torch.bfloat16)
+        # Use unified action prompt
+        action_prompt = (
+            "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
+            "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
+            "gas (0 to 1), braking (0 to 1). "
+            "Stay on the gray road and avoid green areas. "
+            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+        )
+
         model_inputs = self.tokenizer(
             text=[
-                "Please describe the following image: <|im_start|>"
+                f"{action_prompt} <|im_start|>"
                 + "<IMG_CONTEXT>" * self.image_token_num
                 + "<|im_end|>"
             ]
@@ -314,14 +323,35 @@ class MMMambaEncoder(nn.Module):
             inference_params=self.inference_params,
             output_hidden_states=True,
         )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
-        logits = outputs["logits"]
-        # print(f"{logits.shape=}")  # logits.shape=torch.Size([1, len, vocab_size=92553])
-        last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
-        token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
-        output_ids.append(token)
-        self.inference_params.seqlen_offset += input_ids.shape[1]
-        input_ids = token.unsqueeze(1)  # Append the new token
 
+        # Get representation from hidden states
         x = outputs["hidden_states"][-1][:, 0]
         x = x.to(torch.float32)
-        return x
+
+        # Generate action text using multiple tokens
+        logits = outputs["logits"]
+        last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
+        token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
+
+        self.inference_params.seqlen_offset += input_ids.shape[1]
+        input_ids = token.unsqueeze(1)  # Start with first generated token
+
+        # Generate more tokens for action text
+        for _ in range(50):  # max_new_tokens
+            if token.item() in stop_token_ids:
+                break
+            output_ids.append(token.item())
+
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                inference_params=self.inference_params,
+            )
+            logits = outputs["logits"]
+            last_logit = logits[:, -1, :]
+            token = torch.argmax(last_logit, dim=-1)
+            input_ids = token.unsqueeze(1)
+
+        # Decode generated tokens to action text
+        action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+
+        return x, action_text
