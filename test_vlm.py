@@ -13,12 +13,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("encoder", type=str, choices=["mmmamba", "smolvlm", "qwenvl"])
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
+    parser.add_argument("--num_images", type=int, default=5)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
     images_dir = args.images_dir
+    num_images = args.num_images
 
     # 画像の前処理用のtransform
     transform = transforms.Compose(
@@ -29,7 +31,6 @@ if __name__ == "__main__":
         ]
     )
 
-    NUM = 40
     image_list = []
 
     if images_dir.is_file():
@@ -39,12 +40,12 @@ if __name__ == "__main__":
             if not ret:
                 break
             image_list.append(frame)
-            if len(image_list) >= NUM:
+            if len(image_list) >= num_images:
                 break
         cap.release()
     else:
         image_path_list = sorted(images_dir.glob("*.png"))
-        image_path_list = image_path_list[:NUM]
+        image_path_list = image_path_list[:num_images]
         for i, image_path in enumerate(image_path_list):
             image = cv2.imread(str(image_path))
             image_list.append(image)
