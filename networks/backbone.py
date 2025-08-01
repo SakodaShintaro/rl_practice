@@ -105,6 +105,7 @@ class SmolVLMEncoder(nn.Module):
         self.device = device
         self.max_frames = 100
         self.frame_buffer = []
+        self.past_key_values = None
 
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
@@ -136,17 +137,17 @@ class SmolVLMEncoder(nn.Module):
 
         # Get hidden state from forward pass
         input_len = model_inputs["input_ids"].shape[-1]
-        outputs = self.model.forward(**model_inputs, output_hidden_states=True)
+        outputs = self.model.forward(**model_inputs, output_hidden_states=True, use_cache=True)
         hidden = outputs["hidden_states"][-1]
         representation = hidden[:, input_len - 1].to(torch.float32)
 
-        # Generate action text
-        action_text = self._generate_action_text(outputs.logits, model_inputs)
+        # Generate action text with KV cache
+        action_text = self._generate_action_text_with_cache(outputs.logits, outputs.past_key_values, model_inputs)
 
         return representation, action_text
 
-    def _generate_action_text(self, logits, model_inputs):
-        """Generate action text from logits without using model.generate()"""
+    def _generate_action_text_with_cache(self, logits, past_key_values, model_inputs):
+        """Generate action text using KV cache for efficiency"""
         generated_ids = []
         stop_token_ids = [self.processor.tokenizer.eos_token_id]
 
@@ -154,30 +155,22 @@ class SmolVLMEncoder(nn.Module):
         next_token_logits = logits[:, -1, :]
         next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
 
-        input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
+        current_past_key_values = past_key_values
 
         for _ in range(50):  # max_new_tokens
             if next_token.item() in stop_token_ids:
                 break
             generated_ids.append(next_token.item())
 
-            # Manually update attention mask
-            if "attention_mask" in model_inputs:
-                attention_mask = model_inputs["attention_mask"]
-                attention_mask = torch.cat(
-                    [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device)],
-                    dim=-1,
-                )
-                model_inputs["attention_mask"] = attention_mask
-
+            # Use KV cache for next token generation
             outputs = self.model.forward(
-                input_ids=input_ids,
-                attention_mask=model_inputs.get("attention_mask"),
-                pixel_values=model_inputs.get("pixel_values"),
+                input_ids=next_token,
+                past_key_values=current_past_key_values,
+                use_cache=True,
             )
             next_token_logits = outputs.logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            input_ids = torch.cat([input_ids, next_token], dim=-1)
+            current_past_key_values = outputs.past_key_values
 
         action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
         return action_text
