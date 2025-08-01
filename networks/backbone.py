@@ -311,11 +311,12 @@ class MMMambaEncoder(nn.Module):
 
         output_ids = []
         stop_token_ids = [
-            2,
-            1163,
-            92543,
-            92542,
+            self.tokenizer.eos_token_id,
+            self.tokenizer.convert_tokens_to_ids("<|im_end|>"),
+            self.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
         ]
+        # Remove None values
+        stop_token_ids = [tid for tid in stop_token_ids if tid is not None]
 
         outputs = self.model.forward(
             input_ids=input_ids,
