@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torchvision.transforms as T
-from diffusers.models import AutoencoderKL, AutoencoderTiny
+from diffusers.models import AutoencoderTiny
 from mamba_ssm.utils.generation import InferenceParams
 from PIL import Image
 from torch import nn
@@ -18,39 +18,6 @@ ACTION_PROMPT = (
     "Stay on the gray road and avoid green areas. "
     "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
 )
-
-
-class BaseCNN(nn.Module):
-    def __init__(self, in_channels: int):
-        super().__init__()
-        # input shape: (batch_size, in_channels, 96, 96)
-        self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 8, kernel_size=4, stride=2),  # -> (8, 47, 47)
-            nn.LayerNorm([8, 47, 47], elementwise_affine=False),
-            nn.ReLU(),
-            nn.Conv2d(8, 16, kernel_size=3, stride=2),  # -> (16, 23, 23)
-            nn.LayerNorm([16, 23, 23], elementwise_affine=False),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2),  # -> (32, 11, 11)
-            nn.LayerNorm([32, 11, 11], elementwise_affine=False),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2),  # -> (64, 5, 5)
-            nn.LayerNorm([64, 5, 5], elementwise_affine=False),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=1),  # -> (128, 3, 3)
-            nn.LayerNorm([128, 3, 3], elementwise_affine=False),
-            nn.ReLU(),
-            nn.Conv2d(128, 256, kernel_size=3, stride=1),  # -> (256, 1, 1)
-            nn.LayerNorm([256, 1, 1], elementwise_affine=False),
-            nn.ReLU(),
-            nn.Flatten(),  # -> (256,)
-        )
-
-    def encode(self, x):
-        return self.features(x)
-
-    def forward(self, x):
-        return self.encode(x)
 
 
 class AE(nn.Module):
@@ -70,22 +37,6 @@ class AE(nn.Module):
     def decode(self, x):
         x = x.view(x.size(0), 4, 12, 12)
         return self.ae.decode(x).sample
-
-
-class VAE(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema", cache_dir="./cache")
-        self.scale = 0.18215
-
-    def encode(self, x):
-        return self.vae.encode(x).latent_dist.sample().mul_(self.scale)
-
-    def forward(self, x):
-        return self.encode(x)
-
-    def decode(self, x):
-        return self.vae.decode(x / self.scale).sample
 
 
 class VLMEncoderBase(nn.Module):
