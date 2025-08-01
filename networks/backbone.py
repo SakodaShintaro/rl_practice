@@ -10,6 +10,15 @@ from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokeniz
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
+# Unified action prompt for all VLM encoders
+ACTION_PROMPT = (
+    "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
+    "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
+    "gas (0 to 1), braking (0 to 1). "
+    "Stay on the gray road and avoid green areas. "
+    "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+)
+
 
 class BaseCNN(nn.Module):
     def __init__(self, in_channels: int):
@@ -98,13 +107,6 @@ class VLMEncoderBase(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.action_prompt = (
-            "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
-            "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
-            "gas (0 to 1), braking (0 to 1). "
-            "Stay on the gray road and avoid green areas. "
-            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
-        )
         self.output_dim = output_dim
         self.device = device
         self.max_frames = 100
@@ -138,7 +140,7 @@ class VLMEncoderBase(nn.Module):
             {
                 "role": "user",
                 "content": [{"type": "image", "image": frame} for frame in self.frame_buffer]
-                + [{"type": "text", "text": self.action_prompt}],
+                + [{"type": "text", "text": ACTION_PROMPT}],
             }
         ]
 
@@ -288,18 +290,9 @@ class MMMambaEncoder(nn.Module):
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
         image = self.transform(image).to(device).to(torch.bfloat16)
-        # Use unified action prompt
-        action_prompt = (
-            "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
-            "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
-            "gas (0 to 1), braking (0 to 1). "
-            "Stay on the gray road and avoid green areas. "
-            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
-        )
-
         model_inputs = self.tokenizer(
             text=[
-                f"{action_prompt} <|im_start|>"
+                f"{ACTION_PROMPT} <|im_start|>"
                 + "<IMG_CONTEXT>" * self.image_token_num
                 + "<|im_end|>"
             ]
