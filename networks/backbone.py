@@ -290,15 +290,22 @@ class MMMambaEncoder(nn.Module):
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
         image = self.transform(image).to(device).to(torch.bfloat16)
-        model_inputs = self.tokenizer(
-            text=[
-                f"{ACTION_PROMPT} <|im_start|>"
+        messages = [
+            {
+                "role": "user",
+                "content": ACTION_PROMPT
+                + " <|im_start|>"
                 + "<IMG_CONTEXT>" * self.image_token_num
-                + "<|im_end|>"
-            ]
-            * batch_size,
+                + "<|im_end|>",
+            }
+        ]
+
+        model_inputs = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
             return_tensors="pt",
-            padding=True,
         )
         input_ids = model_inputs["input_ids"].to(device)
 
