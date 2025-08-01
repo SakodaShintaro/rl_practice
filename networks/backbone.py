@@ -1,7 +1,9 @@
+import numpy as np
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderKL, AutoencoderTiny
 from mamba_ssm.utils.generation import InferenceParams
+from PIL import Image
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
@@ -77,10 +79,11 @@ class VAE(nn.Module):
         return self.vae.decode(x / self.scale).sample
 
 
-class SmolVLMEncoder(nn.Module):
-    def __init__(self, device=None) -> None:
+class VLMEncoderBase(nn.Module):
+    """Base class for Vision-Language Model encoders"""
+
+    def __init__(self, model_id: str, output_dim: int, action_prompt: str, device=None):
         super().__init__()
-        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
 
@@ -95,82 +98,101 @@ class SmolVLMEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.action_prompt = (
-            "You are an AI driving assistant. Based on the video frames (from oldest to newest), determine the appropriate steering, gas, and braking values. "
-            "Action space: steering (-1 to +1), gas (0 to 1), braking (0 to 1). "
-            "Stay on the gray road and avoid green areas. "
-            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
-        )
-        self.output_dim = 576
+        self.action_prompt = action_prompt
+        self.output_dim = output_dim
         self.device = device
         self.max_frames = 100
         self.frame_buffer = []
-        self.past_key_values = None
+
+    def get_stop_tokens(self):
+        """Get stop tokens for text generation - to be overridden by subclasses"""
+        return [
+            self.processor.tokenizer.eos_token_id,
+            self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>"),
+            self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
+        ]
 
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
         assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
 
-        # Add current frame to buffer
-        self.frame_buffer.append(images[0])  # (3, H, W)
+        # Convert tensor to PIL Image and add to buffer
+        img_tensor = images[0].to(torch.float32)  # (3, H, W) - ensure float32 for PIL conversion
+        img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+        img_np = (img_np * 255).astype(np.uint8)
+        pil_img = Image.fromarray(img_np)
+
+        self.frame_buffer.append(pil_img)
 
         if len(self.frame_buffer) > self.max_frames:
             self.frame_buffer.pop(0)
 
-        # Build prompt with image placeholders
-        prompt_text = f"{self.action_prompt} " + "<image>" * len(self.frame_buffer)
+        # Create chat template messages with video frames
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "image", "image": frame} for frame in self.frame_buffer]
+                + [{"type": "text", "text": self.action_prompt}],
+            }
+        ]
 
-        # Prepare video frames
-        video_frames = torch.stack(self.frame_buffer, dim=0)  # (num_frames, 3, H, W)
-
-        model_inputs = (
-            self.processor(
-                text=[prompt_text],
-                images=[video_frames],  # Pass as a list containing one video tensor
-                return_tensors="pt",
-                do_rescale=False,
-                padding=True,
-            )
-            .to(torch.bfloat16)
-            .to(self.device)
+        # Prepare model inputs
+        model_inputs = self.processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
         )
+        model_inputs = {k: v.to(self.device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(self.device) 
+                       for k, v in model_inputs.items()}
 
         # Get hidden state from forward pass
         input_len = model_inputs["input_ids"].shape[-1]
-        outputs = self.model.forward(**model_inputs, output_hidden_states=True, use_cache=True)
-        hidden = outputs["hidden_states"][-1]
-        representation = hidden[:, input_len - 1].to(torch.float32)
+        output = self.model.forward(**model_inputs, output_hidden_states=True)
+        hidden = output["hidden_states"][-1]
+        x = hidden[:, input_len - 1].to(torch.float32)
 
-        # Generate action text with KV cache
-        action_text = self._generate_action_text_with_cache(outputs.logits, outputs.past_key_values, model_inputs)
+        # Generate action text using logits from forward pass
+        action_text = self._generate_action_text(output.logits, model_inputs)
 
-        return representation, action_text
+        return x, action_text
 
-    def _generate_action_text_with_cache(self, logits, past_key_values, model_inputs):
-        """Generate action text using KV cache for efficiency"""
+    def _generate_action_text(self, logits, model_inputs) -> str:
+        """Generate action text from logits without using model.generate()"""
         generated_ids = []
-        stop_token_ids = [self.processor.tokenizer.eos_token_id]
+        stop_token_ids = self.get_stop_tokens()
+        # Remove None values
+        stop_token_ids = [tid for tid in stop_token_ids if tid is not None]
 
         # Get the next token from the initial logits
         next_token_logits = logits[:, -1, :]
         next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
 
-        current_past_key_values = past_key_values
+        input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
 
         for _ in range(50):  # max_new_tokens
             if next_token.item() in stop_token_ids:
                 break
             generated_ids.append(next_token.item())
 
-            # Use KV cache for next token generation
+            # Manually update attention mask and position ids if they exist
+            if "attention_mask" in model_inputs:
+                attention_mask = model_inputs["attention_mask"]
+                attention_mask = torch.cat(
+                    [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device)],
+                    dim=-1,
+                )
+                model_inputs["attention_mask"] = attention_mask
+
             outputs = self.model.forward(
-                input_ids=next_token,
-                past_key_values=current_past_key_values,
-                use_cache=True,
+                input_ids=input_ids,
+                attention_mask=model_inputs.get("attention_mask"),
+                output_hidden_states=False,
             )
             next_token_logits = outputs.logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            current_past_key_values = outputs.past_key_values
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
 
         action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
         return action_text
@@ -180,6 +202,19 @@ class SmolVLMEncoder(nn.Module):
 
     def reset_inference_params(self):
         self.frame_buffer = []
+
+
+class SmolVLMEncoder(VLMEncoderBase):
+    def __init__(self, device=None) -> None:
+        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
+        action_prompt = (
+            "You are an AI driving assistant. Based on the video frames (from oldest to newest), determine the appropriate steering, gas, and braking values. "
+            "Action space: steering (-1 to +1), gas (0 to 1), braking (0 to 1). "
+            "Stay on the gray road and avoid green areas. "
+            "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+        )
+        output_dim = 576
+        super().__init__(model_id, output_dim, action_prompt, device)
 
 
 class MMMambaEncoder(nn.Module):
@@ -281,125 +316,15 @@ class MMMambaEncoder(nn.Module):
         return x
 
 
-class QwenVLEncoder(nn.Module):
+class QwenVLEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
-        super().__init__()
         model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
-
-        attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_id,
-            torch_dtype=torch.bfloat16,
-            _attn_implementation=attn_impl,
-            cache_dir="./cache",
-            device_map=device,
-        )
-        self.processor = AutoProcessor.from_pretrained(model_id)
-        self.action_prompt = (
+        action_prompt = (
             "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
             "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
             "gas (0 to 1), braking (0 to 1). "
             "Stay on the gray road and avoid green areas. "
             "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
         )
-        self.output_dim = 1536
-        self.device = device
-        self.max_frames = 100
-        self.frame_buffer = []
-
-    @torch.no_grad()
-    def encode(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
-        assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
-
-        from PIL import Image
-
-        # Convert tensor to PIL Image and add to buffer
-        img_tensor = images[0]
-        img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
-        img_np = (img_np * 255).astype("uint8")
-        pil_img = Image.fromarray(img_np)
-        self.frame_buffer.append(pil_img)
-
-        if len(self.frame_buffer) > self.max_frames:
-            self.frame_buffer.pop(0)
-
-        # Prepare content for chat template
-        content = []
-        for frame in self.frame_buffer:
-            content.append({"type": "image", "image": frame})
-        content.append({"type": "text", "text": self.action_prompt})
-
-        messages = [{"role": "user", "content": content}]
-
-        # Prepare model inputs
-        model_inputs = self.processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        )
-        model_inputs = {k: v.to(self.device) for k, v in model_inputs.items()}
-
-        # Get hidden state from forward pass
-        input_len = model_inputs["input_ids"].shape[-1]
-        output = self.model.forward(**model_inputs, output_hidden_states=True)
-        hidden = output["hidden_states"][-1]
-        x = hidden[:, input_len - 1].to(torch.float32)
-
-        # Generate action text using logits from forward pass
-        action_text = self._generate_action_text(output.logits, model_inputs)
-
-        return x, action_text
-
-    def _generate_action_text(self, logits, model_inputs) -> str:
-        """Generate action text from logits without using model.generate()"""
-        generated_ids = []
-        # The stop tokens for Qwen2.5-VL-Instruct are from the conversation template
-        stop_token_ids = [
-            self.processor.tokenizer.eos_token_id,
-            self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>"),
-            self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
-        ]
-
-        # Get the next token from the initial logits
-        next_token_logits = logits[:, -1, :]
-        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-
-        input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
-
-        for _ in range(50):  # max_new_tokens
-            if next_token.item() in stop_token_ids:
-                break
-            generated_ids.append(next_token.item())
-
-            # Manually update attention mask and position ids if they exist
-            if "attention_mask" in model_inputs:
-                attention_mask = model_inputs["attention_mask"]
-                attention_mask = torch.cat(
-                    [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device)],
-                    dim=-1,
-                )
-                model_inputs["attention_mask"] = attention_mask
-
-            outputs = self.model.forward(
-                input_ids=input_ids,
-                attention_mask=model_inputs.get("attention_mask"),
-                output_hidden_states=False,
-            )
-            next_token_logits = outputs.logits[:, -1, :]
-            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            input_ids = torch.cat([input_ids, next_token], dim=-1)
-
-        action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
-        return action_text
-
-    def forward(self, x):
-        return self.encode(x)
-
-    def reset_inference_params(self):
-        self.frame_buffer = []
+        output_dim = 1536
+        super().__init__(model_id, output_dim, action_prompt, device)
