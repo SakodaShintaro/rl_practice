@@ -219,6 +219,8 @@ class VLMEncoderBase(nn.Module):
 class SmolVLMEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
         model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
+        # model_id = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+        # model_id = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
         output_dim = 576
         super().__init__(model_id, output_dim, device)
 
