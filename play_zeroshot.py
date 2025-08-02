@@ -98,7 +98,7 @@ def run_episode(env, agent, render=False):
     step_count = 0
     bgr_image_list = []
     prev_action = None
-    prev_reward = 0.0
+    prev_reward = None
 
     obs_for_render = obs.copy().transpose(1, 2, 0)
     bgr_image_list.append(concat_images(env.render(), [obs_for_render]))
