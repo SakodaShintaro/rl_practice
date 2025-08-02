@@ -83,14 +83,21 @@ if __name__ == "__main__":
 
     # Test step
     encoder.reset_inference_params()
-    encoder(images_sequence[0:1])
+    encoder(images_sequence[0:1], None, None)
     encoder.reset_inference_params()
 
     start = time.time()
 
     for i, image_tensor in enumerate(images_sequence):
         image_tensor = image_tensor.unsqueeze(0)
-        representation, action_text = encoder(image_tensor)
+        # Use step data to get reward and previous action
+        reward = None
+        prev_action = None
+        if i < len(step_data) and i > 0:
+            reward = step_data[i - 1]["reward"]
+            prev_action = step_data[i - 1]["action"]
+
+        representation, action_text = encoder(image_tensor, reward, prev_action)
 
         # Parse action text to get numeric values
         action_values = parse_action_text(action_text)
