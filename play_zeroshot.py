@@ -11,7 +11,6 @@ import numpy as np
 import torch
 
 from networks.backbone import (
-    AE,
     MMMambaEncoder,
     QwenVLEncoder,
     SmolVLMEncoder,
@@ -34,7 +33,7 @@ def parse_args() -> argparse.Namespace:
         "--agent_type",
         type=str,
         default="random",
-        choices=["random", "ae", "smolvlm", "qwenvl", "mmmamba"],
+        choices=["random", "smolvlm", "qwenvl", "mmmamba"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -58,9 +57,7 @@ class VLMAgent:
     def __init__(self, encoder_type, device=None):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        if encoder_type == "ae":
-            self.encoder = AE(device=self.device)
-        elif encoder_type == "smolvlm":
+        if encoder_type == "smolvlm":
             self.encoder = SmolVLMEncoder(device=self.device)
         elif encoder_type == "qwenvl":
             self.encoder = QwenVLEncoder(device=self.device)
