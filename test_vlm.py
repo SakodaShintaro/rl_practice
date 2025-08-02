@@ -27,7 +27,6 @@ if __name__ == "__main__":
     step_data_path = data_root / "data/ep_001_data.json"
 
     step_data = json.load(open(step_data_path, "r"))
-    print(json.dumps(step_data, indent=2))
 
     # 画像の前処理用のtransform
     transform = transforms.Compose(
