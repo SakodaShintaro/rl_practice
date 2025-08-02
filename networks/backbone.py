@@ -14,47 +14,12 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = (
-    "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
+    "You are an AI driving assistant. Analyze the driving scene from the images (from oldest to newest) and provide the next action. "
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
     "gas (0 to 1), braking (0 to 1). "
     "Stay on the gray road and avoid green areas. "
     "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
 )
-
-
-def create_sequence_action_prompt(reward_buffer, action_buffer):
-    """Create action prompt with sequence of rewards and actions.
-
-    Args:
-        reward_buffer: List of rewards from previous steps
-        action_buffer: List of actions from previous steps (numpy arrays)
-
-    Returns:
-        Complete prompt string with sequence context information
-    """
-    prompt = ACTION_PROMPT
-
-    # Add sequence context information if available
-    context_parts = []
-
-    if reward_buffer and len(reward_buffer) > 0:
-        reward_str = ", ".join([f"{r:.2f}" for r in reward_buffer[-10:]])  # Last 10 rewards
-        context_parts.append(f"Reward history: [{reward_str}]")
-
-    if action_buffer and len(action_buffer) > 0:
-        action_strs = []
-        for action in action_buffer[-5:]:  # Last 5 actions
-            if hasattr(action, "__len__") and len(action) >= 3:
-                action_strs.append(f"({action[0]:.2f},{action[1]:.2f},{action[2]:.2f})")
-        if action_strs:
-            action_str = ", ".join(action_strs)
-            context_parts.append(f"Action history: [{action_str}]")
-
-    if context_parts:
-        context_info = "Context: " + "; ".join(context_parts) + ". "
-        prompt = context_info + prompt
-
-    return prompt
 
 
 def parse_action_text(action_text: str) -> np.ndarray:
@@ -111,7 +76,9 @@ class AE(nn.Module):
         self.output_dim = 576
 
     @torch.no_grad()
-    def forward(self, x: torch.Tensor, reward, prev_action) -> tuple[torch.Tensor, str]:
+    def forward(
+        self, x: torch.Tensor, reward: float | None, prev_action: np.ndarray | None
+    ) -> tuple[torch.Tensor, str]:
         return self.ae.encode(x).latents.flatten(1), ""
 
     @torch.no_grad()
@@ -144,10 +111,8 @@ class VLMEncoderBase(nn.Module):
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.output_dim = output_dim
         self.device = device
-        self.max_frames = 100
-        self.frame_buffer = []
-        self.reward_buffer = []
-        self.action_buffer = []
+        self.max_images = 100
+        self.step_buffer = []  # List of (image, reward, action) tuples
 
     def get_stop_tokens(self):
         """Get stop tokens for text generation - to be overridden by subclasses"""
@@ -158,44 +123,50 @@ class VLMEncoderBase(nn.Module):
         ]
 
     @torch.no_grad()
-    def forward(self, images: torch.Tensor, reward, prev_action) -> tuple[torch.Tensor, str]:
+    def forward(
+        self, images: torch.Tensor, reward: float | None, prev_action: np.ndarray | None
+    ) -> tuple[torch.Tensor, str]:
         assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
 
-        # Convert tensor to PIL Image and add to buffer
+        # Convert tensor to PIL Image
         img_tensor = images[0].to(torch.float32)  # (3, H, W) - ensure float32 for PIL conversion
         img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
         img_np = (img_np * 255).astype(np.uint8)
         pil_img = Image.fromarray(img_np)
 
-        self.frame_buffer.append(pil_img)
+        # Add current step (image, reward, action) tuple to buffer
+        self.step_buffer.append((pil_img, reward, prev_action))
 
-        if len(self.frame_buffer) > self.max_frames:
-            self.frame_buffer.pop(0)
+        if len(self.step_buffer) > self.max_images:
+            self.step_buffer.pop(0)
 
-        # Add reward and action to buffers
-        if reward is not None:
-            self.reward_buffer.append(reward)
-            if len(self.reward_buffer) > self.max_frames:
-                self.reward_buffer.pop(0)
+        # Create chat template messages with interleaved images and temporal context
+        content = []
 
-        if prev_action is not None:
-            self.action_buffer.append(prev_action)
-            if len(self.action_buffer) > self.max_frames:
-                self.action_buffer.pop(0)
+        # Add steps with their temporal context
+        for image, step_reward, step_action in self.step_buffer:
+            content.append({"type": "image", "image": image})
 
-        # Create dynamic action prompt with sequence context information
-        action_prompt = create_sequence_action_prompt(
-            reward_buffer=self.reward_buffer, action_buffer=self.action_buffer
-        )
+            # Build reward string
+            if step_reward is None:
+                reward_str = "start"
+            else:
+                reward_str = f"{step_reward:.2f}"
 
-        # Create chat template messages with video frames
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "image", "image": frame} for frame in self.frame_buffer]
-                + [{"type": "text", "text": action_prompt}],
-            }
-        ]
+            # Build action string
+            if step_action is None:
+                action_str = "start"
+            else:
+                action_str = f"(steering={step_action[0]:.2f}, gas={step_action[1]:.2f}, braking={step_action[2]:.2f})"
+
+            # Add temporal context for this step
+            context_text = f"reward={reward_str}, action={action_str}"
+            content.append({"type": "text", "text": context_text})
+
+        # Add main action prompt at the end
+        content.append({"type": "text", "text": ACTION_PROMPT})
+
+        messages = [{"role": "user", "content": content}]
 
         # Prepare model inputs
         model_inputs = self.processor.apply_chat_template(
@@ -263,9 +234,7 @@ class VLMEncoderBase(nn.Module):
         return action_text
 
     def reset_inference_params(self):
-        self.frame_buffer = []
-        self.reward_buffer = []
-        self.action_buffer = []
+        self.step_buffer = []
 
 
 class SmolVLMEncoder(VLMEncoderBase):
@@ -336,38 +305,31 @@ class MMMambaEncoder(nn.Module):
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         self.output_dim = 2048
-        self.reward_buffer = []
-        self.action_buffer = []
-        self.max_frames = 100
+        self.step_buffer = []  # List of (reward, action) tuples for MMMamba (single image)
+        self.max_images = 100
 
     def reset_inference_params(self):
         """Reset inference parameters to default values."""
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
-        self.reward_buffer = []
-        self.action_buffer = []
+        self.step_buffer = []
 
     @torch.inference_mode()
-    def forward(self, image: torch.Tensor, reward, prev_action) -> tuple[torch.Tensor, str]:
+    def forward(
+        self, image: torch.Tensor, reward: float | None, prev_action: np.ndarray | None
+    ) -> tuple[torch.Tensor, str]:
         device = image.device
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
         image = self.transform(image).to(device).to(torch.bfloat16)
 
-        # Add reward and action to buffers
-        if reward is not None:
-            self.reward_buffer.append(reward)
-            if len(self.reward_buffer) > self.max_frames:
-                self.reward_buffer.pop(0)
+        # Add previous time step's reward and action to buffer BEFORE making current decision
+        self.step_buffer.append((reward, prev_action))
 
-        if prev_action is not None:
-            self.action_buffer.append(prev_action)
-            if len(self.action_buffer) > self.max_frames:
-                self.action_buffer.pop(0)
+        if len(self.step_buffer) > self.max_images:
+            self.step_buffer.pop(0)
 
-        # Create dynamic action prompt with sequence context information
-        action_prompt = create_sequence_action_prompt(
-            reward_buffer=self.reward_buffer, action_buffer=self.action_buffer
-        )
+        # Use basic action prompt
+        action_prompt = ACTION_PROMPT
 
         messages = [
             {
