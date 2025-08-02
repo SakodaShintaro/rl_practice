@@ -28,7 +28,7 @@ class PpoBetaPolicyAndValue(nn.Module):
         action: torch.Tensor | None = None,
     ) -> tuple:
         x = s_seq[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
-        x = self.encoder(x)
+        x, _ = self.encoder(x)
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
 

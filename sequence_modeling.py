@@ -13,7 +13,7 @@ def create_sequence_tokens(observations, rewards, actions, sequence_module, enco
 
     # Encode all states at once
     states = observations.view(batch_size * seq_len, *observations.shape[2:])
-    states = encoder_image.encode(states)
+    states, _ = encoder_image.forward(states)
     states = states.view(batch_size, seq_len, sequence_module.cnn_dim)
 
     # Encode all rewards at once
