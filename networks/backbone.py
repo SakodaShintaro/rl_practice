@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import torch
 import torchvision.transforms as T
@@ -18,6 +20,51 @@ ACTION_PROMPT = (
     "Stay on the gray road and avoid green areas. "
     "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
 )
+
+
+def parse_action_text(action_text: str) -> tuple[float, float, float]:
+    """Parse action text and extract steering, gas, braking values.
+
+    Args:
+        action_text: Text in format 'Action: steering=X.X, gas=X.X, braking=X.X'
+
+    Returns:
+        tuple of (steering, gas, braking) as floats
+
+    Example:
+        >>> parse_action_text("Action: steering=0.5, gas=0.3, braking=0.0")
+        (0.5, 0.3, 0.0)
+    """
+    # Default values in case parsing fails
+    steering, gas, braking = 0.0, 0.0, 0.0
+
+    try:
+        # Extract steering value
+        steering_match = re.search(r"steering=([+-]?\d*\.?\d+)", action_text)
+        if steering_match:
+            steering = float(steering_match.group(1))
+            # Clamp steering to [-1, 1]
+            steering = max(-1.0, min(1.0, steering))
+
+        # Extract gas value
+        gas_match = re.search(r"gas=([+-]?\d*\.?\d+)", action_text)
+        if gas_match:
+            gas = float(gas_match.group(1))
+            # Clamp gas to [0, 1]
+            gas = max(0.0, min(1.0, gas))
+
+        # Extract braking value
+        braking_match = re.search(r"braking=([+-]?\d*\.?\d+)", action_text)
+        if braking_match:
+            braking = float(braking_match.group(1))
+            # Clamp braking to [0, 1]
+            braking = max(0.0, min(1.0, braking))
+
+    except (ValueError, AttributeError):
+        # Return default values if parsing fails
+        pass
+
+    return steering, gas, braking
 
 
 class AE(nn.Module):

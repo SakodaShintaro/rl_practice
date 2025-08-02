@@ -6,7 +6,7 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder
+from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
 
 
 def parse_args():
@@ -84,7 +84,13 @@ if __name__ == "__main__":
     for i, image_tensor in enumerate(images_sequence):
         image_tensor = image_tensor.unsqueeze(0)
         representation, action_text = encoder(image_tensor)
+
+        # Parse action text to get numeric values
+        steering, gas, braking = parse_action_text(action_text)
+
         end = time.time()
         elapsed_msec = (end - start) * 1000
         average_msec = elapsed_msec / (i + 1)
-        print(f"Step {i + 1}/{len(images_sequence)}: {average_msec=:.1f} ms, {action_text=}")
+        print(f"Step {i + 1}/{len(images_sequence)}: {average_msec=:.1f} ms")
+        print(f"  Action text: {action_text}")
+        print(f"  Parsed values: steering={steering:.3f}, gas={gas:.3f}, braking={braking:.3f}")
