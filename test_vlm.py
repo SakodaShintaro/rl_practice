@@ -1,4 +1,5 @@
 import argparse
+import json
 import time
 from pathlib import Path
 
@@ -12,15 +13,21 @@ from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder,
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("encoder", type=str, choices=["ae", "mmmamba", "smolvlm", "qwenvl"])
-    parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
+    parser.add_argument("--data_root", type=Path, default="./local/sample")
     parser.add_argument("--num_images", type=int, default=5)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    images_dir = args.images_dir
+    data_root = args.data_root
     num_images = args.num_images
+
+    images_dir = data_root / "video/ep_001.mp4"
+    step_data_path = data_root / "data/ep_001_data.json"
+
+    step_data = json.load(open(step_data_path, "r"))
+    print(json.dumps(step_data, indent=2))
 
     # 画像の前処理用のtransform
     transform = transforms.Compose(
