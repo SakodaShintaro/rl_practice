@@ -107,7 +107,7 @@ def run_episode(env, agent, render=False):
     episode_length = env_info.get("episode", {}).get("l", step_count)
     episode_reward = env_info.get("episode", {}).get("r", total_reward)
 
-    return episode_reward, episode_length, bgr_image_list
+    return episode_reward, episode_length, bgr_image_list, step_count
 
 
 if __name__ == "__main__":
@@ -151,11 +151,18 @@ if __name__ == "__main__":
     episode_lengths = []
     best_reward = -float("inf")
     best_video = None
+    global_step = 0
 
     start_time = time.time()
 
     for episode in range(args.num_episodes):
-        episode_reward, episode_length, bgr_image_list = run_episode(env, agent, render=args.render)
+        episode_reward, episode_length, bgr_image_list, step_count = run_episode(
+            env, agent, render=args.render
+        )
+
+        global_step += step_count
+        elapsed_time = time.time() - start_time
+        sps = global_step / elapsed_time if elapsed_time > 0 else 0
 
         episode_rewards.append(episode_reward)
         episode_lengths.append(episode_length)
@@ -168,14 +175,18 @@ if __name__ == "__main__":
         # Log episode data
         data_dict = {
             "episode": episode + 1,
+            "global_step": global_step,
             "episodic_return": episode_reward,
             "episodic_length": episode_length,
             "average_return": np.mean(episode_rewards),
             "best_return": best_reward,
+            "sps": sps,
+            "elapsed_time": elapsed_time,
         }
 
         print(
-            f"Episode {episode + 1:2d}: Reward = {episode_reward:7.2f}, Length = {episode_length:3d}"
+            f"Episode {episode + 1:2d}: Reward = {episode_reward:7.2f}, Length = {episode_length:3d}, "
+            f"Global Step = {global_step:5d}, SPS = {sps:6.1f}"
         )
 
         # Save episode video
@@ -195,13 +206,16 @@ if __name__ == "__main__":
     std_reward = np.std(episode_rewards)
     avg_length = np.mean(episode_lengths)
     elapsed_time = time.time() - start_time
+    final_sps = global_step / elapsed_time if elapsed_time > 0 else 0
 
     print(f"\n=== Results after {args.num_episodes} episodes ===")
     print(f"Agent type: {args.agent_type}")
     print(f"Average reward: {avg_reward:.2f} ± {std_reward:.2f}")
     print(f"Best reward: {best_reward:.2f}")
     print(f"Average episode length: {avg_length:.1f}")
+    print(f"Total steps: {global_step}")
     print(f"Total time: {elapsed_time:.1f} seconds")
+    print(f"Steps per second: {final_sps:.1f}")
 
     # Final statistics
     final_stats = {
@@ -209,7 +223,9 @@ if __name__ == "__main__":
         "final/std_return": std_reward,
         "final/best_return": best_reward,
         "final/average_length": avg_length,
+        "final/global_step": global_step,
         "final/total_time": elapsed_time,
+        "final/sps": final_sps,
     }
 
     # Save results to file
@@ -219,7 +235,9 @@ if __name__ == "__main__":
         f.write(f"Average reward: {avg_reward:.2f} ± {std_reward:.2f}\n")
         f.write(f"Best reward: {best_reward:.2f}\n")
         f.write(f"Average episode length: {avg_length:.1f}\n")
+        f.write(f"Total steps: {global_step}\n")
         f.write(f"Total time: {elapsed_time:.1f} seconds\n")
+        f.write(f"Steps per second: {final_sps:.1f}\n")
         f.write(f"Episode rewards: {episode_rewards}\n")
 
     env.close()
