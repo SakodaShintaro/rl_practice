@@ -81,11 +81,12 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unknown encoder type: {args.encoder}")
 
-    # Test step
+    # 初回の推論は遅いのでダミーの推論を一回入れる
     encoder.reset_inference_params()
     encoder(images_sequence[0:1], None, None)
-    encoder.reset_inference_params()
 
+    # Test step
+    encoder.reset_inference_params()
     start = time.time()
 
     for i, image_tensor in enumerate(images_sequence):
