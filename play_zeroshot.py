@@ -1,5 +1,4 @@
 import argparse
-import os
 import random
 import time
 from datetime import datetime
@@ -14,6 +13,28 @@ import torch
 from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
 from utils import concat_images
 from wrappers import make_env
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--env_id",
+        type=str,
+        default="CarRacing-v3",
+        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0", "MiniGrid-MemoryS11-v0"],
+    )
+    parser.add_argument("--partial_obs", type=int, default=0, choices=[0, 1])
+    parser.add_argument(
+        "--agent_type",
+        type=str,
+        default="random",
+        choices=["random", "ae", "smolvlm", "qwenvl", "mmmamba"],
+    )
+    parser.add_argument("--seed", type=int, default=-1)
+    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--num_episodes", type=int, default=10)
+
+    return parser.parse_args()
 
 
 class RandomAgent:
@@ -53,30 +74,7 @@ class VLMAgent:
         self.encoder.reset_inference_params()
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--env_id",
-        type=str,
-        default="CarRacing-v3",
-        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0", "MiniGrid-MemoryS11-v0"],
-    )
-    parser.add_argument("--partial_obs", type=int, default=0, choices=[0, 1])
-    parser.add_argument(
-        "--agent_type",
-        type=str,
-        default="random",
-        choices=["random", "ae", "smolvlm", "qwenvl", "mmmamba"],
-    )
-    parser.add_argument("--seed", type=int, default=-1)
-    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--num_episodes", type=int, default=10)
-    parser.add_argument("--save_video", action="store_true")
-
-    return parser.parse_args()
-
-
-def run_episode(env, agent, render=False, save_video=False):
+def run_episode(env, agent, render=False):
     obs, _ = env.reset()
     agent.initialize_for_episode()
 
@@ -84,9 +82,8 @@ def run_episode(env, agent, render=False, save_video=False):
     step_count = 0
     bgr_image_list = []
 
-    if save_video:
-        obs_for_render = obs.copy().transpose(1, 2, 0)
-        bgr_image_list.append(concat_images(env.render(), [obs_for_render]))
+    obs_for_render = obs.copy().transpose(1, 2, 0)
+    bgr_image_list.append(concat_images(env.render(), [obs_for_render]))
 
     while True:
         action = agent.select_action(obs)
@@ -95,10 +92,9 @@ def run_episode(env, agent, render=False, save_video=False):
         total_reward += reward
         step_count += 1
 
-        if save_video:
-            obs_for_render = obs.copy().transpose(1, 2, 0)
-            bgr_image = concat_images(env.render(), [obs_for_render])
-            bgr_image_list.append(bgr_image)
+        obs_for_render = obs.copy().transpose(1, 2, 0)
+        bgr_image = concat_images(env.render(), [obs_for_render])
+        bgr_image_list.append(bgr_image)
 
         if render:
             bgr_image = concat_images(env.render(), [obs.copy().transpose(1, 2, 0)])
@@ -159,12 +155,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     for episode in range(args.num_episodes):
-        episode_reward, episode_length, bgr_image_list = run_episode(
-            env,
-            agent,
-            render=args.render and episode == 0,  # Only render first episode
-            save_video=args.save_video,
-        )
+        episode_reward, episode_length, bgr_image_list = run_episode(env, agent, render=args.render)
 
         episode_rewards.append(episode_reward)
         episode_lengths.append(episode_length)
@@ -172,8 +163,7 @@ if __name__ == "__main__":
         # Save best episode video
         if episode_reward > best_reward:
             best_reward = episode_reward
-            if bgr_image_list:
-                best_video = bgr_image_list
+            best_video = bgr_image_list
 
         # Log episode data
         data_dict = {
@@ -189,7 +179,7 @@ if __name__ == "__main__":
         )
 
         # Save episode video
-        if args.save_video and bgr_image_list:
+        if (episode + 1) % 10 == 0:
             video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
             rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
             imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
