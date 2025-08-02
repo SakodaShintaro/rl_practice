@@ -14,7 +14,9 @@ class PpoPaligemmaPolicyAndValue(nn.Module):
         self.net = PaliGemmaForConditionalGeneration.from_pretrained(
             model_id, torch_dtype=torch.bfloat16, cache_dir="./cache"
         )
-        self.processor = PaliGemmaProcessor.from_pretrained(model_id, use_fast=True)
+        self.processor = PaliGemmaProcessor.from_pretrained(
+            model_id, use_fast=True, cache_dir="./cache"
+        )
         self.prompt = "<image><image> Please drive in the lane."
 
         seq_hidden_dim = self.net.config.text_config.hidden_size
