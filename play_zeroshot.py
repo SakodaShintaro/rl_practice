@@ -1,4 +1,5 @@
 import argparse
+import json
 import random
 import time
 from datetime import datetime
@@ -47,7 +48,7 @@ class RandomAgent:
         self.action_space = action_space
 
     def select_action(self, obs, reward, prev_action):
-        return self.action_space.sample()
+        return self.action_space.sample(), ""
 
     def initialize_for_episode(self):
         pass
@@ -82,7 +83,7 @@ class VLMAgent:
         self.prev_action = action_array
         self.prev_reward = reward
 
-        return action_array
+        return action_array, action_text
 
     def initialize_for_episode(self):
         self.encoder.reset_inference_params()
@@ -97,6 +98,7 @@ def run_episode(env, agent, render=False):
     total_reward = 0
     step_count = 0
     bgr_image_list = []
+    step_data = []  # Store (action, action_text, reward) for each step
     prev_action = None
     prev_reward = None
 
@@ -105,11 +107,22 @@ def run_episode(env, agent, render=False):
 
     while True:
         # Pass previous reward and action to the agent
-        action = agent.select_action(obs, prev_reward, prev_action)
+        action, action_text = agent.select_action(obs, prev_reward, prev_action)
+
         obs, reward, termination, truncation, env_info = env.step(action)
 
         total_reward += reward
         step_count += 1
+
+        # Store step data
+        step_data.append(
+            {
+                "step": step_count,
+                "action": action.tolist() if hasattr(action, "tolist") else action,
+                "action_text": action_text,
+                "reward": reward,
+            }
+        )
 
         # Store for next iteration
         prev_action = action
@@ -130,7 +143,7 @@ def run_episode(env, agent, render=False):
     episode_length = env_info.get("episode", {}).get("l", step_count)
     episode_reward = env_info.get("episode", {}).get("r", total_reward)
 
-    return episode_reward, episode_length, bgr_image_list, step_count
+    return episode_reward, episode_length, bgr_image_list, step_count, step_data
 
 
 if __name__ == "__main__":
@@ -157,6 +170,9 @@ if __name__ == "__main__":
     video_dir = result_dir / "video"
     video_dir.mkdir(parents=True, exist_ok=True)
 
+    data_dir = result_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
     # env setup
     env = make_env(args.env_id, args.partial_obs)
     env.action_space.seed(seed)
@@ -179,7 +195,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     for episode in range(args.num_episodes):
-        episode_reward, episode_length, bgr_image_list, step_count = run_episode(
+        episode_reward, episode_length, bgr_image_list, step_count, step_data = run_episode(
             env, agent, render=args.render
         )
 
@@ -212,11 +228,15 @@ if __name__ == "__main__":
             f"Global Step = {global_step:5d}, SPS = {sps:6.1f}"
         )
 
-        # Save episode video
-        if (episode + 1) % 10 == 0:
-            video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
-            rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
-            imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+        # Save episode video and data
+        video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
+        rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
+        imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+
+        # Save step data as JSON
+        data_path = data_dir / f"ep_{episode + 1:03d}_data.json"
+        with open(data_path, "w") as f:
+            json.dump(step_data, f, indent=2)
 
     # Save best episode video
     if best_video:
