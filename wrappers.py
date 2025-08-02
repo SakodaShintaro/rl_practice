@@ -116,6 +116,28 @@ class TransposeAndNormalizeObs(gym.ObservationWrapper):
         return o
 
 
+class RenderObsWrapper(gym.ObservationWrapper):
+    """
+    Use rendered image as observation instead of the original observation
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+        # Reset environment to be able to render
+        env.reset()
+        # Get a sample render to determine the observation space
+        sample_render = env.render()
+        if sample_render is None:
+            raise ValueError("Environment must support rgb_array render mode")
+
+        h, w, c = sample_render.shape
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(h, w, c), dtype=np.uint8)
+
+    def observation(self, _obs):
+        # Return rendered image instead of original observation
+        return self.env.render()
+
+
 class ResizeObs(gym.ObservationWrapper):
     def __init__(self, env, shape):
         super().__init__(env)
