@@ -24,6 +24,8 @@ def make_env(env_id: str, partial_obs: bool) -> gym.Env:
     elif env_id.startswith("CarRacing"):
         env = env.env  # Unwrap the original TimeLimit wrapper
         env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
+        # env = RenderObsWrapper(env)
+        # env = ResizeObs(env, shape=(3, 96 * 2, 96 * 2))
         env = ActionRepeatWrapper(env, repeat=REPEAT)
         env = AverageRewardEarlyStopWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
