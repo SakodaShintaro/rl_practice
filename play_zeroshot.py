@@ -10,7 +10,13 @@ import imageio
 import numpy as np
 import torch
 
-from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
+from networks.backbone import (
+    AE,
+    MMMambaEncoder,
+    QwenVLEncoder,
+    SmolVLMEncoder,
+    parse_action_text,
+)
 from utils import concat_images
 from wrappers import make_env
 
@@ -41,7 +47,7 @@ class RandomAgent:
     def __init__(self, action_space):
         self.action_space = action_space
 
-    def select_action(self, obs):
+    def select_action(self, obs, reward, prev_action):
         return self.action_space.sample()
 
     def initialize_for_episode(self):
@@ -63,15 +69,28 @@ class VLMAgent:
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 
+        self.prev_action = None
+        self.prev_reward = 0.0
+
     @torch.inference_mode()
-    def select_action(self, obs):
+    def select_action(self, obs, reward, prev_action):
         obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
-        _, action_text = self.encoder(obs_tensor)
+
+        # Pass reward and prev_action to the encoder
+        _, action_text = self.encoder(obs_tensor, reward=reward, prev_action=prev_action)
+
         action_array = parse_action_text(action_text)
+
+        # Store current action as previous action for next step
+        self.prev_action = action_array
+        self.prev_reward = reward
+
         return action_array
 
     def initialize_for_episode(self):
         self.encoder.reset_inference_params()
+        self.prev_action = None
+        self.prev_reward = 0.0
 
 
 def run_episode(env, agent, render=False):
@@ -81,16 +100,23 @@ def run_episode(env, agent, render=False):
     total_reward = 0
     step_count = 0
     bgr_image_list = []
+    prev_action = None
+    prev_reward = 0.0
 
     obs_for_render = obs.copy().transpose(1, 2, 0)
     bgr_image_list.append(concat_images(env.render(), [obs_for_render]))
 
     while True:
-        action = agent.select_action(obs)
+        # Pass previous reward and action to the agent
+        action = agent.select_action(obs, prev_reward, prev_action)
         obs, reward, termination, truncation, env_info = env.step(action)
 
         total_reward += reward
         step_count += 1
+
+        # Store for next iteration
+        prev_action = action
+        prev_reward = reward
 
         obs_for_render = obs.copy().transpose(1, 2, 0)
         bgr_image = concat_images(env.render(), [obs_for_render])

@@ -22,6 +22,41 @@ ACTION_PROMPT = (
 )
 
 
+def create_sequence_action_prompt(reward_buffer, action_buffer):
+    """Create action prompt with sequence of rewards and actions.
+
+    Args:
+        reward_buffer: List of rewards from previous steps
+        action_buffer: List of actions from previous steps (numpy arrays)
+
+    Returns:
+        Complete prompt string with sequence context information
+    """
+    prompt = ACTION_PROMPT
+
+    # Add sequence context information if available
+    context_parts = []
+
+    if reward_buffer and len(reward_buffer) > 0:
+        reward_str = ", ".join([f"{r:.2f}" for r in reward_buffer[-10:]])  # Last 10 rewards
+        context_parts.append(f"Reward history: [{reward_str}]")
+
+    if action_buffer and len(action_buffer) > 0:
+        action_strs = []
+        for action in action_buffer[-5:]:  # Last 5 actions
+            if hasattr(action, "__len__") and len(action) >= 3:
+                action_strs.append(f"({action[0]:.2f},{action[1]:.2f},{action[2]:.2f})")
+        if action_strs:
+            action_str = ", ".join(action_strs)
+            context_parts.append(f"Action history: [{action_str}]")
+
+    if context_parts:
+        context_info = "Context: " + "; ".join(context_parts) + ". "
+        prompt = context_info + prompt
+
+    return prompt
+
+
 def parse_action_text(action_text: str) -> np.ndarray:
     """Parse action text and extract steering, gas, braking values.
 
@@ -76,7 +111,7 @@ class AE(nn.Module):
         self.output_dim = 576
 
     @torch.no_grad()
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, x: torch.Tensor, reward, prev_action) -> tuple[torch.Tensor, str]:
         return self.ae.encode(x).latents.flatten(1), ""
 
     @torch.no_grad()
@@ -111,6 +146,8 @@ class VLMEncoderBase(nn.Module):
         self.device = device
         self.max_frames = 100
         self.frame_buffer = []
+        self.reward_buffer = []
+        self.action_buffer = []
 
     def get_stop_tokens(self):
         """Get stop tokens for text generation - to be overridden by subclasses"""
@@ -121,7 +158,7 @@ class VLMEncoderBase(nn.Module):
         ]
 
     @torch.no_grad()
-    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, images: torch.Tensor, reward, prev_action) -> tuple[torch.Tensor, str]:
         assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
 
         # Convert tensor to PIL Image and add to buffer
@@ -135,12 +172,28 @@ class VLMEncoderBase(nn.Module):
         if len(self.frame_buffer) > self.max_frames:
             self.frame_buffer.pop(0)
 
+        # Add reward and action to buffers
+        if reward is not None:
+            self.reward_buffer.append(reward)
+            if len(self.reward_buffer) > self.max_frames:
+                self.reward_buffer.pop(0)
+
+        if prev_action is not None:
+            self.action_buffer.append(prev_action)
+            if len(self.action_buffer) > self.max_frames:
+                self.action_buffer.pop(0)
+
+        # Create dynamic action prompt with sequence context information
+        action_prompt = create_sequence_action_prompt(
+            reward_buffer=self.reward_buffer, action_buffer=self.action_buffer
+        )
+
         # Create chat template messages with video frames
         messages = [
             {
                 "role": "user",
                 "content": [{"type": "image", "image": frame} for frame in self.frame_buffer]
-                + [{"type": "text", "text": ACTION_PROMPT}],
+                + [{"type": "text", "text": action_prompt}],
             }
         ]
 
@@ -211,6 +264,8 @@ class VLMEncoderBase(nn.Module):
 
     def reset_inference_params(self):
         self.frame_buffer = []
+        self.reward_buffer = []
+        self.action_buffer = []
 
 
 class SmolVLMEncoder(VLMEncoderBase):
@@ -281,21 +336,43 @@ class MMMambaEncoder(nn.Module):
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         self.output_dim = 2048
+        self.reward_buffer = []
+        self.action_buffer = []
+        self.max_frames = 100
 
     def reset_inference_params(self):
         """Reset inference parameters to default values."""
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
+        self.reward_buffer = []
+        self.action_buffer = []
 
     @torch.inference_mode()
-    def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, image: torch.Tensor, reward, prev_action) -> tuple[torch.Tensor, str]:
         device = image.device
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
         image = self.transform(image).to(device).to(torch.bfloat16)
+
+        # Add reward and action to buffers
+        if reward is not None:
+            self.reward_buffer.append(reward)
+            if len(self.reward_buffer) > self.max_frames:
+                self.reward_buffer.pop(0)
+
+        if prev_action is not None:
+            self.action_buffer.append(prev_action)
+            if len(self.action_buffer) > self.max_frames:
+                self.action_buffer.pop(0)
+
+        # Create dynamic action prompt with sequence context information
+        action_prompt = create_sequence_action_prompt(
+            reward_buffer=self.reward_buffer, action_buffer=self.action_buffer
+        )
+
         messages = [
             {
                 "role": "user",
-                "content": ACTION_PROMPT
+                "content": action_prompt
                 + " <|im_start|>"
                 + "<IMG_CONTEXT>" * self.image_token_num
                 + "<|im_end|>",
