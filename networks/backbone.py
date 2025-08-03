@@ -149,7 +149,7 @@ class VLMEncoderBase(nn.Module):
             self.step_buffer.pop(0)
 
         # Create chat template messages with interleaved images and temporal context
-        content = []
+        content = [{"type": "text", "text": ACTION_PROMPT}]
 
         # Add steps with their temporal context
         for image, step_reward, step_action in self.step_buffer:
@@ -170,9 +170,6 @@ class VLMEncoderBase(nn.Module):
             # Add temporal context for this step
             context_text = f"reward={reward_str}, action={action_str}"
             content.append({"type": "text", "text": context_text})
-
-        # Add main action prompt at the end
-        content.append({"type": "text", "text": ACTION_PROMPT})
 
         messages = [{"role": "user", "content": content}]
 
