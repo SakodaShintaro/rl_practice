@@ -1,9 +1,13 @@
 import argparse
 import json
+import os
 import random
 import time
 from datetime import datetime
 from pathlib import Path
+
+# Suppress tokenizers parallelism warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import cv2
 import gymnasium as gym
