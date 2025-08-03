@@ -120,7 +120,7 @@ class VLMEncoderBase(nn.Module):
             cache_dir="./cache",
             device_map=device,
         )
-        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.processor = AutoProcessor.from_pretrained(model_id, use_fast=True)
         self.output_dim = output_dim
         self.device = device
         self.max_images = 100

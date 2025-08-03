@@ -108,6 +108,7 @@ def run_episode(env, agent, render=False):
     while True:
         # Pass previous reward and action to the agent
         action, action_text = agent.select_action(obs, prev_reward, prev_action)
+        print(f"{prev_reward=}, {prev_action=}")
         print(f"{action_text=}")
 
         obs, reward, termination, truncation, env_info = env.step(action)
@@ -171,6 +172,9 @@ if __name__ == "__main__":
     video_dir = result_dir / "video"
     video_dir.mkdir(parents=True, exist_ok=True)
 
+    image_dir = result_dir / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+
     data_dir = result_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -233,6 +237,13 @@ if __name__ == "__main__":
         video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
         rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
         imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+
+        # Save images
+        curr_image_dir = image_dir / f"ep_{episode + 1:03d}"
+        curr_image_dir.mkdir(parents=True, exist_ok=True)
+        for i, img in enumerate(bgr_image_list):
+            img_path = curr_image_dir / f"{i + 1:08d}.png"
+            cv2.imwrite(str(img_path), img)
 
         # Save step data as JSON
         data_path = data_dir / f"ep_{episode + 1:03d}_data.json"
