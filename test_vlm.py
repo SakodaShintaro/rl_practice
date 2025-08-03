@@ -105,8 +105,11 @@ if __name__ == "__main__":
         end = time.time()
         elapsed_msec = (end - start) * 1000
         average_msec = elapsed_msec / (i + 1)
+
+        print()
         print(f"Step {i + 1}/{len(images_sequence)}: {average_msec=:.1f} ms")
         print(f"  Action text: {action_text}")
         print(
             f"  Parsed values: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}"
         )
+        print()

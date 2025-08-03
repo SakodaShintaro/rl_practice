@@ -18,7 +18,12 @@ ACTION_PROMPT = (
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
     "gas (0 to 1), braking (0 to 1). "
     "Stay on the gray road and avoid green areas. "
-    "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+    "First, analyze the situation and plan your strategy inside <think></think> tags. "
+    "After closing the </think> tag, you MUST provide the action in this exact format: "
+    "'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values. "
+    "Example format:\n"
+    "<think>The road curves left, I need to steer left while maintaining speed.</think>\n"
+    "Action: steering=-0.3, gas=0.5, braking=0.0"
 )
 
 
@@ -26,31 +31,34 @@ def parse_action_text(action_text: str) -> np.ndarray:
     """Parse action text and extract steering, gas, braking values.
 
     Args:
-        action_text: Text in format 'Action: steering=X.X, gas=X.X, braking=X.X'
+        action_text: Text that may contain <think></think> tags and 'Action: steering=X.X, gas=X.X, braking=X.X'
 
     Returns:
         np.ndarray of shape (3,) containing [steering, gas, braking]
 
     Example:
-        >>> parse_action_text("Action: steering=0.5, gas=0.3, braking=0.0")
+        >>> parse_action_text("<think>I need to turn left</think>Action: steering=0.5, gas=0.3, braking=0.0")
         array([0.5, 0.3, 0.0])
     """
     # Default values in case parsing fails
     steering, gas, braking = 0.0, 0.0, 0.0
 
     try:
+        # Remove <think></think> content first (optional, but more explicit)
+        clean_text = re.sub(r"<think>.*?</think>", "", action_text, flags=re.DOTALL)
+
         # Extract steering value
-        steering_match = re.search(r"steering=([+-]?\d*\.?\d+)", action_text)
+        steering_match = re.search(r"steering=([+-]?\d*\.?\d+)", clean_text)
         if steering_match:
             steering = float(steering_match.group(1))
 
         # Extract gas value
-        gas_match = re.search(r"gas=([+-]?\d*\.?\d+)", action_text)
+        gas_match = re.search(r"gas=([+-]?\d*\.?\d+)", clean_text)
         if gas_match:
             gas = float(gas_match.group(1))
 
         # Extract braking value
-        braking_match = re.search(r"braking=([+-]?\d*\.?\d+)", action_text)
+        braking_match = re.search(r"braking=([+-]?\d*\.?\d+)", clean_text)
         if braking_match:
             braking = float(braking_match.group(1))
 
@@ -207,7 +215,7 @@ class VLMEncoderBase(nn.Module):
 
         input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
 
-        for _ in range(50):  # max_new_tokens
+        for _ in range(150):  # max_new_tokens
             if next_token.item() in stop_token_ids:
                 break
             generated_ids.append(next_token.item())
@@ -379,7 +387,7 @@ class MMMambaEncoder(nn.Module):
         input_ids = token.unsqueeze(1)  # Start with first generated token
 
         # Generate more tokens for action text
-        for _ in range(50):  # max_new_tokens
+        for _ in range(150):  # max_new_tokens
             if token.item() in stop_token_ids:
                 break
             output_ids.append(token.item())
