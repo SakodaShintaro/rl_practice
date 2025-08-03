@@ -140,8 +140,8 @@ def run_episode(env, agent, render=False):
         if termination or truncation:
             break
 
-    episode_length = env_info.get("episode", {}).get("l", step_count)
-    episode_reward = env_info.get("episode", {}).get("r", total_reward)
+    episode_length = env_info["episode"]["l"]
+    episode_reward = env_info["episode"]["r"]
 
     return episode_reward, episode_length, bgr_image_list, step_count, step_data
 
