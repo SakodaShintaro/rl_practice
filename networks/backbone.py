@@ -15,14 +15,18 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = (
     "You are an AI driving assistant. Analyze the driving scene from the images (from oldest to newest) and provide the next action. "
+    "The input images show a top-down view of the racing environment. "
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
     "gas (0 to 1), braking (0 to 1). "
-    "Stay on the gray road and avoid green areas. "
-    "First, analyze the situation and plan your strategy inside <think></think> tags. "
-    "After closing the </think> tag, you MUST provide the action in this exact format: "
+    "Stay on the gray road. "
+    "The reward is -0.1 every frame and +1000/N for every track tile visited, where N is the total number of tiles visited in the track."
+    "First, analyze the situation and history and plan your strategy inside <think></think> tags. "
+    "After closing the </think> tag, you MUST provide the high-level action and detailed action in this exact format: "
+    "High-level action: [Maintain/Accelerate/Decelerate/Turn left/Turn right] "
     "'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values. "
     "Example format:\n"
     "<think>The road curves left, I need to steer left while maintaining speed.</think>\n"
+    "High-level action: Turn left\n"
     "Action: steering=-0.3, gas=0.5, braking=0.0"
 )
 
