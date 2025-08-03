@@ -108,6 +108,7 @@ def run_episode(env, agent, render=False):
     while True:
         # Pass previous reward and action to the agent
         action, action_text = agent.select_action(obs, prev_reward, prev_action)
+        print(f"{action_text=}")
 
         obs, reward, termination, truncation, env_info = env.step(action)
 
