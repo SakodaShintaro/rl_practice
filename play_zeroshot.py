@@ -17,6 +17,7 @@ import torch
 
 from networks.backbone import (
     MMMambaEncoder,
+    OpenAIEncoder,
     QwenVLEncoder,
     SmolVLMEncoder,
     parse_action_text,
@@ -38,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         "--agent_type",
         type=str,
         default="random",
-        choices=["random", "smolvlm", "qwenvl", "mmmamba"],
+        choices=["random", "smolvlm", "qwenvl", "mmmamba", "openai"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -68,6 +69,8 @@ class VLMAgent:
             self.encoder = QwenVLEncoder(device=self.device)
         elif encoder_type == "mmmamba":
             self.encoder = MMMambaEncoder(device=self.device)
+        elif encoder_type == "openai":
+            self.encoder = OpenAIEncoder(device=self.device)
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 

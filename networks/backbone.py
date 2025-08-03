@@ -1,6 +1,9 @@
+import base64
+import io
 import re
 
 import numpy as np
+import openai
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderTiny
@@ -406,3 +409,93 @@ class MMMambaEncoder(nn.Module):
         action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
         return x, action_text
+
+
+class OpenAIEncoder(nn.Module):
+    """OpenAI API based encoder for action text generation"""
+
+    def __init__(self, model_name="gpt-4o", device=None) -> None:
+        super().__init__()
+
+        self.model_name = model_name
+        self.output_dim = 512  # Dummy dimension
+        self.device = (
+            device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.step_buffer = []  # List of (image, reward, action) tuples
+        self.max_images = 10  # Smaller buffer for API calls
+
+    def _encode_image_to_base64(self, image: torch.Tensor) -> str:
+        """Convert torch tensor image to base64 string"""
+        # Convert tensor to PIL Image
+        img_tensor = image.to(torch.float32)  # (3, H, W)
+        img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+        img_np = (img_np * 255).astype(np.uint8)
+        pil_img = Image.fromarray(img_np)
+
+        # Convert to base64
+        buffer = io.BytesIO()
+        pil_img.save(buffer, format="PNG")
+        img_str = base64.b64encode(buffer.getvalue()).decode()
+        return img_str
+
+    @torch.no_grad()
+    def forward(
+        self, images: torch.Tensor, reward: float | None, prev_action: np.ndarray | None
+    ) -> tuple[torch.Tensor, str]:
+        assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
+
+        # Add current step to buffer
+        image_b64 = self._encode_image_to_base64(images[0])
+        self.step_buffer.append((image_b64, reward, prev_action))
+
+        if len(self.step_buffer) > self.max_images:
+            self.step_buffer.pop(0)
+
+        # Create content for OpenAI API
+        content = [{"type": "text", "text": ACTION_PROMPT}]
+
+        # Add images with context
+        for img_b64, step_reward, step_action in self.step_buffer:
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+            )
+
+            # Build reward string
+            if step_reward is None:
+                reward_str = "start"
+            else:
+                reward_str = f"{step_reward:.2f}"
+
+            # Build action string
+            if step_action is None:
+                action_str = "start"
+            else:
+                action_str = f"(steering={step_action[0]:.2f}, gas={step_action[1]:.2f}, braking={step_action[2]:.2f})"
+
+            # Add temporal context for this step
+            context_text = f"reward={reward_str}, action={action_str}"
+            content.append({"type": "text", "text": context_text})
+
+        # Call OpenAI API
+        try:
+            response = openai.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=200,
+                temperature=0.7,
+            )
+            action_text = response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"OpenAI API error: {e}")
+            action_text = "Action: steering=0.0, gas=0.0, braking=0.0"
+
+        # Create dummy representation (random vector)
+        dummy_representation = torch.randn(
+            1, self.output_dim, device=self.device, dtype=torch.float32
+        )
+
+        return dummy_representation, action_text
+
+    def reset_inference_params(self):
+        self.step_buffer = []
