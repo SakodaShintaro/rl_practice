@@ -102,6 +102,10 @@ def run_episode(env, agent, render=False):
     obs, _ = env.reset()
     agent.initialize_for_episode()
 
+    for _ in range(10):
+        action = np.zeros(env.action_space.shape, dtype=np.float32)
+        obs, _, termination, truncation, _ = env.step(action)
+
     total_reward = 0
     step_count = 0
     bgr_image_list = []
