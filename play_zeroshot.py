@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 from networks.backbone import (
+    GeminiEncoder,
     MMMambaEncoder,
     OpenAIEncoder,
     QwenVLEncoder,
@@ -39,7 +40,7 @@ def parse_args() -> argparse.Namespace:
         "--agent_type",
         type=str,
         default="random",
-        choices=["random", "smolvlm", "qwenvl", "mmmamba", "openai"],
+        choices=["random", "smolvlm", "qwenvl", "mmmamba", "openai", "gemini"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -71,6 +72,8 @@ class VLMAgent:
             self.encoder = MMMambaEncoder(device=self.device)
         elif encoder_type == "openai":
             self.encoder = OpenAIEncoder(device=self.device)
+        elif encoder_type == "gemini":
+            self.encoder = GeminiEncoder(device=self.device)
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 

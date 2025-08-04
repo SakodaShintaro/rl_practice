@@ -7,6 +7,8 @@ import openai
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderTiny
+from google import genai
+from google.genai import types
 from mamba_ssm.utils.generation import InferenceParams
 from PIL import Image
 from torch import nn
@@ -21,9 +23,11 @@ ACTION_PROMPT = (
     "You are an AI driving assistant. Analyze the driving scene from the images (from oldest to newest) and provide the next action. "
     "The input images show a top-down view of the racing environment. "
     "The red car is the ego vehicle. "
+    "Keep the speed low. "
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
     f"gas (0 to {GAS_LIMIT}), braking (0 to 1). "
     "Pay attention to the state of ego vehicle's motion compared to the previous image. "
+    "Determine whether your current movement state is \"stationary, slowing down, turning left, or turning right.\""
     "The reward is -0.1 every frame and +1000/N for every track tile visited, where N is the total number of tiles visited in the track."
     "First, analyze the situation and plan your strategy inside <think></think> tags. "
     "After closing the </think> tag, you MUST provide the high-level action and detailed action in this exact format: "
@@ -411,6 +415,90 @@ class MMMambaEncoder(nn.Module):
         action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
         return x, action_text
+
+
+class GeminiEncoder(nn.Module):
+    """Gemini API based encoder for action text generation"""
+
+    def __init__(self, model_name="gemini-2.5-flash", device=None) -> None:
+        super().__init__()
+
+        self.model_name = model_name
+        self.output_dim = 512  # Dummy dimension
+        self.device = (
+            device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.step_buffer = []  # List of (image, reward, action) tuples
+        self.max_images = 10  # Smaller buffer for API calls
+        self.client = genai.Client()
+
+    def _convert_image_to_bytes(self, image: torch.Tensor) -> tuple[bytes, str]:
+        """Convert torch tensor image to bytes for Gemini API"""
+        # Convert tensor to PIL Image
+        img_tensor = image.to(torch.float32)  # (3, H, W)
+        img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+        img_np = (img_np * 255).astype(np.uint8)
+        pil_img = Image.fromarray(img_np)
+
+        # Convert to bytes
+        buffer = io.BytesIO()
+        pil_img.save(buffer, format="PNG")
+        img_bytes = buffer.getvalue()
+        return img_bytes, "image/png"
+
+    @torch.no_grad()
+    def forward(
+        self, images: torch.Tensor, reward: float | None, prev_action: np.ndarray | None
+    ) -> tuple[torch.Tensor, str]:
+        assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
+
+        # Add current step to buffer
+        img_bytes, mime_type = self._convert_image_to_bytes(images[0])
+        self.step_buffer.append((img_bytes, mime_type, reward, prev_action))
+
+        if len(self.step_buffer) > self.max_images:
+            self.step_buffer.pop(0)
+
+        # Create content for Gemini API
+        content = [ACTION_PROMPT]
+
+        # Add images with context
+        for img_bytes, mime_type, step_reward, step_action in self.step_buffer:
+            content.append(types.Part.from_bytes(data=img_bytes, mime_type=mime_type))
+
+            # Build reward string
+            if step_reward is None:
+                reward_str = "start"
+            else:
+                reward_str = f"{step_reward:.2f}"
+
+            # Build action string
+            if step_action is None:
+                action_str = "start"
+            else:
+                action_str = f"(steering={step_action[0]:.2f}, gas={step_action[1]:.2f}, braking={step_action[2]:.2f})"
+
+            # Add temporal context for this step
+            context_text = f"reward={reward_str}, action={action_str}"
+            content.append(context_text)
+
+        # Call Gemini API
+        try:
+            response = self.client.models.generate_content(model=self.model_name, contents=content)
+            action_text = response.text.strip()
+        except Exception as e:
+            print(f"Gemini API error: {e}")
+            action_text = "Action: steering=0.0, gas=0.0, braking=0.0"
+
+        # Create dummy representation (random vector)
+        dummy_representation = torch.randn(
+            1, self.output_dim, device=self.device, dtype=torch.float32
+        )
+
+        return dummy_representation, action_text
+
+    def reset_inference_params(self):
+        self.step_buffer = []
 
 
 class OpenAIEncoder(nn.Module):
