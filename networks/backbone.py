@@ -16,11 +16,13 @@ from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokeniz
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 # Unified action prompt for all VLM encoders
+GAS_LIMIT = 0.25
 ACTION_PROMPT = (
     "You are an AI driving assistant. Analyze the driving scene from the images (from oldest to newest) and provide the next action. "
     "The input images show a top-down view of the racing environment. "
+    "The red car is the ego vehicle. "
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
-    "gas (0 to 1), braking (0 to 1). "
+    f"gas (0 to {GAS_LIMIT}), braking (0 to 1). "
     "Pay attention to the state of ego vehicle's motion compared to the previous image. "
     "The reward is -0.1 every frame and +1000/N for every track tile visited, where N is the total number of tiles visited in the track."
     "First, analyze the situation and plan your strategy inside <think></think> tags. "
@@ -76,7 +78,7 @@ def parse_action_text(action_text: str) -> np.ndarray:
     # Create array and clamp values using numpy.clip
     action_array = np.array([steering, gas, braking], dtype=np.float32)
     action_array[0] = np.clip(action_array[0], -1.0, 1.0)  # steering
-    action_array[1] = np.clip(action_array[1], 0.0, 1.0)  # gas
+    action_array[1] = np.clip(action_array[1], 0.0, GAS_LIMIT)  # gas
     action_array[2] = np.clip(action_array[2], 0.0, 1.0)  # braking
 
     return action_array
