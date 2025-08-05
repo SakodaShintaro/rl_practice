@@ -429,7 +429,7 @@ class GeminiEncoder(nn.Module):
             device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
         )
         self.step_buffer = []  # List of (image, reward, action) tuples
-        self.max_images = 10  # Smaller buffer for API calls
+        self.max_images = 20  # Smaller buffer for API calls
         self.client = genai.Client()
 
     def _convert_image_to_bytes(self, image: torch.Tensor) -> tuple[bytes, str]:
