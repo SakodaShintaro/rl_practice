@@ -147,7 +147,7 @@ if __name__ == "__main__":
         obs_for_render = obs.copy().transpose(1, 2, 0)
         bgr_image_list = [concat_images(env.render(), [obs_for_render])]
         agent.initialize_for_episode()
-        action, agent_info = agent.select_action(global_step, obs)
+        action, agent_info = agent.select_action(global_step, obs, None)
 
         while True:
             global_step += 1

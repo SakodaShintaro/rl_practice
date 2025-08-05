@@ -28,7 +28,10 @@ class PpoBetaPolicyAndValue(nn.Module):
         action: torch.Tensor | None = None,
     ) -> tuple:
         x = s_seq[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
-        x, _ = self.encoder(x)
+        # Get previous reward and action from sequences
+        prev_reward = r_seq[:, -1].item() if r_seq.shape[1] > 0 else None
+        prev_action = a_seq[:, -2].cpu().numpy() if a_seq.shape[1] > 1 else None
+        x, _ = self.encoder(x, reward=prev_reward, prev_action=prev_action)
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
 

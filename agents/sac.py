@@ -257,11 +257,14 @@ class SacAgent:
         self.prev_action = None
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
+    def select_action(self, global_step, obs, reward) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
-        output_enc, _ = self.network.encoder_image.forward(obs_tensor)
+        # Use provided reward and stored previous action
+        output_enc, _ = self.network.encoder_image.forward(
+            obs_tensor, reward=reward, prev_action=self.prev_action
+        )
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -366,7 +369,7 @@ class SacAgent:
         info_dict.update(train_info)
 
         # make decision
-        action, action_info = self.select_action(global_step, obs)
+        action, action_info = self.select_action(global_step, obs, reward)
         info_dict.update(action_info)
 
         return action, info_dict

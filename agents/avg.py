@@ -147,9 +147,11 @@ class AvgAgent:
         self._prev_obs = None
         self._prev_action = None
 
-    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
+    def select_action(self, global_step, obs, reward) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
-        obs_encoded, _ = self.network.encoder_image.forward(obs_tensor)
+        obs_encoded, _ = self.network.encoder_image.forward(
+            obs_tensor, reward=reward, prev_action=self._prev_action
+        )
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
@@ -171,7 +173,9 @@ class AvgAgent:
         info_dict["train_reward"] = train_reward
 
         obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
-        curr_obs, _ = self.network.encoder_image.forward(obs_tensor)
+        curr_obs, _ = self.network.encoder_image.forward(
+            obs_tensor, reward=reward, prev_action=self._prev_action
+        )
 
         observations = torch.stack([self._prev_obs, curr_obs], dim=1).to(self.device)
 
@@ -240,7 +244,7 @@ class AvgAgent:
                 info_dict[f"{key}/{feature_name}"] = value
 
         # make decision
-        action, action_info = self.select_action(global_step, obs)
+        action, action_info = self.select_action(global_step, obs, reward)
         info_dict.update(action_info)
 
         return action, info_dict
