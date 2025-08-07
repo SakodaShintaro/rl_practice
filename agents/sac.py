@@ -77,7 +77,8 @@ class Network(nn.Module):
 
     def compute_critic_loss(self, data, state_curr):
         with torch.no_grad():
-            state_next = data.observations[:, -1]
+            obs_next = data.observations[:, -1]
+            state_next, _ = self.encoder_image.forward(obs_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -226,7 +227,7 @@ class SacAgent:
         self.rb = ReplayBuffer(
             args.buffer_size,
             seq_len,
-            (self.network.state_dim,),
+            observation_space.shape,
             action_space.shape,
             self.device,
         )
@@ -249,11 +250,11 @@ class SacAgent:
             "actor": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
         }
-        self.encoded_obs = None
+        self.prev_obs = None
         self.prev_action = None
 
     def initialize_for_episode(self) -> None:
-        self.encoded_obs = None
+        self.prev_obs = None
         self.prev_action = None
 
     @torch.inference_mode()
@@ -276,7 +277,7 @@ class SacAgent:
             action = np.clip(action, self.action_low, self.action_high)
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
 
-        self.encoded_obs = output_enc
+        self.prev_obs = obs
         self.prev_action = action
         return action, info_dict
 
@@ -289,7 +290,7 @@ class SacAgent:
         info_dict["train_reward"] = train_reward
 
         self.rb.add(
-            self.encoded_obs[0].cpu().numpy(),
+            self.prev_obs,
             self.prev_action,
             train_reward,
             False,
@@ -304,7 +305,8 @@ class SacAgent:
         data = self.rb.sample(self.batch_size)
 
         # Compute all losses using refactored methods
-        state_curr = data.observations[:, -2]
+        obs_curr = data.observations[:, -2]
+        state_curr, _ = self.network.encoder_image.forward(obs_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
