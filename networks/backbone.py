@@ -73,14 +73,11 @@ class AE(nn.Module):
         self.ae = AutoencoderTiny.from_pretrained(
             "madebyollin/taesd", cache_dir="./cache", device_map=device
         )
-        original_output_dim = 576
-        self.output_dim = original_output_dim // 2
-        self.linear = nn.Linear(original_output_dim, self.output_dim)
+        self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, str]:
         x = self.ae.encode(x).latents.flatten(1)
-        x = self.linear(x)
         x = self.norm(x)
         return x, ""
 
