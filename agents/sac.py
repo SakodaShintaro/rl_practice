@@ -114,6 +114,7 @@ class Network(nn.Module):
         return critic_loss, activations_dict, info_dict
 
     def compute_actor_loss(self, state_curr):
+        state_curr = state_curr.detach()
         pi, log_pi = self.actor.get_action(state_curr)
 
         for param in self.critic.parameters():
