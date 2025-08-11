@@ -114,6 +114,7 @@ class Network(nn.Module):
         return critic_loss, activations_dict, info_dict
 
     def compute_actor_loss(self, state_curr):
+        state_curr = state_curr.detach()
         pi, log_pi = self.actor.get_action(state_curr)
 
         for param in self.critic.parameters():
@@ -221,7 +222,7 @@ class SacAgent:
             args=args,
             enable_sequence_modeling=False,
         ).to(self.device)
-        lr = 1e-4
+        lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
 
         self.rb = ReplayBuffer(

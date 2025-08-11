@@ -74,10 +74,12 @@ class AE(nn.Module):
             "madebyollin/taesd", cache_dir="./cache", device_map=device
         )
         self.output_dim = 576
+        self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    @torch.no_grad()
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, str]:
-        return self.ae.encode(x).latents.flatten(1), ""
+        x = self.ae.encode(x).latents.flatten(1)
+        x = self.norm(x)
+        return x, ""
 
     @torch.no_grad()
     def decode(self, x):
@@ -120,7 +122,6 @@ class VLMEncoderBase(nn.Module):
             self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
         ]
 
-    @torch.no_grad()
     def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
         assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
 
@@ -286,7 +287,6 @@ class MMMambaEncoder(nn.Module):
         """Reset inference parameters to default values."""
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
 
-    @torch.inference_mode()
     def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
         device = image.device
         batch_size = image.shape[0]

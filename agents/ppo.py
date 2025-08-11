@@ -80,7 +80,8 @@ class PpoAgent:
         )
         self.counter = 0
 
-        self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
+        lr = args.learning_rate
+        self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
 
         self.r_list = []
         self.s_list = []

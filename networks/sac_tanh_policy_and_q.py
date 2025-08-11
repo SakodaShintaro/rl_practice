@@ -7,25 +7,10 @@ from .sparse_utils import apply_one_shot_pruning
 
 
 def weights_init_(m):
-    """
-    Function to initialize weights.
-    When used with apply(fn) recursively applied to every submodule as well as self.
-
-    ## Input:
-
-    - **m** *(nn.Module)*: Checks if the layer is a feedforward layer and initializes using the uniform glorot scheme if True.
-
-    """
     if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_uniform_(m.weight, gain=1)
-        torch.nn.init.constant_(m.bias, 0)
-
-
-def orthogonal_weight_init(m: nn.Module) -> None:
-    """Orthogonal weight initialization for neural networks."""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        m.bias.data.fill_(0.0)
+        nn.init.xavier_uniform_(m.weight, gain=1)
+        # nn.init.orthogonal_(m.weight.data)
+        nn.init.constant_(m.bias, 0)
 
 
 class SacQ(nn.Module):
