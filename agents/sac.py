@@ -60,6 +60,9 @@ class Network(nn.Module):
             sparsity=args.sparsity,
         )
 
+        self.detach_actor = args.detach_actor
+        self.detach_critic = args.detach_critic
+
         # Sequence modeling components (optional)
         if enable_sequence_modeling:
             self.sequence_model = SequenceModelingModule(self.state_dim, action_dim, seq_len, args)
@@ -76,6 +79,8 @@ class Network(nn.Module):
             )
 
     def compute_critic_loss(self, data, state_curr):
+        if self.detach_critic:
+            state_curr = state_curr.detach()
         with torch.no_grad():
             obs_next = data.observations[:, -1]
             state_next, _ = self.encoder_image.forward(obs_next)
@@ -114,7 +119,8 @@ class Network(nn.Module):
         return critic_loss, activations_dict, info_dict
 
     def compute_actor_loss(self, state_curr):
-        state_curr = state_curr.detach()
+        if self.detach_actor:
+            state_curr = state_curr.detach()
         pi, log_pi = self.actor.get_action(state_curr)
 
         for param in self.critic.parameters():
