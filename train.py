@@ -241,5 +241,5 @@ if __name__ == "__main__":
     seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
 
     for i in range(args.trial_num):
-        suffix = f"_{i:2d}" if args.trial_num > 1 else ""
+        suffix = f"_{i:02d}" if args.trial_num > 1 else ""
         main(exp_name + suffix, seed + i)
