@@ -24,6 +24,7 @@ from wrappers import make_env
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
+    parser.add_argument("--trial_num", type=int, default=1)
     parser.add_argument(
         "--env_id",
         type=str,
@@ -76,22 +77,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    if args.debug:
-        args.off_wandb = True
-        args.learning_starts = 10
-        args.render = 0
-        args.step_limit = 100
-
-    if args.off_wandb:
-        os.environ["WANDB_MODE"] = "offline"
-
-    exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
+def main(exp_name: str, seed: int) -> None:
     wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
 
     # seeding
-    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -235,3 +224,22 @@ if __name__ == "__main__":
             break
 
     env.close()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    if args.debug:
+        args.off_wandb = True
+        args.learning_starts = 10
+        args.render = 0
+        args.step_limit = 100
+
+    if args.off_wandb:
+        os.environ["WANDB_MODE"] = "offline"
+
+    exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
+    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+
+    for i in range(args.trial_num):
+        suffix = f"_{i:2d}" if args.trial_num > 1 else ""
+        main(exp_name + suffix, seed + i)
