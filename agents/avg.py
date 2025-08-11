@@ -131,12 +131,13 @@ class AvgAgent:
             "critic": StatisticalMetricsComputer(),
         }
 
+        lr = args.learning_rate
         if self.use_eligibility_trace:
             self.optimizer = AdaptiveObGD(
-                self.network.parameters(), lr=1e-5, gamma=self.gamma, et_lambda=self.et_lambda
+                self.network.parameters(), lr=lr, gamma=self.gamma, et_lambda=self.et_lambda
             )
         else:
-            self.optimizer = optim.AdamW(self.network.parameters(), lr=1e-5, weight_decay=1e-5)
+            self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
 
         # Initialize state tracking
         self._prev_obs = None
