@@ -226,6 +226,7 @@ def main(exp_name: str, seed: int) -> None:
             break
 
     env.close()
+    wandb.finish()
 
 
 if __name__ == "__main__":
