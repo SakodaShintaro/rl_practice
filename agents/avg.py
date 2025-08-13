@@ -150,7 +150,7 @@ class AvgAgent:
 
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
-        obs_encoded, _ = self.network.encoder_image.forward(obs_tensor)
+        obs_encoded, _ = self.network.encoder_sequence.forward(obs_tensor)
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
@@ -194,7 +194,7 @@ class AvgAgent:
 
         # Encode current state
         raw_obs_curr = data.observations[:, -2]
-        state_curr, _ = self.network.encoder_image.forward(raw_obs_curr)
+        state_curr, _ = self.network.encoder_sequence.forward(raw_obs_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)

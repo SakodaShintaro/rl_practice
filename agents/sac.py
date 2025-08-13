@@ -7,7 +7,7 @@ from torch import optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import AE, MMMambaEncoder, SmolVLMEncoder
+from networks.backbone import SequenceAEEncoder, SequenceMMMambaEncoder, SequenceSmolVLMEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -28,19 +28,20 @@ class Network(nn.Module):
         self.gamma = 0.99
         self.num_bins = args.num_bins
         self.sparsity = args.sparsity
+        self.seq_len = seq_len
 
         self.action_dim = action_dim
 
         if args.image_encoder == "ae":
-            self.encoder_image = AE()
+            self.encoder_sequence = SequenceAEEncoder(seq_len=seq_len)
         elif args.image_encoder == "smolvlm":
-            self.encoder_image = SmolVLMEncoder()
+            self.encoder_sequence = SequenceSmolVLMEncoder(seq_len=seq_len)
         elif args.image_encoder == "mmmamba":
-            self.encoder_image = MMMambaEncoder()
+            self.encoder_sequence = SequenceMMMambaEncoder(seq_len=seq_len)
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
 
-        self.state_dim = self.encoder_image.output_dim
+        self.state_dim = self.encoder_sequence.output_dim
         self.reward_dim = 32
         self.token_dim = self.state_dim + self.reward_dim  # 608
 
@@ -83,7 +84,7 @@ class Network(nn.Module):
             state_curr = state_curr.detach()
         with torch.no_grad():
             obs_next = data.observations[:, -1]
-            state_next, _ = self.encoder_image.forward(obs_next)
+            state_next, _ = self.encoder_sequence.forward(obs_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -198,7 +199,7 @@ class Network(nn.Module):
                 {},
             )
 
-        return self.sequence_model.compute_sequence_loss(data, self.encoder_image)
+        return self.sequence_model.compute_sequence_loss(data, self.encoder_sequence)
 
 
 class SacAgent:
@@ -221,6 +222,10 @@ class SacAgent:
         self.batch_size = args.batch_size
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
+
+        # Sequence observation management
+        self.seq_len = seq_len
+        self.observation_buffer = []
 
         self.network = Network(
             action_dim=self.action_dim,
@@ -263,13 +268,21 @@ class SacAgent:
     def initialize_for_episode(self) -> None:
         self.prev_obs = None
         self.prev_action = None
+        self.observation_buffer = []
+        self.network.encoder_sequence.reset_inference_params()
 
     @torch.inference_mode()
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
-        output_enc, _ = self.network.encoder_image.forward(obs_tensor)
+
+        # Update observation buffer for sequence tracking
+        self.observation_buffer.append(obs_tensor)
+        if len(self.observation_buffer) > self.seq_len:
+            self.observation_buffer.pop(0)
+
+        output_enc, _ = self.network.encoder_sequence.forward(obs_tensor)
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -313,7 +326,7 @@ class SacAgent:
 
         # Compute all losses using refactored methods
         obs_curr = data.observations[:, -2]
-        state_curr, _ = self.network.encoder_image.forward(obs_curr)
+        state_curr, _ = self.network.encoder_sequence.forward(obs_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
