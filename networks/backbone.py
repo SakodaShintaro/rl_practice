@@ -472,7 +472,7 @@ class SequenceSTTEncoder(nn.Module):
         self.seq_len = seq_len
         self.action_dim = action_dim
         self.condition_frames = seq_len
-        
+
         # Default configuration
         hidden_dim = 256
         img_tokens_size = 1024
@@ -493,14 +493,16 @@ class SequenceSTTEncoder(nn.Module):
 
         # Use AE encoder for image preprocessing
         self.ae_encoder = AE(device=device)
-        
+
         # Update vae_emb_dim to match AE encoder output
-        actual_vae_emb_dim = self.ae_encoder.output_dim // img_tokens_size  # 576 // 1024 = 0.5625... 
+        actual_vae_emb_dim = (
+            self.ae_encoder.output_dim // img_tokens_size
+        )  # 576 // 1024 = 0.5625...
         # Since 576 is not divisible by 1024, we need to adjust
         # Let's use a different approach - use the full AE output as input
         self.actual_img_tokens_size = self.ae_encoder.output_dim
         actual_vae_emb_dim = 1
-        
+
         # Update token size configuration
         token_size_dict = {
             "img_tokens_size": self.actual_img_tokens_size,
@@ -513,11 +515,9 @@ class SequenceSTTEncoder(nn.Module):
             n_layer=[6, 3],
             n_head=8,
             n_embd=hidden_dim,
-            embd_pdrop=0.0,
             resid_pdrop=0.0,
             attn_pdrop=0.0,
             n_unmasked=0,
-            local_rank=0,
             condition_frames=self.condition_frames,
             latent_size=(32, 32),
             token_size_dict=token_size_dict,
@@ -589,7 +589,9 @@ class SequenceSTTEncoder(nn.Module):
             for i in range(self.action_dim):
                 min_val, max_val = self.action_ranges[i]
                 dummy_action = (
-                    torch.zeros(batch_size, self.condition_frames + 1, device=obs.device) * (max_val - min_val) / 2
+                    torch.zeros(batch_size, self.condition_frames + 1, device=obs.device)
+                    * (max_val - min_val)
+                    / 2
                 )
                 dummy_actions.append(dummy_action)
             action_values_total = torch.stack(dummy_actions, dim=-1)
@@ -617,8 +619,16 @@ class SequenceSTTEncoder(nn.Module):
             Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
         """
         feature_total, action_values_total = self._prepare_stt_input(observations)
+        original_batch_size = observations.shape[0]
         stt_output = self.stt(feature_total, action_values_total)
-        action_emb = stt_output["action_emb"]
+        action_emb = stt_output["action_emb"]  # [B*F, hidden_dim * action_dim]
+
+        # Reshape to [B, F, hidden_dim * action_dim] and take mean over frames
+        frames = feature_total.shape[1]  # F+1
+        action_emb_reshaped = action_emb.view(original_batch_size, frames - 1, -1)
+        # Average over frames to get [B, hidden_dim * action_dim]
+        action_emb_pooled = action_emb_reshaped.mean(dim=1)
+
         # Project to match AE output dimension
-        projected_output = self.output_projection(action_emb)
+        projected_output = self.output_projection(action_emb_pooled)
         return projected_output, None

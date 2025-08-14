@@ -109,7 +109,6 @@ class CausalSpaceSelfAttention(nn.Module):
         self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.attn_drop = nn.Dropout(config.attn_pdrop)
         self.resid_drop = nn.Dropout(config.resid_pdrop)
         self.attn_dropout_rate = config.attn_pdrop
         self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
@@ -121,18 +120,6 @@ class CausalSpaceSelfAttention(nn.Module):
             self.k_norm = nn.LayerNorm(config.n_embd)
         else:
             self.q_norm = self.k_norm = nn.Identity()
-
-        self.action_tokens_num = config.token_size_dict["action_tokens_size"]
-        self.img_tokens_num = config.token_size_dict["img_tokens_size"]
-        self.total_tokens_num = config.token_size_dict["total_tokens_size"]
-        self.patch_size = config.patch_size
-        self.num_tokens = self.total_tokens_num
-        self.freqs_cis_singlescale = compute_axial_cis(
-            dim=config.n_embd // self.n_head,
-            end_x=self.patch_size[0],
-            end_y=self.patch_size[1],
-            theta=1000.0,
-        )
 
     def forward(self, x, attn_mask):
         B, T, C = x.size()
@@ -190,7 +177,6 @@ class SpaceSelfAttention(nn.Module):
         self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.attn_drop = nn.Dropout(config.attn_pdrop)
         self.resid_drop = nn.Dropout(config.resid_pdrop)
         self.attn_dropout_rate = config.attn_pdrop
         self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
@@ -202,18 +188,6 @@ class SpaceSelfAttention(nn.Module):
             self.k_norm = nn.LayerNorm(config.n_embd)
         else:
             self.q_norm = self.k_norm = nn.Identity()
-
-        self.action_tokens_num = config.token_size_dict["action_tokens_size"]
-        self.img_tokens_num = config.token_size_dict["img_tokens_size"]
-        self.total_tokens_num = config.token_size_dict["total_tokens_size"]
-        self.patch_size = config.patch_size
-        self.num_tokens = self.total_tokens_num
-        self.freqs_cis_singlescale = compute_axial_cis(
-            dim=config.n_embd // self.n_head,
-            end_x=self.patch_size[0],
-            end_y=self.patch_size[1],
-            theta=1000.0,
-        )
 
     def forward(self, x):
         B, T, C = x.size()
@@ -267,7 +241,6 @@ class CausalTimeSelfAttention(nn.Module):
         self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.attn_drop = nn.Dropout(config.attn_pdrop)
         self.resid_drop = nn.Dropout(config.resid_pdrop)
         self.attn_dropout_rate = config.attn_pdrop
         self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
@@ -352,7 +325,6 @@ class SpatialTemporalTransformer(nn.Module):
         resid_pdrop,
         attn_pdrop,
         n_unmasked,
-        local_rank,
         condition_frames,
         latent_size,
         token_size_dict,
@@ -399,14 +371,11 @@ class SpatialTemporalTransformer(nn.Module):
             ]
         )
         self.causal_time_space_num = config.n_layer[0]
-        self.auto_regressive_num = config.n_layer[1]
         print(
-            "self.causal_time_space_num, self.auto_regressive_num",
+            "self.causal_time_space_num",
             self.causal_time_space_num,
-            self.auto_regressive_num,
         )
 
-        self.local_rank = local_rank
         self.img_token_size = token_size_dict["img_tokens_size"]
         self.total_token_size = token_size_dict["total_tokens_size"]
         self.action_token_size = token_size_dict["action_tokens_size"]
@@ -415,7 +384,6 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.time_emb = nn.Parameter(torch.zeros(50, self.C))
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
-        self.begin_ends = []
 
         self.causal_time_space_blocks = nn.Sequential(
             *[CausalTimeSpaceBlock(config) for _ in range(self.causal_time_space_num)]
