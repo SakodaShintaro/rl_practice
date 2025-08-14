@@ -98,7 +98,9 @@ class AE(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
+        # images : (B, T, C, H, W)
+        x = images[:, -1]  # (B, C, H, W)
         x = self.ae.encode(x).latents.flatten(1)
         x = self.norm(x)
         return x, ""
@@ -145,7 +147,7 @@ class VLMEncoderBase(nn.Module):
         ]
 
     def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
-        assert images.shape[0] == 1, "Batch size must be 1 for stepwise inference"
+        # x : (B, T, C, H, W)
 
         # Convert tensor to PIL Image and add to buffer
         img_tensor = images[0].to(torch.float32)  # (3, H, W) - ensure float32 for PIL conversion
@@ -253,63 +255,6 @@ class QwenVLEncoder(VLMEncoderBase):
         # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
         output_dim = 1536
         super().__init__(model_id, output_dim, device)
-
-
-class SequenceEncoderBase(nn.Module):
-    """Base class for sequence encoders that wrap image encoders"""
-
-    def __init__(self, image_encoder, seq_len=1):
-        super().__init__()
-        self.image_encoder = image_encoder
-        self.seq_len = seq_len
-        self.output_dim = image_encoder.output_dim
-        self.frame_buffer = []
-
-    def forward(self, observations):
-        """Forward pass for sequence of observations
-
-        Args:
-            observations: Tensor of shape (batch_size, seq_len, *image_shape) or (batch_size, *image_shape)
-
-        Returns:
-            encoded states and action text from the most recent frame
-        """
-        if len(observations.shape) == 4:
-            # Single observation: (batch_size, C, H, W)
-            return self._forward_single(observations)
-        else:
-            # Sequence of observations: (batch_size, seq_len, C, H, W)
-            return self._forward_sequence(observations)
-
-    def _forward_single(self, observation):
-        """Process single observation (current behavior)"""
-        # Update frame buffer for internal sequence tracking
-        if observation.shape[0] == 1:  # batch_size == 1
-            self.frame_buffer.append(observation)
-            if len(self.frame_buffer) > self.seq_len:
-                self.frame_buffer.pop(0)
-
-        # Process using underlying image encoder
-        return self.image_encoder.forward(observation)
-
-    def _forward_sequence(self, observations):
-        """Process sequence of observations (future implementation)"""
-        # For now, just use the most recent frame
-        latest_obs = observations[:, -1]  # (batch_size, C, H, W)
-        return self._forward_single(latest_obs)
-
-    def reset_inference_params(self):
-        """Reset inference parameters"""
-        self.frame_buffer = []
-        if hasattr(self.image_encoder, "reset_inference_params"):
-            self.image_encoder.reset_inference_params()
-
-    def decode(self, x):
-        """Decode latent representation back to image"""
-        if hasattr(self.image_encoder, "decode"):
-            return self.image_encoder.decode(x)
-        else:
-            raise NotImplementedError("Underlying encoder does not support decoding")
 
 
 class MMMambaEncoder(nn.Module):
@@ -439,31 +384,7 @@ class MMMambaEncoder(nn.Module):
         return x, action_text
 
 
-class SequenceAEEncoder(SequenceEncoderBase):
-    """Sequence encoder wrapper for AE"""
-
-    def __init__(self, seq_len=1, device=None):
-        ae_encoder = AE(device=device)
-        super().__init__(ae_encoder, seq_len)
-
-
-class SequenceSmolVLMEncoder(SequenceEncoderBase):
-    """Sequence encoder wrapper for SmolVLM"""
-
-    def __init__(self, seq_len=1, device=None):
-        smolvlm_encoder = SmolVLMEncoder(device=device)
-        super().__init__(smolvlm_encoder, seq_len)
-
-
-class SequenceMMMambaEncoder(SequenceEncoderBase):
-    """Sequence encoder wrapper for MMMamba"""
-
-    def __init__(self, seq_len=1, device=None):
-        mmmamba_encoder = MMMambaEncoder(device=device)
-        super().__init__(mmmamba_encoder, seq_len)
-
-
-class SequenceSTTEncoder(nn.Module):
+class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
     def __init__(self, seq_len):
@@ -509,14 +430,14 @@ class SequenceSTTEncoder(nn.Module):
         """Reset inference parameters for compatibility with other encoders"""
         self.obs_history = []
 
-    def forward(self, observations):
+    def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, str]:
         """Forward pass for sequence of observations
 
         Args:
-            observations: Tensor of shape (batch_size, 3, H, W) - Raw RGB images
+            observations: Tensor of shape (B, T, 3, H, W)
 
         Returns:
-            Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
+            Tuple: (encoded features from SpatialTemporalTransformer, str)
         """
         # Encode with AE but preserve spatial structure
         with torch.no_grad():
@@ -571,4 +492,4 @@ class SequenceSTTEncoder(nn.Module):
 
         # Project to match AE output dimension
         projected_output = self.output_projection(global_emb)
-        return projected_output, None
+        return projected_output, ""
