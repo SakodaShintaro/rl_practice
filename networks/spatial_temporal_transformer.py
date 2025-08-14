@@ -102,19 +102,19 @@ class GPTConfig:
 class CausalSpaceSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
-        self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        assert config.hidden_dim % config.n_head == 0
+        self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
+        self.query = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
+        self.value = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.res_drop_prob = nn.Dropout(config.res_drop_prob)
         self.attn_dropout_rate = config.attn_drop_prob
-        self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.n_head = config.n_head
         self.qk_norm = True
 
         if self.qk_norm:
-            self.q_norm = nn.LayerNorm(config.n_embd)
-            self.k_norm = nn.LayerNorm(config.n_embd)
+            self.q_norm = nn.LayerNorm(config.hidden_dim)
+            self.k_norm = nn.LayerNorm(config.hidden_dim)
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
@@ -149,13 +149,13 @@ class CausalSpaceSelfAttention(nn.Module):
 class CausalSpaceBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln1 = nn.LayerNorm(config.n_embd)
-        self.ln2 = nn.LayerNorm(config.n_embd)
+        self.ln1 = nn.LayerNorm(config.hidden_dim)
+        self.ln2 = nn.LayerNorm(config.hidden_dim)
         self.attn = CausalSpaceSelfAttention(config)
         self.mlp = nn.Sequential(
-            nn.Linear(config.n_embd, 4 * config.n_embd, bias=False),
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
-            nn.Linear(4 * config.n_embd, config.n_embd, bias=False),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
             nn.Dropout(config.res_drop_prob),
         )
 
@@ -170,19 +170,19 @@ class CausalSpaceBlock(nn.Module):
 class SpaceSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
-        self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        assert config.hidden_dim % config.n_head == 0
+        self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
+        self.query = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
+        self.value = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.res_drop_prob = nn.Dropout(config.res_drop_prob)
         self.attn_dropout_rate = config.attn_drop_prob
-        self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.n_head = config.n_head
         self.qk_norm = True
 
         if self.qk_norm:
-            self.q_norm = nn.LayerNorm(config.n_embd)
-            self.k_norm = nn.LayerNorm(config.n_embd)
+            self.q_norm = nn.LayerNorm(config.hidden_dim)
+            self.k_norm = nn.LayerNorm(config.hidden_dim)
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
@@ -213,13 +213,13 @@ class SpaceSelfAttention(nn.Module):
 class SpaceBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln1 = nn.LayerNorm(config.n_embd)
-        self.ln2 = nn.LayerNorm(config.n_embd)
+        self.ln1 = nn.LayerNorm(config.hidden_dim)
+        self.ln2 = nn.LayerNorm(config.hidden_dim)
         self.attn = SpaceSelfAttention(config)
         self.mlp = nn.Sequential(
-            nn.Linear(config.n_embd, 4 * config.n_embd, bias=False),
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
-            nn.Linear(4 * config.n_embd, config.n_embd, bias=False),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
             nn.Dropout(config.res_drop_prob),
         )
 
@@ -234,19 +234,19 @@ class SpaceBlock(nn.Module):
 class CausalTimeSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
-        self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        assert config.hidden_dim % config.n_head == 0
+        self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
+        self.query = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
+        self.value = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.res_drop_prob = nn.Dropout(config.res_drop_prob)
         self.attn_dropout_rate = config.attn_drop_prob
-        self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.n_head = config.n_head
         self.qk_norm = True
 
         if self.qk_norm:
-            self.q_norm = nn.LayerNorm(config.n_embd)
-            self.k_norm = nn.LayerNorm(config.n_embd)
+            self.q_norm = nn.LayerNorm(config.hidden_dim)
+            self.k_norm = nn.LayerNorm(config.hidden_dim)
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
@@ -279,13 +279,13 @@ class CausalTimeSelfAttention(nn.Module):
 class CausalTimeBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln1 = nn.LayerNorm(config.n_embd)
-        self.ln2 = nn.LayerNorm(config.n_embd)
+        self.ln1 = nn.LayerNorm(config.hidden_dim)
+        self.ln2 = nn.LayerNorm(config.hidden_dim)
         self.attn = CausalTimeSelfAttention(config)
         self.mlp = nn.Sequential(
-            nn.Linear(config.n_embd, 4 * config.n_embd, bias=False),
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
-            nn.Linear(4 * config.n_embd, config.n_embd, bias=False),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
             nn.Dropout(config.res_drop_prob),
         )
 
@@ -317,7 +317,7 @@ class SpatialTemporalTransformer(nn.Module):
         self,
         n_layer,
         n_head,
-        n_embd,
+        hidden_dim,
         res_drop_prob,
         attn_drop_prob,
         condition_frames,
@@ -327,13 +327,13 @@ class SpatialTemporalTransformer(nn.Module):
             res_drop_prob=res_drop_prob,
             attn_drop_prob=attn_drop_prob,
             n_head=n_head,
-            n_embd=n_embd,
+            hidden_dim=hidden_dim,
         )
 
-        self.n_embd = n_embd
+        self.hidden_dim = hidden_dim
         self.causal_time_space_num = n_layer
 
-        self.time_emb = nn.Parameter(torch.zeros(50, self.n_embd))
+        self.time_emb = nn.Parameter(torch.zeros(50, self.hidden_dim))
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
 
         self.causal_time_space_blocks = nn.Sequential(
@@ -362,10 +362,10 @@ class SpatialTemporalTransformer(nn.Module):
         Shape-invariant transformation for image features.
 
         Args:
-            feature_embeddings: [B, F, img_tokens_size, n_embd] - Embedded image features
+            feature_embeddings: [B, F, img_tokens_size, hidden_dim] - Embedded image features
 
         Returns:
-            torch.Tensor: shape [B, F, img_tokens_size, n_embd] - Processed spatial-temporal embeddings
+            torch.Tensor: shape [B, F, img_tokens_size, hidden_dim] - Processed spatial-temporal embeddings
         """
         _, F, L, _ = feature_embeddings.shape
 
