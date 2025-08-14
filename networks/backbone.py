@@ -473,8 +473,8 @@ class SequenceSTTEncoder(nn.Module):
         self.action_dim = action_dim
         self.condition_frames = seq_len
 
-        # Default configuration
-        hidden_dim = 256
+        # Default configuration (reduced for memory efficiency)
+        hidden_dim = 128  # Reduced from 256
         img_tokens_size = 1024
         vae_emb_dim = 8
         action_ranges = [(-1.0, 1.0)] * action_dim
@@ -507,8 +507,8 @@ class SequenceSTTEncoder(nn.Module):
 
         self.stt = SpatialTemporalTransformer(
             block_size=self.actual_img_tokens_size + action_dim,
-            n_layer=[6, 3],
-            n_head=8,
+            n_layer=[3, 2],  # Reduced from [6, 3]
+            n_head=4,  # Reduced from 8
             n_embd=hidden_dim,
             resid_pdrop=0.0,
             attn_pdrop=0.0,
@@ -522,7 +522,7 @@ class SequenceSTTEncoder(nn.Module):
         )
 
         # Add projection layer to match AE encoder output dimension
-        stt_output_dim = hidden_dim * action_dim  # 768
+        stt_output_dim = hidden_dim  # 128 (n_embd from global average)
         ae_output_dim = 576
         self.output_projection = nn.Linear(stt_output_dim, ae_output_dim)
         self.output_dim = ae_output_dim
@@ -619,16 +619,13 @@ class SequenceSTTEncoder(nn.Module):
         # feature_total: [B, condition_frames+1, 144, 4] - Image features with spatial structure
         # action_values_total: [B, condition_frames+1, action_dim] - Action history
 
-        original_batch_size = observations.shape[0]
         stt_output = self.stt(feature_total, action_values_total)
-        action_emb = stt_output["action_emb"]  # [B*F, hidden_dim * action_dim]
+        # stt_output: [B, F, total_tokens_size, n_embd] - Full spatial-temporal embeddings
 
-        # Reshape to [B, F, hidden_dim * action_dim] and take mean over frames
-        frames = feature_total.shape[1]  # F+1
-        action_emb_reshaped = action_emb.view(original_batch_size, frames - 1, -1)
-        # Average over frames to get [B, hidden_dim * action_dim]
-        action_emb_pooled = action_emb_reshaped.mean(dim=1)
+        # Take mean over frames and tokens to get global representation
+        # [B, F, total_tokens_size, n_embd] -> [B, n_embd]
+        global_emb = stt_output.mean(dim=(1, 2))
 
         # Project to match AE output dimension
-        projected_output = self.output_projection(action_emb_pooled)
+        projected_output = self.output_projection(global_emb)
         return projected_output, None

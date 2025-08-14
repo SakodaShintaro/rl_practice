@@ -451,9 +451,9 @@ class SpatialTemporalTransformer(nn.Module):
             action_values_total: [B, (F+1)*temporal_block, num_actions] - Action float values
 
         Returns:
-            dict: Contains 'logits' and 'action_emb'
+            torch.Tensor: shape [B, F, total_tokens_size, n_embd] - Processed spatial-temporal embeddings
         """
-        B, F, _, _ = feature_total.shape
+        _, F, _, _ = feature_total.shape
         F = F - 1
         action_embs = self.get_action_emb(action_values_total)
         action_token_embeddings = []
@@ -489,20 +489,7 @@ class SpatialTemporalTransformer(nn.Module):
             time_space_token_embeddings = self.causal_time_space_blocks[i](
                 time_space_token_embeddings, self.mask_time
             )
-        auto_regressive_token_embeddings = rearrange(
-            time_space_token_embeddings, "B F L C -> (B F) L C", B=B, F=F
-        )
-
-        target_action_embeddings = []
-        for action_emb in action_token_embeddings_reshaped:
-            target_emb = action_emb[:, self.temporal_block :, ...].reshape(
-                B * F, self.temporal_block * self.C
-            )
-            target_action_embeddings.append(target_emb)
-
-        action_emb = torch.cat(target_action_embeddings, dim=1)
-
-        out = {"logits": auto_regressive_token_embeddings, "action_emb": action_emb}
-        return out
+        # Return with preserved temporal structure: [B, F, L, C]
+        return time_space_token_embeddings
 
 
