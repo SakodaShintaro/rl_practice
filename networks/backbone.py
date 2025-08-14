@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderTiny
+from einops import rearrange
 from mamba_ssm.utils.generation import InferenceParams
 from PIL import Image
 from torch import nn
@@ -475,21 +476,13 @@ class SequenceSTTEncoder(nn.Module):
 
         # Default configuration (reduced for memory efficiency)
         hidden_dim = 128  # Reduced from 256
-        img_tokens_size = 1024
         vae_emb_dim = 8
         action_ranges = [(-1.0, 1.0)] * action_dim
         device = "cuda:0"
 
         self.action_ranges = action_ranges
-
-        action_tokens_size = action_dim
-        total_tokens_size = img_tokens_size + action_tokens_size
-
-        token_size_dict = {
-            "img_tokens_size": img_tokens_size,
-            "action_tokens_size": action_tokens_size,
-            "total_tokens_size": total_tokens_size,
-        }
+        self.action_emb_dim = 512
+        self.temporal_block = 1
 
         # Use AE encoder for image preprocessing
         self.ae_encoder = AE(device=device)
@@ -498,27 +491,28 @@ class SequenceSTTEncoder(nn.Module):
         self.actual_img_tokens_size = 144  # 12 * 12 patches
         actual_vae_emb_dim = 4  # each patch has 4 dimensions
 
-        # Update token size configuration
-        token_size_dict = {
-            "img_tokens_size": self.actual_img_tokens_size,
-            "action_tokens_size": action_dim,
-            "total_tokens_size": self.actual_img_tokens_size + action_dim,
-        }
-
         self.stt = SpatialTemporalTransformer(
-            block_size=self.actual_img_tokens_size + action_dim,
             n_layer=[3, 2],  # Reduced from [6, 3]
             n_head=4,  # Reduced from 8
             n_embd=hidden_dim,
             resid_pdrop=0.0,
             attn_pdrop=0.0,
-            n_unmasked=0,
             condition_frames=self.condition_frames,
             latent_size=(12, 12),
-            token_size_dict=token_size_dict,
             vae_emb_dim=actual_vae_emb_dim,
-            temporal_block=1,
-            action_ranges=action_ranges,
+        )
+
+        # Action processing components moved from STT
+        self.action_projectors = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(self.action_emb_dim, self.action_emb_dim, bias=False),
+                    nn.GELU(),
+                    nn.Linear(self.action_emb_dim, hidden_dim, bias=False),
+                    nn.LayerNorm(hidden_dim),
+                )
+                for _ in range(action_dim)
+            ]
         )
 
         # Add projection layer to match AE encoder output dimension
@@ -528,6 +522,30 @@ class SequenceSTTEncoder(nn.Module):
         self.output_dim = ae_output_dim
         self.obs_history = []
         self.action_history = []
+
+    def get_action_emb(self, action_values):
+        """
+        Convert action float values to embeddings.
+
+        Args:
+            action_values: [B, T, num_actions] - Float values for each action
+        """
+        from .spatial_temporal_transformer import get_fourier_embeds_from_coordinates
+        
+        action_values_normalize = []
+        for i in range(self.action_dim):
+            # Normalize float values to [0, 1] range using min/max of each action
+            min_val, max_val = self.action_ranges[i]
+            normalized = (action_values[:, :, i : i + 1] - min_val) / (max_val - min_val)
+            # Clamp to [0, 1] to ensure values are in valid range
+            normalized = torch.clamp(normalized, 0.0, 1.0)
+            action_values_normalize.append(normalized)
+
+        combined_values = torch.cat(action_values_normalize, dim=-1)
+        action_emb = get_fourier_embeds_from_coordinates(self.action_emb_dim, combined_values)
+
+        action_embs = torch.split(action_emb, dim=2, split_size_or_sections=1)
+        return action_embs
 
     def reset_inference_params(self):
         """Reset inference parameters for compatibility with other encoders"""
@@ -576,8 +594,13 @@ class SequenceSTTEncoder(nn.Module):
             adjusted_history.append(hist_obs)
 
         feature_total = torch.stack(adjusted_history, dim=1)
+        # feature_total: [B, F+1, 144, 4]
 
-        # Create dummy actions since we're focusing only on observations
+        # Project image features to embedding space
+        feature_embeddings = self.stt.img_projector(feature_total)
+        # feature_embeddings: [B, F+1, 144, n_embd]
+
+        # Create dummy action embeddings
         dummy_actions = []
         for i in range(self.action_dim):
             min_val, max_val = self.action_ranges[i]
@@ -588,12 +611,42 @@ class SequenceSTTEncoder(nn.Module):
             )
             dummy_actions.append(dummy_action)
         action_values_total = torch.stack(dummy_actions, dim=-1)
+        # action_values_total: [B, F+1, action_dim]
 
-        stt_output = self.stt(feature_total, action_values_total)
-        # stt_output: [B, F, total_tokens_size, n_embd] - Full spatial-temporal embeddings
+        # Get action embeddings
+        action_embs = self.get_action_emb(action_values_total)
+        action_token_embeddings = []
+        for i, emb in enumerate(action_embs):
+            action_token_embeddings.append(self.action_projectors[i](emb))
 
-        # Use last timestep's image tokens (most recent spatial-temporal understanding)
-        last_frame_emb = stt_output[:, -1, :, :]  # [B, total_tokens_size, n_embd]
+        # Reshape and combine action embeddings with image embeddings
+        action_token_embeddings_reshaped = []
+        F = self.condition_frames
+        for action_emb in action_token_embeddings:
+            reshaped = rearrange(
+                action_emb, "B (F T) L C -> B F (L T) C", F=F + 1, T=self.temporal_block
+            )
+            action_token_embeddings_reshaped.append(reshaped)
+
+        # Use only the history frames (not the last one for prediction)
+        input_action_token_embeddings = []
+        for action_emb in action_token_embeddings_reshaped:
+            input_action_token_embeddings.append(action_emb[:, :-1, ...])
+        input_feature_embeddings = feature_embeddings[:, :-1, ...]
+
+        # Combine action and image tokens
+        combined_token_embeddings = torch.cat(
+            input_action_token_embeddings + [input_feature_embeddings],
+            dim=2,
+        )
+        # combined_token_embeddings: [B, F, total_tokens_size, n_embd]
+
+        # Apply STT (now shape-invariant)
+        stt_output = self.stt(combined_token_embeddings)
+        # stt_output: [B, F, total_tokens_size, n_embd]
+
+        # Use last timestep's image tokens only
+        last_frame_emb = stt_output[:, -1, :self.actual_img_tokens_size, :]  # [B, 144, n_embd]
         global_emb = last_frame_emb.mean(dim=1)  # [B, n_embd]
 
         # Project to match AE output dimension

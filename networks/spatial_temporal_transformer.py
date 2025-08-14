@@ -316,57 +316,38 @@ class CausalTimeSpaceBlock(nn.Module):
 class SpatialTemporalTransformer(nn.Module):
     def __init__(
         self,
-        block_size,
         n_layer,
         n_head,
         n_embd,
         resid_pdrop,
         attn_pdrop,
-        n_unmasked,
         condition_frames,
         latent_size,
-        token_size_dict,
         vae_emb_dim,
-        temporal_block,
-        action_ranges,
     ):
         super().__init__()
+        # Calculate block size based on image tokens only
+        img_tokens_size = latent_size[0] * latent_size[1]  # 12 * 12 = 144
+
         config = GPTConfig(
-            block_size=block_size,
+            block_size=img_tokens_size,
             resid_pdrop=resid_pdrop,
             attn_pdrop=attn_pdrop,
             n_layer=n_layer,
             n_head=n_head,
             n_embd=n_embd,
-            n_unmasked=n_unmasked,
             patch_size=latent_size,
             condition_frames=condition_frames,
-            token_size_dict=token_size_dict,
         )
 
         self.C = n_embd
         self.Cvae = vae_emb_dim
-        self.action_emb_dim = 512
-        self.action_ranges = action_ranges
-        self.num_actions = len(action_ranges)
         self.latent_size = latent_size
-        self.temporal_block = temporal_block
         self.img_projector = nn.Sequential(
             nn.Linear(self.Cvae, self.C // 2, bias=False),
             nn.GELU(),
             nn.Linear(self.C // 2, self.C, bias=False),
             nn.LayerNorm(self.C),
-        )
-        self.action_projectors = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(self.action_emb_dim, self.action_emb_dim, bias=False),
-                    nn.GELU(),
-                    nn.Linear(self.action_emb_dim, self.C, bias=False),
-                    nn.LayerNorm(self.C),
-                )
-                for _ in range(self.num_actions)
-            ]
         )
         self.causal_time_space_num = config.n_layer[0]
         print(
@@ -374,10 +355,6 @@ class SpatialTemporalTransformer(nn.Module):
             self.causal_time_space_num,
         )
 
-        self.img_token_size = token_size_dict["img_tokens_size"]
-        self.total_token_size = token_size_dict["total_tokens_size"]
-        self.action_token_size = token_size_dict["action_tokens_size"]
-        self.prefix_size = self.total_token_size - self.img_token_size
         self.condition_frames = condition_frames
 
         self.time_emb = nn.Parameter(torch.zeros(50, self.C))
@@ -387,29 +364,12 @@ class SpatialTemporalTransformer(nn.Module):
             *[CausalTimeSpaceBlock(config) for _ in range(self.causal_time_space_num)]
         )
 
-        self.block_size = config.block_size
         self.apply(self._init_weights)
-        self.config = config
 
         matrix = torch.tril(torch.ones(condition_frames, condition_frames))
         time_causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         time_causal_mask = torch.where(matrix == 1, 0, time_causal_mask)
         self.register_buffer("mask_time", time_causal_mask.contiguous())
-
-        matrix_1 = torch.ones(self.total_token_size, self.total_token_size)
-        for i in range(0, self.prefix_size):
-            matrix_1[i, self.prefix_size :] = 0
-        seq_causal_mask = torch.where(matrix_1 == 0, float("-inf"), matrix_1)
-        seq_causal_mask = torch.where(matrix_1 == 1, 0, seq_causal_mask)
-        beta = 0.1
-        space_weight = torch.zeros(self.total_token_size, self.total_token_size)
-        space_weight[:, 0] = 2
-        space_weight[:, 1] = 1
-        seq_causal_mask = seq_causal_mask + space_weight * beta
-        self.register_buffer("mask_space", seq_causal_mask.contiguous())
-
-    def get_block_size(self):
-        return self.block_size
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -420,76 +380,27 @@ class SpatialTemporalTransformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def get_action_emb(self, action_values):
-        """
-        Convert action float values to embeddings.
-
-        Args:
-            action_values: [B, T, num_actions] - Float values for each action
-        """
-        action_values_normalize = []
-        for i in range(self.num_actions):
-            # Normalize float values to [0, 1] range using min/max of each action
-            min_val, max_val = self.action_ranges[i]
-            normalized = (action_values[:, :, i : i + 1] - min_val) / (max_val - min_val)
-            # Clamp to [0, 1] to ensure values are in valid range
-            normalized = torch.clamp(normalized, 0.0, 1.0)
-            action_values_normalize.append(normalized)
-
-        combined_values = torch.cat(action_values_normalize, dim=-1)
-        action_emb = get_fourier_embeds_from_coordinates(self.action_emb_dim, combined_values)
-
-        action_embs = torch.split(action_emb, dim=2, split_size_or_sections=1)
-        return action_embs
-
-    def forward(self, feature_total, action_values_total):
+    def forward(self, feature_embeddings):
         """
         Forward pass of the SpatialTemporalTransformer.
+        Shape-invariant transformation for image features.
 
         Args:
-            feature_total: [B, F+1, img_tokens_size, vae_emb_dim] - Image features
-            action_values_total: [B, (F+1)*temporal_block, num_actions] - Action float values
+            feature_embeddings: [B, F, img_tokens_size, n_embd] - Embedded image features
 
         Returns:
-            torch.Tensor: shape [B, F, total_tokens_size, n_embd] - Processed spatial-temporal embeddings
+            torch.Tensor: shape [B, F, img_tokens_size, n_embd] - Processed spatial-temporal embeddings
         """
-        _, F, _, _ = feature_total.shape
-        F = F - 1
-        action_embs = self.get_action_emb(action_values_total)
-        action_token_embeddings = []
-        for i, emb in enumerate(action_embs):
-            action_token_embeddings.append(self.action_projectors[i](emb))
-        feature_embeddings = self.img_projector(feature_total)
-
-        action_token_embeddings_reshaped = []
-        for action_emb in action_token_embeddings:
-            reshaped = rearrange(
-                action_emb, "B (F T) L C -> B F (L T) C", F=F + 1, T=self.temporal_block
-            )
-            action_token_embeddings_reshaped.append(reshaped)
-
-        input_action_token_embeddings = []
-        for action_emb in action_token_embeddings_reshaped:
-            input_action_token_embeddings.append(action_emb[:, :-1, ...])
-        input_feature_embeddings = feature_embeddings[:, :-1, ...]
-
-        combined_token_embeddings = torch.cat(
-            input_action_token_embeddings + [input_feature_embeddings],
-            dim=2,
-        )
+        _, F, L, _ = feature_embeddings.shape
 
         time_emb_F = self.time_emb[:F, :].unsqueeze(0)
-        time_emb_F = torch.repeat_interleave(
-            time_emb_F[:, :, None, :], self.total_token_size, dim=2
-        )
+        time_emb_F = torch.repeat_interleave(time_emb_F[:, :, None, :], L, dim=2)
 
-        time_space_token_embeddings = combined_token_embeddings + time_emb_F
+        time_space_token_embeddings = feature_embeddings + time_emb_F
 
         for i in range(self.causal_time_space_num):
             time_space_token_embeddings = self.causal_time_space_blocks[i](
                 time_space_token_embeddings, self.mask_time
             )
-        # Return with preserved temporal structure: [B, F, L, C]
+
         return time_space_token_embeddings
-
-
