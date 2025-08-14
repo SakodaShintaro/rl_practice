@@ -11,6 +11,7 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
+from .spatial_temporal_transformer import SpatialTemporalTransformer
 
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = (
@@ -460,3 +461,114 @@ class SequenceMMMambaEncoder(SequenceEncoderBase):
     def __init__(self, seq_len=1, device=None):
         mmmamba_encoder = MMMambaEncoder(device=device)
         super().__init__(mmmamba_encoder, seq_len)
+
+
+class SequenceSTTEncoder(nn.Module):
+    """Sequence encoder using SpatialTemporalTransformer"""
+
+    def __init__(self, seq_len):
+        super().__init__()
+
+        self.seq_len = seq_len
+        self.condition_frames = seq_len
+
+        # Default configuration (reduced for memory efficiency)
+        hidden_dim = 128  # Reduced from 256
+        device = "cuda:0"
+
+        # Use AE encoder for image preprocessing
+        self.ae_encoder = AE(device=device)
+
+        # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
+        self.actual_img_tokens_size = 144  # 12 * 12 patches
+        actual_vae_emb_dim = 4  # each patch has 4 dimensions
+
+        # Image projection from VAE to embedding space
+        self.img_projector = nn.Sequential(
+            nn.Linear(actual_vae_emb_dim, hidden_dim // 2, bias=False),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, hidden_dim, bias=False),
+            nn.LayerNorm(hidden_dim),
+        )
+
+        self.stt = SpatialTemporalTransformer(
+            n_layer=2,
+            time_len=self.condition_frames,
+            hidden_dim=hidden_dim,
+            n_head=4,
+            attn_drop_prob=0.0,
+            res_drop_prob=0.0,
+        )
+
+        # Add projection layer to match AE encoder output dimension
+        self.output_dim = 576
+        self.output_projection = nn.Linear(hidden_dim, self.output_dim)
+        self.obs_history = []
+
+    def reset_inference_params(self):
+        """Reset inference parameters for compatibility with other encoders"""
+        self.obs_history = []
+
+    def forward(self, observations):
+        """Forward pass for sequence of observations
+
+        Args:
+            observations: Tensor of shape (batch_size, 3, H, W) - Raw RGB images
+
+        Returns:
+            Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
+        """
+        # Encode with AE but preserve spatial structure
+        with torch.no_grad():
+            latents = self.ae_encoder.ae.encode(observations).latents  # [B, 4, 12, 12]
+            B = latents.shape[0]
+            obs = latents.view(B, 4, -1).transpose(1, 2)  # [B, 144, 4]
+
+        batch_size = obs.shape[0]
+        self.obs_history.append(obs)
+        if len(self.obs_history) > self.condition_frames + 1:
+            self.obs_history.pop(0)
+
+        while len(self.obs_history) < self.condition_frames + 1:
+            if len(self.obs_history) > 0:
+                first_obs = self.obs_history[0]
+                if first_obs.shape[0] != batch_size:
+                    first_obs = first_obs.repeat(batch_size, 1, 1)
+                self.obs_history.insert(0, first_obs)
+            else:
+                dummy_obs = torch.zeros(
+                    batch_size, self.actual_img_tokens_size, 4, device=obs.device, dtype=obs.dtype
+                )
+                self.obs_history.append(dummy_obs)
+
+        adjusted_history = []
+        for hist_obs in self.obs_history[-self.condition_frames - 1 :]:
+            if hist_obs.shape[0] != batch_size:
+                if hist_obs.shape[0] < batch_size:
+                    hist_obs = hist_obs.repeat(batch_size, 1, 1)
+                else:
+                    hist_obs = hist_obs[:batch_size]
+            adjusted_history.append(hist_obs)
+
+        feature_total = torch.stack(adjusted_history, dim=1)
+        # feature_total: [B, F+1, 144, 4]
+
+        # Project image features to embedding space
+        feature_embeddings = self.img_projector(feature_total)
+        # feature_embeddings: [B, F+1, 144, hidden_dim]
+
+        # Use only the history frames (not the last one for prediction)
+        input_feature_embeddings = feature_embeddings[:, :-1, ...]
+        # input_feature_embeddings: [B, F, 144, hidden_dim]
+
+        # Apply STT (now shape-invariant)
+        stt_output = self.stt(input_feature_embeddings)
+        # stt_output: [B, F, 144, hidden_dim]
+
+        # Use last timestep's image tokens
+        last_frame_emb = stt_output[:, -1, :, :]  # [B, 144, hidden_dim]
+        global_emb = last_frame_emb.mean(dim=1)  # [B, hidden_dim]
+
+        # Project to match AE output dimension
+        projected_output = self.output_projection(global_emb)
+        return projected_output, None
