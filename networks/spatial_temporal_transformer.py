@@ -326,14 +326,13 @@ class SpatialTemporalTransformer(nn.Module):
         config = GPTConfig(
             resid_pdrop=resid_pdrop,
             attn_pdrop=attn_pdrop,
-            n_layer=n_layer,
             n_head=n_head,
             n_embd=n_embd,
             condition_frames=condition_frames,
         )
 
         self.n_embd = n_embd
-        self.causal_time_space_num = config.n_layer[0]
+        self.causal_time_space_num = n_layer
         print(
             "self.causal_time_space_num",
             self.causal_time_space_num,

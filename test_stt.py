@@ -9,7 +9,7 @@ if __name__ == "__main__":
     n_embd = 512
 
     model = SpatialTemporalTransformer(
-        n_layer=[2, 1],
+        n_layer=2,
         n_head=8,
         n_embd=n_embd,
         resid_pdrop=0.1,
