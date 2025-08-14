@@ -622,9 +622,9 @@ class SequenceSTTEncoder(nn.Module):
         stt_output = self.stt(feature_total, action_values_total)
         # stt_output: [B, F, total_tokens_size, n_embd] - Full spatial-temporal embeddings
 
-        # Take mean over frames and tokens to get global representation
-        # [B, F, total_tokens_size, n_embd] -> [B, n_embd]
-        global_emb = stt_output.mean(dim=(1, 2))
+        # Use last timestep's image tokens (most recent spatial-temporal understanding)
+        last_frame_emb = stt_output[:, -1, :, :]  # [B, total_tokens_size, n_embd]
+        global_emb = last_frame_emb.mean(dim=1)  # [B, n_embd]
 
         # Project to match AE output dimension
         projected_output = self.output_projection(global_emb)
