@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -90,13 +92,12 @@ def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) ->
     return emb
 
 
-class GPTConfig:
-    res_drop_prob = 0.1
-    attn_drop_prob = 0.1
-
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+@dataclass
+class Config:
+    hidden_dim: int
+    n_head: int
+    attn_drop_prob: float
+    res_drop_prob: float
 
 
 class CausalSpaceSelfAttention(nn.Module):
@@ -323,11 +324,11 @@ class SpatialTemporalTransformer(nn.Module):
         condition_frames,
     ):
         super().__init__()
-        config = GPTConfig(
-            res_drop_prob=res_drop_prob,
-            attn_drop_prob=attn_drop_prob,
-            n_head=n_head,
+        config = Config(
             hidden_dim=hidden_dim,
+            n_head=n_head,
+            attn_drop_prob=attn_drop_prob,
+            res_drop_prob=res_drop_prob,
         )
 
         self.hidden_dim = hidden_dim
