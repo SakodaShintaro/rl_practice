@@ -1,5 +1,4 @@
 import math
-import random
 
 import torch
 import torch.nn as nn
@@ -319,7 +318,7 @@ class SpatialTemporalTransformer(nn.Module):
         token_size_dict,
         vae_emb_dim,
         temporal_block,
-        action_vocab_sizes,
+        action_ranges,
     ):
         super().__init__()
         config = GPTConfig(
@@ -339,8 +338,8 @@ class SpatialTemporalTransformer(nn.Module):
         self.C = n_embd
         self.Cvae = vae_emb_dim
         self.action_emb_dim = 512
-        self.action_vocab_sizes = action_vocab_sizes
-        self.num_actions = len(action_vocab_sizes)
+        self.action_ranges = action_ranges
+        self.num_actions = len(action_ranges)
         self.latent_size = latent_size
         self.temporal_block = temporal_block
         self.img_projector = nn.Sequential(
@@ -416,22 +415,42 @@ class SpatialTemporalTransformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def get_action_emb(self, action_indices):
-        action_indices_normalize = []
-        for i in range(self.num_actions):
-            normalized = action_indices[:, :, i : i + 1] / self.action_vocab_sizes[i]
-            action_indices_normalize.append(normalized)
+    def get_action_emb(self, action_values):
+        """
+        Convert action float values to embeddings.
 
-        combined_indices = torch.cat(action_indices_normalize, dim=-1)
-        action_emb = get_fourier_embeds_from_coordinates(self.action_emb_dim, combined_indices)
+        Args:
+            action_values: [B, T, num_actions] - Float values for each action
+        """
+        action_values_normalize = []
+        for i in range(self.num_actions):
+            # Normalize float values to [0, 1] range using min/max of each action
+            min_val, max_val = self.action_ranges[i]
+            normalized = (action_values[:, :, i : i + 1] - min_val) / (max_val - min_val)
+            # Clamp to [0, 1] to ensure values are in valid range
+            normalized = torch.clamp(normalized, 0.0, 1.0)
+            action_values_normalize.append(normalized)
+
+        combined_values = torch.cat(action_values_normalize, dim=-1)
+        action_emb = get_fourier_embeds_from_coordinates(self.action_emb_dim, combined_values)
 
         action_embs = torch.split(action_emb, dim=2, split_size_or_sections=1)
         return action_embs
 
-    def forward(self, feature_total, action_indices_total):
+    def forward(self, feature_total, action_values_total):
+        """
+        Forward pass of the SpatialTemporalTransformer.
+
+        Args:
+            feature_total: [B, F+1, img_tokens_size, vae_emb_dim] - Image features
+            action_values_total: [B, (F+1)*temporal_block, num_actions] - Action float values
+
+        Returns:
+            dict: Contains 'logits' and 'action_emb'
+        """
         B, F, _, _ = feature_total.shape
         F = F - 1
-        action_embs = self.get_action_emb(action_indices_total)
+        action_embs = self.get_action_emb(action_values_total)
         action_token_embeddings = []
         for i, emb in enumerate(action_embs):
             action_token_embeddings.append(self.action_projectors[i](emb))
@@ -482,8 +501,19 @@ class SpatialTemporalTransformer(nn.Module):
         return out
 
     @torch.no_grad()
-    def evaluate(self, feature, action_total, sample_last=True):
-        action_embs = self.get_action_emb(action_total)
+    def evaluate(self, feature, action_values_total, sample_last=True):
+        """
+        Evaluate the model.
+
+        Args:
+            feature: [B, F, img_tokens_size, vae_emb_dim] - Image features
+            action_values_total: [B, F*temporal_block, num_actions] - Action float values
+            sample_last: bool - Whether to sample only the last frame
+
+        Returns:
+            tuple: (logits, action_emb)
+        """
+        action_embs = self.get_action_emb(action_values_total)
         action_token_embeddings = []
         for i, emb in enumerate(action_embs):
             action_token_embeddings.append(self.action_projectors[i](emb))

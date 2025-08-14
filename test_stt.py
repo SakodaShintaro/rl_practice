@@ -16,8 +16,8 @@ def test_spatial_temporal_transformer():
         "total_tokens_size": total_tokens_size,
     }
 
-    # 3つの行動のvocab size（例：x座標、y座標、角度）
-    action_vocab_sizes = [512, 512, 360]  # 最後は角度なので360
+    # 3つの行動の範囲（汎用的なfloat行動値）
+    action_ranges = [(-1.0, 1.0), (-1.0, 1.0), (-1.0, 1.0)]  # action_0, action_1, action_2
 
     model = SpatialTemporalTransformer(
         block_size=total_tokens_size,
@@ -34,25 +34,25 @@ def test_spatial_temporal_transformer():
         token_size_dict=token_size_dict,
         vae_emb_dim=8,
         temporal_block=1,
-        action_vocab_sizes=action_vocab_sizes,
+        action_ranges=action_ranges,
     )
 
     feature_total = torch.randn(batch_size, condition_frames + 1, img_tokens_size, 8)
-    # 3つの行動値 (action_0, action_1, action_2)
-    action_indices_total = torch.stack(
+    # 3つの行動値 (汎用的なfloat値)
+    action_values_total = torch.stack(
         [
-            torch.randint(0, 512, (batch_size, (condition_frames + 1) * 1)),  # action_0
-            torch.randint(0, 512, (batch_size, (condition_frames + 1) * 1)),  # action_1
-            torch.randint(0, 360, (batch_size, (condition_frames + 1) * 1)),  # action_2 (角度)
+            torch.rand(batch_size, (condition_frames + 1) * 1) * 2.0 - 1.0,  # action_0 [-1, 1]
+            torch.rand(batch_size, (condition_frames + 1) * 1) * 2.0 - 1.0,  # action_1 [-1, 1]
+            torch.rand(batch_size, (condition_frames + 1) * 1) * 2.0 - 1.0,  # action_2 [-1, 1]
         ],
         dim=-1,
     )
 
     print("入力サイズ:")
     print(f"feature_total: {feature_total.shape}")
-    print(f"action_indices_total: {action_indices_total.shape}")
+    print(f"action_values_total: {action_values_total.shape}")
 
-    output = model(feature_total, action_indices_total)
+    output = model(feature_total, action_values_total)
 
     print("\n出力サイズ:")
     print(f"logits: {output['logits'].shape}")
