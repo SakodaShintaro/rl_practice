@@ -87,8 +87,11 @@ def init_weights(m):
 
 
 class AE(nn.Module):
-    def __init__(self, device=None) -> None:
+    def __init__(self, seq_len: int, device: str) -> None:
         super().__init__()
+        self.seq_len = seq_len
+        self.device = device
+
         self.ae = AutoencoderTiny.from_pretrained(
             "madebyollin/taesd", cache_dir="./cache", device_map=device
         )
@@ -98,12 +101,13 @@ class AE(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, list[str]]:
         # images : (B, T, C, H, W)
+        batch_size = images.shape[0]
         x = images[:, -1]  # (B, C, H, W)
         x = self.ae.encode(x).latents.flatten(1)
         x = self.norm(x)
-        return x, ""
+        return x, [""] * batch_size
 
     @torch.no_grad()
     def decode(self, x):
