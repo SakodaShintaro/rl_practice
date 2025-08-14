@@ -489,17 +489,14 @@ class SequenceSTTEncoder(nn.Module):
 
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
         self.actual_img_tokens_size = 144  # 12 * 12 patches
-        actual_vae_emb_dim = 4  # each patch has 4 dimensions
 
         self.stt = SpatialTemporalTransformer(
-            n_layer=[3, 2],  # Reduced from [6, 3]
-            n_head=4,  # Reduced from 8
-            hidden_dim=hidden_dim,
-            resid_pdrop=0.0,
-            attn_pdrop=0.0,
+            n_layer=2,
             time_len=self.condition_frames,
-            latent_size=(12, 12),
-            vae_emb_dim=actual_vae_emb_dim,
+            hidden_dim=hidden_dim,
+            n_head=4,
+            attn_drop_prob=0.0,
+            res_drop_prob=0.0,
         )
 
         self.img_projector = nn.Sequential(
