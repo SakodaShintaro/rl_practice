@@ -93,7 +93,6 @@ def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) ->
 
 
 class GPTConfig:
-    embd_pdrop = 0.1
     resid_pdrop = 0.1
     attn_pdrop = 0.1
 
@@ -350,7 +349,6 @@ class SpatialTemporalTransformer(nn.Module):
         n_layer,
         n_head,
         n_embd,
-        embd_pdrop,
         resid_pdrop,
         attn_pdrop,
         n_unmasked,
@@ -365,7 +363,6 @@ class SpatialTemporalTransformer(nn.Module):
         super().__init__()
         config = GPTConfig(
             block_size=block_size,
-            embd_pdrop=embd_pdrop,
             resid_pdrop=resid_pdrop,
             attn_pdrop=attn_pdrop,
             n_layer=n_layer,
