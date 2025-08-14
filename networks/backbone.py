@@ -391,18 +391,18 @@ class MMMambaEncoder(nn.Module):
 class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
-    def __init__(self, seq_len):
+    def __init__(self, seq_len: int, device: str):
         super().__init__()
 
         self.seq_len = seq_len
         self.condition_frames = seq_len
 
         # Default configuration (reduced for memory efficiency)
-        hidden_dim = 128  # Reduced from 256
-        device = "cuda:0"
+        hidden_dim = 128
+        self.device = device
 
         # Use AE encoder for image preprocessing
-        self.ae_encoder = AE(device=device)
+        self.ae_encoder = AE(self.seq_len, self.device)
 
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
         self.actual_img_tokens_size = 144  # 12 * 12 patches
@@ -414,7 +414,7 @@ class STTEncoder(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim // 2, hidden_dim, bias=False),
             nn.LayerNorm(hidden_dim),
-        )
+        ).to(self.device)
 
         self.stt = SpatialTemporalTransformer(
             n_layer=2,
@@ -423,18 +423,18 @@ class STTEncoder(nn.Module):
             n_head=4,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
-        )
+        ).to(self.device)
 
         # Add projection layer to match AE encoder output dimension
         self.output_dim = 576
-        self.output_projection = nn.Linear(hidden_dim, self.output_dim)
+        self.output_projection = nn.Linear(hidden_dim, self.output_dim).to(self.device)
         self.obs_history = []
 
     def reset_inference_params(self):
         """Reset inference parameters for compatibility with other encoders"""
         self.obs_history = []
 
-    def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, list[str]]:
         """Forward pass for sequence of observations
 
         Args:
@@ -443,57 +443,32 @@ class STTEncoder(nn.Module):
         Returns:
             Tuple: (encoded features from SpatialTemporalTransformer, str)
         """
-        # Encode with AE but preserve spatial structure
+        # Encode all frames with AE but preserve spatial structure
+        # observations: (B, T, C, H, W) -> encode all frames
+        batch_size, seq_len = observations.shape[:2]
+
+        # Reshape to process all frames: (B*T, C, H, W)
+        all_frames = observations.view(-1, *observations.shape[2:])
+
         with torch.no_grad():
-            latents = self.ae_encoder.ae.encode(observations).latents  # [B, 4, 12, 12]
-            B = latents.shape[0]
-            obs = latents.view(B, 4, -1).transpose(1, 2)  # [B, 144, 4]
-
-        batch_size = obs.shape[0]
-        self.obs_history.append(obs)
-        if len(self.obs_history) > self.condition_frames + 1:
-            self.obs_history.pop(0)
-
-        while len(self.obs_history) < self.condition_frames + 1:
-            if len(self.obs_history) > 0:
-                first_obs = self.obs_history[0]
-                if first_obs.shape[0] != batch_size:
-                    first_obs = first_obs.repeat(batch_size, 1, 1)
-                self.obs_history.insert(0, first_obs)
-            else:
-                dummy_obs = torch.zeros(
-                    batch_size, self.actual_img_tokens_size, 4, device=obs.device, dtype=obs.dtype
-                )
-                self.obs_history.append(dummy_obs)
-
-        adjusted_history = []
-        for hist_obs in self.obs_history[-self.condition_frames - 1 :]:
-            if hist_obs.shape[0] != batch_size:
-                if hist_obs.shape[0] < batch_size:
-                    hist_obs = hist_obs.repeat(batch_size, 1, 1)
-                else:
-                    hist_obs = hist_obs[:batch_size]
-            adjusted_history.append(hist_obs)
-
-        feature_total = torch.stack(adjusted_history, dim=1)
-        # feature_total: [B, F+1, 144, 4]
+            # Encode all frames at once
+            all_latents = self.ae_encoder.ae.encode(all_frames).latents  # [B*T, 4, 12, 12]
+            # Reshape back to sequence: [B, T, 4, 12, 12]
+            all_latents = all_latents.view(batch_size, seq_len, 4, 12, 12)
+            # Convert to tokens: [B, T, 144, 4]
+            all_obs = all_latents.view(batch_size, seq_len, 4, -1).transpose(2, 3)
 
         # Project image features to embedding space
-        feature_embeddings = self.img_projector(feature_total)
-        # feature_embeddings: [B, F+1, 144, hidden_dim]
+        feature_embeddings = self.img_projector(all_obs)  # [B, T, 144, hidden_dim]
 
-        # Use only the history frames (not the last one for prediction)
-        input_feature_embeddings = feature_embeddings[:, :-1, ...]
-        # input_feature_embeddings: [B, F, 144, hidden_dim]
+        # Apply STT to all frames
+        stt_output = self.stt(feature_embeddings)  # [B, T, 144, hidden_dim]
 
-        # Apply STT (now shape-invariant)
-        stt_output = self.stt(input_feature_embeddings)
-        # stt_output: [B, F, 144, hidden_dim]
-
-        # Use last timestep's image tokens
+        # Use last timestep's image tokens for final representation
         last_frame_emb = stt_output[:, -1, :, :]  # [B, 144, hidden_dim]
         global_emb = last_frame_emb.mean(dim=1)  # [B, hidden_dim]
 
         # Project to match AE output dimension
         projected_output = self.output_projection(global_emb)
-        return projected_output, ""
+        batch_size = observations.shape[0]
+        return projected_output, [""] * batch_size
