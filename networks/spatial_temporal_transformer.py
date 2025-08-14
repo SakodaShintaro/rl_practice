@@ -94,8 +94,7 @@ class GPTConfig:
     resid_pdrop = 0.1
     attn_pdrop = 0.1
 
-    def __init__(self, block_size, **kwargs):
-        self.block_size = block_size
+    def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -322,33 +321,18 @@ class SpatialTemporalTransformer(nn.Module):
         resid_pdrop,
         attn_pdrop,
         condition_frames,
-        latent_size,
-        vae_emb_dim,
     ):
         super().__init__()
-        # Calculate block size based on image tokens only
-        img_tokens_size = latent_size[0] * latent_size[1]  # 12 * 12 = 144
-
         config = GPTConfig(
-            block_size=img_tokens_size,
             resid_pdrop=resid_pdrop,
             attn_pdrop=attn_pdrop,
             n_layer=n_layer,
             n_head=n_head,
             n_embd=n_embd,
-            patch_size=latent_size,
             condition_frames=condition_frames,
         )
 
-        self.C = n_embd
-        self.Cvae = vae_emb_dim
-        self.latent_size = latent_size
-        self.img_projector = nn.Sequential(
-            nn.Linear(self.Cvae, self.C // 2, bias=False),
-            nn.GELU(),
-            nn.Linear(self.C // 2, self.C, bias=False),
-            nn.LayerNorm(self.C),
-        )
+        self.n_embd = n_embd
         self.causal_time_space_num = config.n_layer[0]
         print(
             "self.causal_time_space_num",
@@ -357,7 +341,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.condition_frames = condition_frames
 
-        self.time_emb = nn.Parameter(torch.zeros(50, self.C))
+        self.time_emb = nn.Parameter(torch.zeros(50, self.n_embd))
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
 
         self.causal_time_space_blocks = nn.Sequential(
