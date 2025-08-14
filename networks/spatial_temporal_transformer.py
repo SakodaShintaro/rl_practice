@@ -328,17 +328,10 @@ class SpatialTemporalTransformer(nn.Module):
             attn_pdrop=attn_pdrop,
             n_head=n_head,
             n_embd=n_embd,
-            condition_frames=condition_frames,
         )
 
         self.n_embd = n_embd
         self.causal_time_space_num = n_layer
-        print(
-            "self.causal_time_space_num",
-            self.causal_time_space_num,
-        )
-
-        self.condition_frames = condition_frames
 
         self.time_emb = nn.Parameter(torch.zeros(50, self.n_embd))
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
