@@ -494,12 +494,19 @@ class SequenceSTTEncoder(nn.Module):
         self.stt = SpatialTemporalTransformer(
             n_layer=[3, 2],  # Reduced from [6, 3]
             n_head=4,  # Reduced from 8
-            n_embd=hidden_dim,
+            hidden_dim=hidden_dim,
             resid_pdrop=0.0,
             attn_pdrop=0.0,
-            condition_frames=self.condition_frames,
+            time_len=self.condition_frames,
             latent_size=(12, 12),
             vae_emb_dim=actual_vae_emb_dim,
+        )
+
+        self.img_projector = nn.Sequential(
+            nn.Linear(self.Cvae, self.C // 2, bias=False),
+            nn.GELU(),
+            nn.Linear(self.C // 2, self.C, bias=False),
+            nn.LayerNorm(self.C),
         )
 
         # Action processing components moved from STT
@@ -516,7 +523,7 @@ class SequenceSTTEncoder(nn.Module):
         )
 
         # Add projection layer to match AE encoder output dimension
-        stt_output_dim = hidden_dim  # 128 (n_embd from global average)
+        stt_output_dim = hidden_dim  # 128 (hidden_dim from global average)
         ae_output_dim = 576
         self.output_projection = nn.Linear(stt_output_dim, ae_output_dim)
         self.output_dim = ae_output_dim
@@ -531,7 +538,7 @@ class SequenceSTTEncoder(nn.Module):
             action_values: [B, T, num_actions] - Float values for each action
         """
         from .spatial_temporal_transformer import get_fourier_embeds_from_coordinates
-        
+
         action_values_normalize = []
         for i in range(self.action_dim):
             # Normalize float values to [0, 1] range using min/max of each action
@@ -597,8 +604,8 @@ class SequenceSTTEncoder(nn.Module):
         # feature_total: [B, F+1, 144, 4]
 
         # Project image features to embedding space
-        feature_embeddings = self.stt.img_projector(feature_total)
-        # feature_embeddings: [B, F+1, 144, n_embd]
+        feature_embeddings = self.img_projector(feature_total)
+        # feature_embeddings: [B, F+1, 144, hidden_dim]
 
         # Create dummy action embeddings
         dummy_actions = []
@@ -639,15 +646,15 @@ class SequenceSTTEncoder(nn.Module):
             input_action_token_embeddings + [input_feature_embeddings],
             dim=2,
         )
-        # combined_token_embeddings: [B, F, total_tokens_size, n_embd]
+        # combined_token_embeddings: [B, F, total_tokens_size, hidden_dim]
 
         # Apply STT (now shape-invariant)
         stt_output = self.stt(combined_token_embeddings)
-        # stt_output: [B, F, total_tokens_size, n_embd]
+        # stt_output: [B, F, total_tokens_size, hidden_dim]
 
         # Use last timestep's image tokens only
-        last_frame_emb = stt_output[:, -1, :self.actual_img_tokens_size, :]  # [B, 144, n_embd]
-        global_emb = last_frame_emb.mean(dim=1)  # [B, n_embd]
+        last_frame_emb = stt_output[:, -1, : self.actual_img_tokens_size, :]  # [B, 144, hidden_dim]
+        global_emb = last_frame_emb.mean(dim=1)  # [B, hidden_dim]
 
         # Project to match AE output dimension
         projected_output = self.output_projection(global_emb)
