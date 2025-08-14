@@ -428,7 +428,7 @@ class SpatialTemporalTransformer(nn.Module):
         action_embs = torch.split(action_emb, dim=2, split_size_or_sections=1)
         return action_embs
 
-    def forward(self, feature_total, action_indices_total, drop_feature=0):
+    def forward(self, feature_total, action_indices_total):
         B, F, _, _ = feature_total.shape
         F = F - 1
         action_embs = self.get_action_emb(action_indices_total)
@@ -444,32 +444,30 @@ class SpatialTemporalTransformer(nn.Module):
             )
             action_token_embeddings_reshaped.append(reshaped)
 
-        pro = random.random()
-        if pro > drop_feature:
-            input_action_token_embeddings = []
-            for action_emb in action_token_embeddings_reshaped:
-                input_action_token_embeddings.append(action_emb[:, :-1, ...])
-            input_feature_embeddings = feature_embeddings[:, :-1, ...]
+        input_action_token_embeddings = []
+        for action_emb in action_token_embeddings_reshaped:
+            input_action_token_embeddings.append(action_emb[:, :-1, ...])
+        input_feature_embeddings = feature_embeddings[:, :-1, ...]
 
-            combined_token_embeddings = torch.cat(
-                input_action_token_embeddings + [input_feature_embeddings],
-                dim=2,
+        combined_token_embeddings = torch.cat(
+            input_action_token_embeddings + [input_feature_embeddings],
+            dim=2,
+        )
+
+        time_emb_F = self.time_emb[:F, :].unsqueeze(0)
+        time_emb_F = torch.repeat_interleave(
+            time_emb_F[:, :, None, :], self.total_token_size, dim=2
+        )
+
+        time_space_token_embeddings = combined_token_embeddings + time_emb_F
+
+        for i in range(self.causal_time_space_num):
+            time_space_token_embeddings = self.causal_time_space_blocks[i](
+                time_space_token_embeddings, self.mask_time
             )
-
-            time_emb_F = self.time_emb[:F, :].unsqueeze(0)
-            time_emb_F = torch.repeat_interleave(
-                time_emb_F[:, :, None, :], self.total_token_size, dim=2
-            )
-
-            time_space_token_embeddings = combined_token_embeddings + time_emb_F
-
-            for i in range(self.causal_time_space_num):
-                time_space_token_embeddings = self.causal_time_space_blocks[i](
-                    time_space_token_embeddings, self.mask_time
-                )
-            auto_regressive_token_embeddings = rearrange(
-                time_space_token_embeddings, "B F L C -> (B F) L C", B=B, F=F
-            )
+        auto_regressive_token_embeddings = rearrange(
+            time_space_token_embeddings, "B F L C -> (B F) L C", B=B, F=F
+        )
 
         target_action_embeddings = []
         for action_emb in action_token_embeddings_reshaped:
