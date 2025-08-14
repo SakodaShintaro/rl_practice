@@ -476,7 +476,6 @@ class SequenceSTTEncoder(nn.Module):
 
         # Default configuration (reduced for memory efficiency)
         hidden_dim = 128  # Reduced from 256
-        vae_emb_dim = 8
         action_ranges = [(-1.0, 1.0)] * action_dim
         device = "cuda:0"
 
@@ -489,6 +488,15 @@ class SequenceSTTEncoder(nn.Module):
 
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
         self.actual_img_tokens_size = 144  # 12 * 12 patches
+        actual_vae_emb_dim = 4  # each patch has 4 dimensions
+
+        # Image projection from VAE to embedding space
+        self.img_projector = nn.Sequential(
+            nn.Linear(actual_vae_emb_dim, hidden_dim // 2, bias=False),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, hidden_dim, bias=False),
+            nn.LayerNorm(hidden_dim),
+        )
 
         self.stt = SpatialTemporalTransformer(
             n_layer=2,
@@ -497,13 +505,6 @@ class SequenceSTTEncoder(nn.Module):
             n_head=4,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
-        )
-
-        self.img_projector = nn.Sequential(
-            nn.Linear(self.Cvae, self.C // 2, bias=False),
-            nn.GELU(),
-            nn.Linear(self.C // 2, self.C, bias=False),
-            nn.LayerNorm(self.C),
         )
 
         # Action processing components moved from STT
