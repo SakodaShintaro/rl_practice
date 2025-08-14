@@ -500,7 +500,6 @@ class SequenceSTTEncoder(nn.Module):
             res_drop_prob=0.0,
         )
 
-
         # Add projection layer to match AE encoder output dimension
         self.output_dim = 576
         self.output_projection = nn.Linear(hidden_dim, self.output_dim)
