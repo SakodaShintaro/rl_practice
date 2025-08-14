@@ -91,8 +91,8 @@ def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) ->
 
 
 class GPTConfig:
-    resid_pdrop = 0.1
-    attn_pdrop = 0.1
+    res_drop_prob = 0.1
+    attn_drop_prob = 0.1
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -106,8 +106,8 @@ class CausalSpaceSelfAttention(nn.Module):
         self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.resid_drop = nn.Dropout(config.resid_pdrop)
-        self.attn_dropout_rate = config.attn_pdrop
+        self.res_drop_prob = nn.Dropout(config.res_drop_prob)
+        self.attn_dropout_rate = config.attn_drop_prob
         self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.n_head = config.n_head
         self.qk_norm = True
@@ -142,7 +142,7 @@ class CausalSpaceSelfAttention(nn.Module):
             .view(B, T, C)
         )
 
-        y = self.resid_drop(self.proj(y))
+        y = self.res_drop_prob(self.proj(y))
         return y
 
 
@@ -156,7 +156,7 @@ class CausalSpaceBlock(nn.Module):
             nn.Linear(config.n_embd, 4 * config.n_embd, bias=False),
             nn.GELU(),
             nn.Linear(4 * config.n_embd, config.n_embd, bias=False),
-            nn.Dropout(config.resid_pdrop),
+            nn.Dropout(config.res_drop_prob),
         )
 
     def forward(self, x, attn_mask):
@@ -174,8 +174,8 @@ class SpaceSelfAttention(nn.Module):
         self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.resid_drop = nn.Dropout(config.resid_pdrop)
-        self.attn_dropout_rate = config.attn_pdrop
+        self.res_drop_prob = nn.Dropout(config.res_drop_prob)
+        self.attn_dropout_rate = config.attn_drop_prob
         self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.n_head = config.n_head
         self.qk_norm = True
@@ -206,7 +206,7 @@ class SpaceSelfAttention(nn.Module):
             .view(B, T, C)
         )
 
-        y = self.resid_drop(self.proj(y))
+        y = self.res_drop_prob(self.proj(y))
         return y
 
 
@@ -220,7 +220,7 @@ class SpaceBlock(nn.Module):
             nn.Linear(config.n_embd, 4 * config.n_embd, bias=False),
             nn.GELU(),
             nn.Linear(4 * config.n_embd, config.n_embd, bias=False),
-            nn.Dropout(config.resid_pdrop),
+            nn.Dropout(config.res_drop_prob),
         )
 
     def forward(self, x):
@@ -238,8 +238,8 @@ class CausalTimeSelfAttention(nn.Module):
         self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.resid_drop = nn.Dropout(config.resid_pdrop)
-        self.attn_dropout_rate = config.attn_pdrop
+        self.res_drop_prob = nn.Dropout(config.res_drop_prob)
+        self.attn_dropout_rate = config.attn_drop_prob
         self.proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.n_head = config.n_head
         self.qk_norm = True
@@ -272,7 +272,7 @@ class CausalTimeSelfAttention(nn.Module):
             .view(B, T, C)
         )
 
-        y = self.resid_drop(self.proj(y))
+        y = self.res_drop_prob(self.proj(y))
         return y
 
 
@@ -286,7 +286,7 @@ class CausalTimeBlock(nn.Module):
             nn.Linear(config.n_embd, 4 * config.n_embd, bias=False),
             nn.GELU(),
             nn.Linear(4 * config.n_embd, config.n_embd, bias=False),
-            nn.Dropout(config.resid_pdrop),
+            nn.Dropout(config.res_drop_prob),
         )
 
     def forward(self, x, attn_mask):
@@ -318,14 +318,14 @@ class SpatialTemporalTransformer(nn.Module):
         n_layer,
         n_head,
         n_embd,
-        resid_pdrop,
-        attn_pdrop,
+        res_drop_prob,
+        attn_drop_prob,
         condition_frames,
     ):
         super().__init__()
         config = GPTConfig(
-            resid_pdrop=resid_pdrop,
-            attn_pdrop=attn_pdrop,
+            res_drop_prob=res_drop_prob,
+            attn_drop_prob=attn_drop_prob,
             n_head=n_head,
             n_embd=n_embd,
         )

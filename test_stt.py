@@ -12,8 +12,8 @@ if __name__ == "__main__":
         n_layer=2,
         n_head=8,
         n_embd=n_embd,
-        resid_pdrop=0.1,
-        attn_pdrop=0.1,
+        res_drop_prob=0.1,
+        attn_drop_prob=0.1,
         condition_frames=condition_frames,
     )
 
