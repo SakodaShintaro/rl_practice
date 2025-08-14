@@ -534,8 +534,15 @@ class SequenceSTTEncoder(nn.Module):
         self.obs_history = []
         self.action_history = []
 
-    def _prepare_stt_input(self, observations):
-        # observations: [B, 3, H, W] - Raw RGB images
+    def forward(self, observations):
+        """Forward pass for sequence of observations
+
+        Args:
+            observations: Tensor of shape (batch_size, 3, H, W) - Raw RGB images
+
+        Returns:
+            Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
+        """
         # Encode with AE but preserve spatial structure
         with torch.no_grad():
             latents = self.ae_encoder.ae.encode(observations).latents  # [B, 4, 12, 12]
@@ -570,43 +577,17 @@ class SequenceSTTEncoder(nn.Module):
 
         feature_total = torch.stack(adjusted_history, dim=1)
 
-        if len(self.action_history) < self.condition_frames + 1:
-            dummy_actions = []
-            for i in range(self.action_dim):
-                min_val, max_val = self.action_ranges[i]
-                dummy_action = (
-                    torch.zeros(batch_size, self.condition_frames + 1, device=obs.device)
-                    * (max_val - min_val)
-                    / 2
-                )
-                dummy_actions.append(dummy_action)
-            action_values_total = torch.stack(dummy_actions, dim=-1)
-        else:
-            adjusted_action_history = []
-            for hist_action in self.action_history[-self.condition_frames - 1 :]:
-                if hist_action.shape[0] != batch_size:
-                    if hist_action.shape[0] < batch_size:
-                        hist_action = hist_action.repeat(batch_size, 1)
-                    else:
-                        hist_action = hist_action[:batch_size]
-                adjusted_action_history.append(hist_action)
-            action_values_total = torch.stack(adjusted_action_history, dim=1)
-
-        return feature_total, action_values_total
-
-    def forward(self, observations):
-        """Forward pass for sequence of observations
-
-        Args:
-            observations: Tensor of shape (batch_size, seq_len, img_tokens_size, vae_emb_dim)
-                         or (batch_size, img_tokens_size, vae_emb_dim)
-
-        Returns:
-            Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
-        """
-        feature_total, action_values_total = self._prepare_stt_input(observations)
-        # feature_total: [B, condition_frames+1, 144, 4] - Image features with spatial structure
-        # action_values_total: [B, condition_frames+1, action_dim] - Action history
+        # Create dummy actions since we're focusing only on observations
+        dummy_actions = []
+        for i in range(self.action_dim):
+            min_val, max_val = self.action_ranges[i]
+            dummy_action = (
+                torch.zeros(batch_size, self.condition_frames + 1, device=obs.device)
+                * (max_val - min_val)
+                / 2
+            )
+            dummy_actions.append(dummy_action)
+        action_values_total = torch.stack(dummy_actions, dim=-1)
 
         stt_output = self.stt(feature_total, action_values_total)
         # stt_output: [B, F, total_tokens_size, n_embd] - Full spatial-temporal embeddings
