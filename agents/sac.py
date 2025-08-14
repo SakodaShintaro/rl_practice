@@ -234,7 +234,7 @@ class SacAgent:
             enable_sequence_modeling=False,
         ).to(self.device)
         lr = args.learning_rate
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 
         self.rb = ReplayBuffer(
             args.buffer_size,
