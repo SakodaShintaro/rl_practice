@@ -73,21 +73,21 @@ if __name__ == "__main__":
     print("Initializing Encoder")
     target_encoder_list = []
     if args.encoder == "ae":
-        target_encoder_list.append(AE(device=device))
+        target_encoder_list.append(AE(num_images, device))
     elif args.encoder == "mmmamba":
-        target_encoder_list.append(MMMambaEncoder(device=device))
+        target_encoder_list.append(MMMambaEncoder(num_images, device))
     elif args.encoder == "smolvlm":
-        target_encoder_list.append(SmolVLMEncoder(device=device))
+        target_encoder_list.append(SmolVLMEncoder(num_images, device))
     elif args.encoder == "qwenvl":
-        target_encoder_list.append(QwenVLEncoder(device=device))
+        target_encoder_list.append(QwenVLEncoder(num_images, device))
     elif args.encoder == "stt":
-        target_encoder_list.append(STTEncoder(device=device))
+        target_encoder_list.append(STTEncoder(num_images, device))
     else:  # all
-        target_encoder_list.append(AE(device=device))
-        target_encoder_list.append(MMMambaEncoder(device=device))
-        target_encoder_list.append(SmolVLMEncoder(device=device))
-        target_encoder_list.append(QwenVLEncoder(device=device))
-        target_encoder_list.append(STTEncoder(device=device))
+        target_encoder_list.append(AE(num_images, device))
+        target_encoder_list.append(MMMambaEncoder(num_images, device))
+        target_encoder_list.append(SmolVLMEncoder(num_images, device))
+        target_encoder_list.append(QwenVLEncoder(num_images, device))
+        target_encoder_list.append(STTEncoder(num_images, device))
 
     for encoder in target_encoder_list:
         start = time.time()
