@@ -548,10 +548,10 @@ class SequenceSTTEncoder(nn.Module):
                 self.action_history.pop(0)
 
     def _prepare_stt_input(self, observations):
+        # observations: [B, 3, H, W] - Raw RGB images
         # Encode with AE but preserve spatial structure
         with torch.no_grad():
             latents = self.ae_encoder.ae.encode(observations).latents  # [B, 4, 12, 12]
-            # Reshape to [B, 144, 4] for STT (treating as 144 patches of 4 dims each)
             B = latents.shape[0]
             obs = latents.view(B, 4, -1).transpose(1, 2)  # [B, 144, 4]
 
@@ -616,6 +616,9 @@ class SequenceSTTEncoder(nn.Module):
             Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
         """
         feature_total, action_values_total = self._prepare_stt_input(observations)
+        # feature_total: [B, condition_frames+1, 144, 4] - Image features with spatial structure
+        # action_values_total: [B, condition_frames+1, action_dim] - Action history
+
         original_batch_size = observations.shape[0]
         stt_output = self.stt(feature_total, action_values_total)
         action_emb = stt_output["action_emb"]  # [B*F, hidden_dim * action_dim]
