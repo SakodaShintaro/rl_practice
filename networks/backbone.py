@@ -502,9 +502,8 @@ class SequenceSTTEncoder(nn.Module):
 
 
         # Add projection layer to match AE encoder output dimension
-        stt_output_dim = hidden_dim  # 128 (hidden_dim from global average)
         ae_output_dim = 576
-        self.output_projection = nn.Linear(stt_output_dim, ae_output_dim)
+        self.output_projection = nn.Linear(hidden_dim, ae_output_dim)
         self.output_dim = ae_output_dim
         self.obs_history = []
 
