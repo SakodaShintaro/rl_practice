@@ -359,20 +359,19 @@ class SpatialTemporalTransformer(nn.Module):
     def forward(self, feature_embeddings):
         """
         Forward pass of the SpatialTemporalTransformer.
-        Shape-invariant transformation for image features.
 
         Args:
-            feature_embeddings: [B, F, img_tokens_size, hidden_dim] - Embedded image features
+            feature_embeddings: [B, T, S, C]
 
         Returns:
-            torch.Tensor: shape [B, F, img_tokens_size, hidden_dim] - Processed spatial-temporal embeddings
+            torch.Tensor: shape [B, T, S, C]
         """
-        _, F, L, _ = feature_embeddings.shape
+        _, T, S, _ = feature_embeddings.shape
 
-        time_emb_F = self.time_emb[:F, :].unsqueeze(0)
-        time_emb_F = torch.repeat_interleave(time_emb_F[:, :, None, :], L, dim=2)
+        time_emb_T = self.time_emb[:T, :].unsqueeze(0)
+        time_emb_T = torch.repeat_interleave(time_emb_T[:, :, None, :], S, dim=2)
 
-        time_space_token_embeddings = feature_embeddings + time_emb_F
+        time_space_token_embeddings = feature_embeddings + time_emb_T
 
         for i in range(self.causal_time_space_num):
             time_space_token_embeddings = self.causal_time_space_blocks[i](
