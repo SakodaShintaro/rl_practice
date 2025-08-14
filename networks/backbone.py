@@ -494,14 +494,9 @@ class SequenceSTTEncoder(nn.Module):
         # Use AE encoder for image preprocessing
         self.ae_encoder = AE(device=device)
 
-        # Update vae_emb_dim to match AE encoder output
-        actual_vae_emb_dim = (
-            self.ae_encoder.output_dim // img_tokens_size
-        )  # 576 // 1024 = 0.5625...
-        # Since 576 is not divisible by 1024, we need to adjust
-        # Let's use a different approach - use the full AE output as input
-        self.actual_img_tokens_size = self.ae_encoder.output_dim
-        actual_vae_emb_dim = 1
+        # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
+        self.actual_img_tokens_size = 144  # 12 * 12 patches
+        actual_vae_emb_dim = 4  # each patch has 4 dimensions
 
         # Update token size configuration
         token_size_dict = {
@@ -519,7 +514,7 @@ class SequenceSTTEncoder(nn.Module):
             attn_pdrop=0.0,
             n_unmasked=0,
             condition_frames=self.condition_frames,
-            latent_size=(32, 32),
+            latent_size=(12, 12),
             token_size_dict=token_size_dict,
             vae_emb_dim=actual_vae_emb_dim,
             temporal_block=1,
@@ -553,10 +548,12 @@ class SequenceSTTEncoder(nn.Module):
                 self.action_history.pop(0)
 
     def _prepare_stt_input(self, observations):
-        # First encode raw image with AE encoder
-        encoded_obs, _ = self.ae_encoder.forward(observations)  # [batch_size, 576]
-        # Reshape to [batch_size, 576, 1] for STT input
-        obs = encoded_obs.unsqueeze(-1)
+        # Encode with AE but preserve spatial structure
+        with torch.no_grad():
+            latents = self.ae_encoder.ae.encode(observations).latents  # [B, 4, 12, 12]
+            # Reshape to [B, 144, 4] for STT (treating as 144 patches of 4 dims each)
+            B = latents.shape[0]
+            obs = latents.view(B, 4, -1).transpose(1, 2)  # [B, 144, 4]
 
         batch_size = obs.shape[0]
         self.update_history(obs)
@@ -569,7 +566,7 @@ class SequenceSTTEncoder(nn.Module):
                 self.obs_history.insert(0, first_obs)
             else:
                 dummy_obs = torch.zeros(
-                    batch_size, self.actual_img_tokens_size, 1, device=obs.device, dtype=obs.dtype
+                    batch_size, self.actual_img_tokens_size, 4, device=obs.device, dtype=obs.dtype
                 )
                 self.obs_history.append(dummy_obs)
 
