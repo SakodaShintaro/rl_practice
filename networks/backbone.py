@@ -529,23 +529,10 @@ class SequenceSTTEncoder(nn.Module):
         self.obs_history = []
         self.action_history = []
 
-    def reset_history(self):
-        self.obs_history = []
-        self.action_history = []
-
     def reset_inference_params(self):
         """Reset inference parameters for compatibility with other encoders"""
-        self.reset_history()
-
-    def update_obs_history(self, obs):
-        self.obs_history.append(obs)
-        if len(self.obs_history) > self.condition_frames + 1:
-            self.obs_history.pop(0)
-
-    def update_action_history(self, action):
-        self.action_history.append(action)
-        if len(self.action_history) > self.condition_frames + 1:
-            self.action_history.pop(0)
+        self.obs_history = []
+        self.action_history = []
 
     def _prepare_stt_input(self, observations):
         # observations: [B, 3, H, W] - Raw RGB images
@@ -556,7 +543,9 @@ class SequenceSTTEncoder(nn.Module):
             obs = latents.view(B, 4, -1).transpose(1, 2)  # [B, 144, 4]
 
         batch_size = obs.shape[0]
-        self.update_obs_history(obs)
+        self.obs_history.append(obs)
+        if len(self.obs_history) > self.condition_frames + 1:
+            self.obs_history.pop(0)
 
         while len(self.obs_history) < self.condition_frames + 1:
             if len(self.obs_history) > 0:
