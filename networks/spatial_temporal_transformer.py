@@ -6,44 +6,86 @@ import torch.nn.functional as F
 from einops import rearrange
 
 
-def compute_axial_cis(dim, end_x, end_y, theta=1000.0):
+def compute_axial_cis(dim: int, end_x: int, end_y: int, theta: float = 1000.0) -> torch.Tensor:
+    """
+    2次元回転位置埋め込み（2D Rotary Position Embedding, RoPE）を計算する
+
+    Args:
+        dim: 埋め込み次元数（偶数である必要がある）
+        end_x: x軸方向の位置数（パッチの幅）
+        end_y: y軸方向の位置数（パッチの高さ）
+        theta: RoPEの基準周波数（通常1000.0または10000.0）
+
+    Returns:
+        torch.Tensor: shape [end_x * end_y, dim] の複素数テンソル（dtype=torch.complex64）
+                     各位置(x,y)に対応する回転子を含む。各要素は実部+虚部*jの複素数。
+    """
+    # 周波数を計算: 低次元ほど低周波数、高次元ほど高周波数
+    # dim//2個の異なる周波数を生成（複素数なので実際のdimは2倍になる）
     freqs_x = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
     freqs_y = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
 
+    # x軸、y軸の位置インデックスを作成 [0, 1, 2, ..., end_x-1]
     t_x = torch.arange(end_x, device=freqs_x.device)
     t_y = torch.arange(end_y, device=freqs_y.device)
 
+    # 各位置と各周波数の組み合わせで位相角を計算
+    # freqs_x: [end_x, dim//2], freqs_y: [end_y, dim//2]
     freqs_x = torch.outer(t_x, freqs_x).float()
     freqs_y = torch.outer(t_y, freqs_y).float()
 
+    # 複素数として表現: e^(i*θ) = cos(θ) + i*sin(θ)
+    # これが回転行列の本質（各次元ペアを回転させる）
     freqs_cis_x = torch.polar(torch.ones_like(freqs_x), freqs_x)
     freqs_cis_y = torch.polar(torch.ones_like(freqs_y), freqs_y)
 
+    # 全ての(x,y)位置に対して、x方向とy方向の回転子を連結
     freqs_cis = []
     for i in range(end_x):
         for j in range(end_y):
+            # x位置iの回転子とy位置jの回転子を連結してdim次元にする
             freqs_cis.append(torch.cat([freqs_cis_x[i], freqs_cis_y[j]], dim=-1))
 
     return torch.stack(freqs_cis)
 
 
-def get_fourier_embeds_from_coordinates(embed_dim, coords):
+def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) -> torch.Tensor:
+    """
+    連続値座標をフーリエ位置埋め込みに変換する
+
+    アクション値などの連続値を高次元ベクトルに変換してTransformerで処理可能にする。
+    異なる周波数のsin/cos関数を組み合わせて豊かな表現を作成。
+
+    Args:
+        embed_dim: 埋め込み次元数（偶数である必要がある）
+        coords: 座標テンソル [B, T, coord_dim] または [B, T]
+
+    Returns:
+        torch.Tensor: shape [B, T, coord_dim, embed_dim] のフーリエ埋め込み
+    """
     device = coords.device
     dtype = coords.dtype
 
+    # 2次元テンソルの場合は3次元に拡張 [B, T] -> [B, T, 1]
     if coords.dim() == 2:
         coords = coords.unsqueeze(-1)
 
     batch_size, seq_len, coord_dim = coords.shape
 
+    # 異なる周波数を生成（Transformerの位置埋め込みと同じ原理）
     half_dim = embed_dim // 2
     emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
     emb = torch.exp(torch.arange(half_dim, dtype=dtype, device=device) * -emb)
 
+    # ブロードキャスト用に次元を拡張 [half_dim] -> [1, 1, 1, half_dim]
     emb = emb.unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    coords = coords.unsqueeze(-1)
+    coords = coords.unsqueeze(-1)  # [B, T, coord_dim] -> [B, T, coord_dim, 1]
 
+    # 各座標値に各周波数を掛ける [B, T, coord_dim, half_dim]
     emb = coords * emb
+
+    # sin/cosを組み合わせて埋め込みベクトルを作成
+    # [sin(coord*freq1), cos(coord*freq1), sin(coord*freq2), cos(coord*freq2), ...]
     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
     emb = emb.view(batch_size, seq_len, coord_dim, embed_dim)
 
