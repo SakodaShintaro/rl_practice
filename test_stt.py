@@ -14,7 +14,7 @@ if __name__ == "__main__":
         hidden_dim=C,
         res_drop_prob=0.1,
         attn_drop_prob=0.1,
-        condition_frames=T,
+        time_len=T,
     )
 
     feature_total = torch.randn(B, T, S, C)

@@ -317,11 +317,11 @@ class SpatialTemporalTransformer(nn.Module):
     def __init__(
         self,
         n_layer,
-        n_head,
+        time_len,
         hidden_dim,
-        res_drop_prob,
+        n_head,
         attn_drop_prob,
-        condition_frames,
+        res_drop_prob,
     ):
         super().__init__()
         config = Config(
@@ -343,7 +343,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.apply(self._init_weights)
 
-        matrix = torch.tril(torch.ones(condition_frames, condition_frames))
+        matrix = torch.tril(torch.ones(time_len, time_len))
         time_causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         time_causal_mask = torch.where(matrix == 1, 0, time_causal_mask)
         self.register_buffer("mask_time", time_causal_mask.contiguous())
