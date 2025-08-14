@@ -68,12 +68,33 @@ def parse_action_text(action_text: str) -> np.ndarray:
     return action_array
 
 
+def init_weights(m):
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.ConvTranspose2d):
+        nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.GroupNorm):
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.Linear):
+        nn.init.normal_(m.weight, 0, 0.01)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+
+
 class AE(nn.Module):
     def __init__(self, device=None) -> None:
         super().__init__()
         self.ae = AutoencoderTiny.from_pretrained(
             "madebyollin/taesd", cache_dir="./cache", device_map=device
         )
+
+        # self.ae.apply(init_weights)
+
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
