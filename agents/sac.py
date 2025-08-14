@@ -44,7 +44,7 @@ class Network(nn.Module):
         elif args.image_encoder == "mmmamba":
             self.encoder_sequence = SequenceMMMambaEncoder(seq_len=seq_len)
         elif args.image_encoder == "stt":
-            self.encoder_sequence = SequenceSTTEncoder(seq_len=seq_len, action_dim=action_dim)
+            self.encoder_sequence = SequenceSTTEncoder(seq_len=seq_len)
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
 

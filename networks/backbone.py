@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 from diffusers.models import AutoencoderTiny
-from einops import rearrange
 from mamba_ssm.utils.generation import InferenceParams
 from PIL import Image
 from torch import nn
@@ -467,21 +466,15 @@ class SequenceMMMambaEncoder(SequenceEncoderBase):
 class SequenceSTTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
-    def __init__(self, seq_len, action_dim):
+    def __init__(self, seq_len):
         super().__init__()
 
         self.seq_len = seq_len
-        self.action_dim = action_dim
         self.condition_frames = seq_len
 
         # Default configuration (reduced for memory efficiency)
         hidden_dim = 128  # Reduced from 256
-        action_ranges = [(-1.0, 1.0)] * action_dim
         device = "cuda:0"
-
-        self.action_ranges = action_ranges
-        self.action_emb_dim = 512
-        self.temporal_block = 1
 
         # Use AE encoder for image preprocessing
         self.ae_encoder = AE(device=device)
@@ -507,18 +500,6 @@ class SequenceSTTEncoder(nn.Module):
             res_drop_prob=0.0,
         )
 
-        # Action processing components moved from STT
-        self.action_projectors = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(self.action_emb_dim, self.action_emb_dim, bias=False),
-                    nn.GELU(),
-                    nn.Linear(self.action_emb_dim, hidden_dim, bias=False),
-                    nn.LayerNorm(hidden_dim),
-                )
-                for _ in range(action_dim)
-            ]
-        )
 
         # Add projection layer to match AE encoder output dimension
         stt_output_dim = hidden_dim  # 128 (hidden_dim from global average)
@@ -526,36 +507,10 @@ class SequenceSTTEncoder(nn.Module):
         self.output_projection = nn.Linear(stt_output_dim, ae_output_dim)
         self.output_dim = ae_output_dim
         self.obs_history = []
-        self.action_history = []
-
-    def get_action_emb(self, action_values):
-        """
-        Convert action float values to embeddings.
-
-        Args:
-            action_values: [B, T, num_actions] - Float values for each action
-        """
-        from .spatial_temporal_transformer import get_fourier_embeds_from_coordinates
-
-        action_values_normalize = []
-        for i in range(self.action_dim):
-            # Normalize float values to [0, 1] range using min/max of each action
-            min_val, max_val = self.action_ranges[i]
-            normalized = (action_values[:, :, i : i + 1] - min_val) / (max_val - min_val)
-            # Clamp to [0, 1] to ensure values are in valid range
-            normalized = torch.clamp(normalized, 0.0, 1.0)
-            action_values_normalize.append(normalized)
-
-        combined_values = torch.cat(action_values_normalize, dim=-1)
-        action_emb = get_fourier_embeds_from_coordinates(self.action_emb_dim, combined_values)
-
-        action_embs = torch.split(action_emb, dim=2, split_size_or_sections=1)
-        return action_embs
 
     def reset_inference_params(self):
         """Reset inference parameters for compatibility with other encoders"""
         self.obs_history = []
-        self.action_history = []
 
     def forward(self, observations):
         """Forward pass for sequence of observations
@@ -605,53 +560,16 @@ class SequenceSTTEncoder(nn.Module):
         feature_embeddings = self.img_projector(feature_total)
         # feature_embeddings: [B, F+1, 144, hidden_dim]
 
-        # Create dummy action embeddings
-        dummy_actions = []
-        for i in range(self.action_dim):
-            min_val, max_val = self.action_ranges[i]
-            dummy_action = (
-                torch.zeros(batch_size, self.condition_frames + 1, device=obs.device)
-                * (max_val - min_val)
-                / 2
-            )
-            dummy_actions.append(dummy_action)
-        action_values_total = torch.stack(dummy_actions, dim=-1)
-        # action_values_total: [B, F+1, action_dim]
-
-        # Get action embeddings
-        action_embs = self.get_action_emb(action_values_total)
-        action_token_embeddings = []
-        for i, emb in enumerate(action_embs):
-            action_token_embeddings.append(self.action_projectors[i](emb))
-
-        # Reshape and combine action embeddings with image embeddings
-        action_token_embeddings_reshaped = []
-        F = self.condition_frames
-        for action_emb in action_token_embeddings:
-            reshaped = rearrange(
-                action_emb, "B (F T) L C -> B F (L T) C", F=F + 1, T=self.temporal_block
-            )
-            action_token_embeddings_reshaped.append(reshaped)
-
         # Use only the history frames (not the last one for prediction)
-        input_action_token_embeddings = []
-        for action_emb in action_token_embeddings_reshaped:
-            input_action_token_embeddings.append(action_emb[:, :-1, ...])
         input_feature_embeddings = feature_embeddings[:, :-1, ...]
-
-        # Combine action and image tokens
-        combined_token_embeddings = torch.cat(
-            input_action_token_embeddings + [input_feature_embeddings],
-            dim=2,
-        )
-        # combined_token_embeddings: [B, F, total_tokens_size, hidden_dim]
+        # input_feature_embeddings: [B, F, 144, hidden_dim]
 
         # Apply STT (now shape-invariant)
-        stt_output = self.stt(combined_token_embeddings)
-        # stt_output: [B, F, total_tokens_size, hidden_dim]
+        stt_output = self.stt(input_feature_embeddings)
+        # stt_output: [B, F, 144, hidden_dim]
 
-        # Use last timestep's image tokens only
-        last_frame_emb = stt_output[:, -1, : self.actual_img_tokens_size, :]  # [B, 144, hidden_dim]
+        # Use last timestep's image tokens
+        last_frame_emb = stt_output[:, -1, :, :]  # [B, 144, hidden_dim]
         global_emb = last_frame_emb.mean(dim=1)  # [B, hidden_dim]
 
         # Project to match AE output dimension
