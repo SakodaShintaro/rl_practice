@@ -11,6 +11,7 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
+from .spatial_temporal_transformer import SpatialTemporalTransformer
 
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = (
@@ -439,3 +440,164 @@ class SequenceMMMambaEncoder(SequenceEncoderBase):
     def __init__(self, seq_len=1, device=None):
         mmmamba_encoder = MMMambaEncoder(device=device)
         super().__init__(mmmamba_encoder, seq_len)
+
+
+class SequenceSTTEncoder(nn.Module):
+    """Sequence encoder using SpatialTemporalTransformer"""
+
+    def __init__(self, seq_len, action_dim):
+        super().__init__()
+
+        self.seq_len = seq_len
+        self.action_dim = action_dim
+        self.condition_frames = seq_len
+        
+        # Default configuration
+        hidden_dim = 256
+        img_tokens_size = 1024
+        vae_emb_dim = 8
+        action_ranges = [(-1.0, 1.0)] * action_dim
+        device = "cuda:0"
+
+        self.action_ranges = action_ranges
+
+        action_tokens_size = action_dim
+        total_tokens_size = img_tokens_size + action_tokens_size
+
+        token_size_dict = {
+            "img_tokens_size": img_tokens_size,
+            "action_tokens_size": action_tokens_size,
+            "total_tokens_size": total_tokens_size,
+        }
+
+        # Use AE encoder for image preprocessing
+        self.ae_encoder = AE(device=device)
+        
+        # Update vae_emb_dim to match AE encoder output
+        actual_vae_emb_dim = self.ae_encoder.output_dim // img_tokens_size  # 576 // 1024 = 0.5625... 
+        # Since 576 is not divisible by 1024, we need to adjust
+        # Let's use a different approach - use the full AE output as input
+        self.actual_img_tokens_size = self.ae_encoder.output_dim
+        actual_vae_emb_dim = 1
+        
+        # Update token size configuration
+        token_size_dict = {
+            "img_tokens_size": self.actual_img_tokens_size,
+            "action_tokens_size": action_dim,
+            "total_tokens_size": self.actual_img_tokens_size + action_dim,
+        }
+
+        self.stt = SpatialTemporalTransformer(
+            block_size=self.actual_img_tokens_size + action_dim,
+            n_layer=[6, 3],
+            n_head=8,
+            n_embd=hidden_dim,
+            embd_pdrop=0.0,
+            resid_pdrop=0.0,
+            attn_pdrop=0.0,
+            n_unmasked=0,
+            local_rank=0,
+            condition_frames=self.condition_frames,
+            latent_size=(32, 32),
+            token_size_dict=token_size_dict,
+            vae_emb_dim=actual_vae_emb_dim,
+            temporal_block=1,
+            action_ranges=action_ranges,
+        )
+
+        # Add projection layer to match AE encoder output dimension
+        stt_output_dim = hidden_dim * action_dim  # 768
+        ae_output_dim = 576
+        self.output_projection = nn.Linear(stt_output_dim, ae_output_dim)
+        self.output_dim = ae_output_dim
+        self.obs_history = []
+        self.action_history = []
+
+    def reset_history(self):
+        self.obs_history = []
+        self.action_history = []
+
+    def reset_inference_params(self):
+        """Reset inference parameters for compatibility with other encoders"""
+        self.reset_history()
+
+    def update_history(self, obs, action=None):
+        self.obs_history.append(obs)
+        if len(self.obs_history) > self.condition_frames + 1:
+            self.obs_history.pop(0)
+
+        if action is not None:
+            self.action_history.append(action)
+            if len(self.action_history) > self.condition_frames + 1:
+                self.action_history.pop(0)
+
+    def _prepare_stt_input(self, observations):
+        # First encode raw image with AE encoder
+        encoded_obs, _ = self.ae_encoder.forward(observations)  # [batch_size, 576]
+        # Reshape to [batch_size, 576, 1] for STT input
+        obs = encoded_obs.unsqueeze(-1)
+
+        batch_size = obs.shape[0]
+        self.update_history(obs)
+
+        while len(self.obs_history) < self.condition_frames + 1:
+            if len(self.obs_history) > 0:
+                first_obs = self.obs_history[0]
+                if first_obs.shape[0] != batch_size:
+                    first_obs = first_obs.repeat(batch_size, 1, 1)
+                self.obs_history.insert(0, first_obs)
+            else:
+                dummy_obs = torch.zeros(
+                    batch_size, self.actual_img_tokens_size, 1, device=obs.device, dtype=obs.dtype
+                )
+                self.obs_history.append(dummy_obs)
+
+        adjusted_history = []
+        for hist_obs in self.obs_history[-self.condition_frames - 1 :]:
+            if hist_obs.shape[0] != batch_size:
+                if hist_obs.shape[0] < batch_size:
+                    hist_obs = hist_obs.repeat(batch_size, 1, 1)
+                else:
+                    hist_obs = hist_obs[:batch_size]
+            adjusted_history.append(hist_obs)
+
+        feature_total = torch.stack(adjusted_history, dim=1)
+
+        if len(self.action_history) < self.condition_frames + 1:
+            dummy_actions = []
+            for i in range(self.action_dim):
+                min_val, max_val = self.action_ranges[i]
+                dummy_action = (
+                    torch.zeros(batch_size, self.condition_frames + 1, device=obs.device) * (max_val - min_val) / 2
+                )
+                dummy_actions.append(dummy_action)
+            action_values_total = torch.stack(dummy_actions, dim=-1)
+        else:
+            adjusted_action_history = []
+            for hist_action in self.action_history[-self.condition_frames - 1 :]:
+                if hist_action.shape[0] != batch_size:
+                    if hist_action.shape[0] < batch_size:
+                        hist_action = hist_action.repeat(batch_size, 1)
+                    else:
+                        hist_action = hist_action[:batch_size]
+                adjusted_action_history.append(hist_action)
+            action_values_total = torch.stack(adjusted_action_history, dim=1)
+
+        return feature_total, action_values_total
+
+    def forward(self, observations):
+        """Forward pass for sequence of observations
+
+        Args:
+            observations: Tensor of shape (batch_size, seq_len, img_tokens_size, vae_emb_dim)
+                         or (batch_size, img_tokens_size, vae_emb_dim)
+
+        Returns:
+            Tuple: (encoded features from SpatialTemporalTransformer, None) for compatibility
+        """
+        feature_total, action_values_total = self._prepare_stt_input(observations)
+        stt_output = self.stt(feature_total, action_values_total)
+        action_emb = stt_output["action_emb"]
+        # Project to match AE output dimension
+        projected_output = self.output_projection(action_emb)
+        return projected_output, None

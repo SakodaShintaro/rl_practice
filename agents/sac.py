@@ -7,7 +7,12 @@ from torch import optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import SequenceAEEncoder, SequenceMMMambaEncoder, SequenceSmolVLMEncoder
+from networks.backbone import (
+    SequenceAEEncoder,
+    SequenceMMMambaEncoder,
+    SequenceSmolVLMEncoder,
+    SequenceSTTEncoder,
+)
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -38,6 +43,8 @@ class Network(nn.Module):
             self.encoder_sequence = SequenceSmolVLMEncoder(seq_len=seq_len)
         elif args.image_encoder == "mmmamba":
             self.encoder_sequence = SequenceMMMambaEncoder(seq_len=seq_len)
+        elif args.image_encoder == "stt":
+            self.encoder_sequence = SequenceSTTEncoder(seq_len=seq_len, action_dim=action_dim)
         else:
             raise ValueError(f"Unknown image encoder: {args.image_encoder}")
 
