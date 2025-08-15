@@ -106,7 +106,7 @@ class AvgAgent:
         self.action_norm_penalty = args.action_norm_penalty
 
         # Use SAC's Network class
-        seq_len = 2
+        seq_len = 3
         self.network = Network(
             action_dim=self.action_dim,
             seq_len=seq_len,

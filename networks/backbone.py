@@ -448,15 +448,15 @@ class STTEncoder(nn.Module):
         batch_size, seq_len = observations.shape[:2]
 
         # Reshape to process all frames: (B*T, C, H, W)
-        all_frames = observations.view(-1, *observations.shape[2:])
+        all_frames = observations.reshape(-1, *observations.shape[2:])
 
         with torch.no_grad():
             # Encode all frames at once
             all_latents = self.ae_encoder.ae.encode(all_frames).latents  # [B*T, 4, 12, 12]
             # Reshape back to sequence: [B, T, 4, 12, 12]
-            all_latents = all_latents.view(batch_size, seq_len, 4, 12, 12)
+            all_latents = all_latents.reshape(batch_size, seq_len, 4, 12, 12)
             # Convert to tokens: [B, T, 144, 4]
-            all_obs = all_latents.view(batch_size, seq_len, 4, -1).transpose(2, 3)
+            all_obs = all_latents.reshape(batch_size, seq_len, 4, -1).transpose(2, 3)
 
         # Project image features to embedding space
         feature_embeddings = self.img_projector(all_obs)  # [B, T, 144, hidden_dim]

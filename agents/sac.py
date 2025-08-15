@@ -211,7 +211,7 @@ class SacAgent:
     def __init__(self, args, observation_space, action_space) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        seq_len = 2
+        seq_len = 3
 
         # action properties
         self.action_space = action_space
@@ -292,8 +292,12 @@ class SacAgent:
             # Repeat first observation if buffer is not full
             self.observation_buffer.insert(0, self.observation_buffer[0])
 
+        # Use only the required sequence length for encoder (seq_len - 1)
+        encoder_seq_len = self.seq_len - 1
+        encoder_obs = self.observation_buffer[-encoder_seq_len:]  # Take last seq_len-1 observations
+
         # Stack observations to create sequence: (T, C, H, W) -> (1, T, C, H, W)
-        obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)  # (1, T, C, H, W)
+        obs_sequence = torch.stack(encoder_obs, dim=0).unsqueeze(0)  # (1, encoder_seq_len, C, H, W)
 
         output_enc, _ = self.network.encoder_sequence.forward(obs_sequence)
 
