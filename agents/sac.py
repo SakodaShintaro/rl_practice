@@ -8,10 +8,8 @@ from torch import optim
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import (
-    SequenceAEEncoder,
-    SequenceMMMambaEncoder,
-    SequenceSmolVLMEncoder,
-    SequenceSTTEncoder,
+    AE,
+    STTEncoder,
 )
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
@@ -37,16 +35,16 @@ class Network(nn.Module):
 
         self.action_dim = action_dim
 
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         if args.image_encoder == "ae":
-            self.encoder_sequence = SequenceAEEncoder(seq_len=seq_len)
-        elif args.image_encoder == "smolvlm":
-            self.encoder_sequence = SequenceSmolVLMEncoder(seq_len=seq_len)
-        elif args.image_encoder == "mmmamba":
-            self.encoder_sequence = SequenceMMMambaEncoder(seq_len=seq_len)
+            self.encoder_sequence = AE(seq_len=seq_len - 1, device=device)
         elif args.image_encoder == "stt":
-            self.encoder_sequence = SequenceSTTEncoder(seq_len=seq_len)
+            self.encoder_sequence = STTEncoder(seq_len=seq_len - 1, device=device)
         else:
-            raise ValueError(f"Unknown image encoder: {args.image_encoder}")
+            raise ValueError(
+                f"Unknown image encoder: {args.image_encoder}. Only 'ae' and 'stt' are supported."
+            )
 
         self.state_dim = self.encoder_sequence.output_dim
         self.reward_dim = 32
@@ -90,7 +88,7 @@ class Network(nn.Module):
         if self.detach_critic:
             state_curr = state_curr.detach()
         with torch.no_grad():
-            obs_next = data.observations[:, -1]
+            obs_next = data.observations[:, 1:]
             state_next, _ = self.encoder_sequence.forward(obs_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
@@ -282,14 +280,22 @@ class SacAgent:
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        obs_tensor = torch.Tensor(obs).to(self.device).unsqueeze(0)
+        obs_tensor = torch.Tensor(obs).to(self.device)
 
         # Update observation buffer for sequence tracking
         self.observation_buffer.append(obs_tensor)
         if len(self.observation_buffer) > self.seq_len:
             self.observation_buffer.pop(0)
 
-        output_enc, _ = self.network.encoder_sequence.forward(obs_tensor)
+        # Pad buffer if not enough observations
+        while len(self.observation_buffer) < self.seq_len:
+            # Repeat first observation if buffer is not full
+            self.observation_buffer.insert(0, self.observation_buffer[0])
+
+        # Stack observations to create sequence: (T, C, H, W) -> (1, T, C, H, W)
+        obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)  # (1, T, C, H, W)
+
+        output_enc, _ = self.network.encoder_sequence.forward(obs_sequence)
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -332,7 +338,7 @@ class SacAgent:
         data = self.rb.sample(self.batch_size)
 
         # Compute all losses using refactored methods
-        obs_curr = data.observations[:, -2]
+        obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, seq_len-1, C, H, W)
         state_curr, _ = self.network.encoder_sequence.forward(obs_curr)
 
         # Actor

@@ -8,7 +8,8 @@ from .backbone import AE
 class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int, seq_len: int) -> None:
         super().__init__()
-        self.encoder = AE()
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.encoder = AE(seq_len, device)
         seq_hidden_dim = self.encoder.output_dim
         rep_dim = 256
         hidden_dim = 100
@@ -27,8 +28,8 @@ class PpoBetaPolicyAndValue(nn.Module):
         a_seq: torch.Tensor,
         action: torch.Tensor | None = None,
     ) -> tuple:
-        x = s_seq[:, -1]  # Use the last time step representation (batch_size, seq_hidden_dim)
-        x, _ = self.encoder(x)
+        # s_seq is (B, T, C, H, W), encoder expects (B, T, C, H, W)
+        x, _ = self.encoder(s_seq)
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
 
