@@ -416,7 +416,7 @@ class STTEncoder(nn.Module):
         self.img_projector = nn.Identity()
 
         self.stt = SpatialTemporalTransformer(
-            n_layer=0,
+            n_layer=1,
             time_len=self.condition_frames,
             hidden_dim=vae_dim,
             n_head=1,
