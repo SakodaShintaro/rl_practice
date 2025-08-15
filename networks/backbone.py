@@ -397,37 +397,35 @@ class STTEncoder(nn.Module):
         self.seq_len = seq_len
         self.condition_frames = seq_len
 
-        # Default configuration (reduced for memory efficiency)
-        hidden_dim = 128
         self.device = device
 
         # Use AE encoder for image preprocessing
         self.ae_encoder = AE(self.seq_len, self.device)
 
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
-        self.actual_img_tokens_size = 144  # 12 * 12 patches
-        actual_vae_emb_dim = 4  # each patch has 4 dimensions
+        vae_dim = 4
+        self.image_tokens_num = 144  # 12 * 12 patches
 
         # Image projection from VAE to embedding space
-        self.img_projector = nn.Sequential(
-            nn.Linear(actual_vae_emb_dim, hidden_dim // 2, bias=False),
-            nn.GELU(),
-            nn.Linear(hidden_dim // 2, hidden_dim, bias=False),
-            nn.LayerNorm(hidden_dim),
-        ).to(self.device)
+        # self.img_projector = nn.Sequential(
+        #     nn.Linear(vae_dim, vae_dim // 2, bias=False),
+        #     nn.GELU(),
+        #     nn.Linear(vae_dim // 2, vae_dim, bias=False),
+        #     nn.LayerNorm(vae_dim),
+        # ).to(self.device)
+        self.img_projector = nn.Identity()
 
         self.stt = SpatialTemporalTransformer(
-            n_layer=2,
+            n_layer=0,
             time_len=self.condition_frames,
-            hidden_dim=hidden_dim,
-            n_head=4,
+            hidden_dim=vae_dim,
+            n_head=1,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
         ).to(self.device)
 
         # Add projection layer to match AE encoder output dimension
         self.output_dim = 576
-        self.output_projection = nn.Linear(hidden_dim, self.output_dim).to(self.device)
         self.obs_history = []
 
     def reset_inference_params(self):
@@ -466,9 +464,9 @@ class STTEncoder(nn.Module):
 
         # Use last timestep's image tokens for final representation
         last_frame_emb = stt_output[:, -1, :, :]  # [B, 144, hidden_dim]
-        global_emb = last_frame_emb.mean(dim=1)  # [B, hidden_dim]
+
+        output = last_frame_emb.flatten(start_dim=1)  # [B, 144*hidden_dim]
 
         # Project to match AE output dimension
-        projected_output = self.output_projection(global_emb)
         batch_size = observations.shape[0]
-        return projected_output, [""] * batch_size
+        return output, [""] * batch_size
