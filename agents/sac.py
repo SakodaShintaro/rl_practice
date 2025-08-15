@@ -211,8 +211,6 @@ class SacAgent:
     def __init__(self, args, observation_space, action_space) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        seq_len = 3
-
         # action properties
         self.action_space = action_space
         self.action_dim = np.prod(action_space.shape)
@@ -229,12 +227,12 @@ class SacAgent:
         self.apply_masks_during_training = args.apply_masks_during_training
 
         # Sequence observation management
-        self.seq_len = seq_len
+        self.seq_len = args.seq_len
         self.observation_buffer = []
 
         self.network = Network(
             action_dim=self.action_dim,
-            seq_len=seq_len,
+            seq_len=self.seq_len,
             args=args,
             enable_sequence_modeling=False,
         ).to(self.device)
@@ -243,7 +241,7 @@ class SacAgent:
 
         self.rb = ReplayBuffer(
             args.buffer_size,
-            seq_len,
+            self.seq_len,
             observation_space.shape,
             action_space.shape,
             self.device,

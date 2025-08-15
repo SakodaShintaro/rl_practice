@@ -395,7 +395,6 @@ class STTEncoder(nn.Module):
         super().__init__()
 
         self.seq_len = seq_len
-        self.condition_frames = seq_len
 
         self.device = device
 
@@ -417,7 +416,7 @@ class STTEncoder(nn.Module):
 
         self.stt = SpatialTemporalTransformer(
             n_layer=1,
-            time_len=self.condition_frames,
+            time_len=self.seq_len,
             hidden_dim=vae_dim,
             n_head=1,
             attn_drop_prob=0.0,
@@ -467,6 +466,4 @@ class STTEncoder(nn.Module):
 
         output = last_frame_emb.flatten(start_dim=1)  # [B, 144*hidden_dim]
 
-        # Project to match AE output dimension
-        batch_size = observations.shape[0]
         return output, [""] * batch_size
