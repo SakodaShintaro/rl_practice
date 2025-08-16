@@ -7,10 +7,7 @@ from torch import optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import (
-    AE,
-    STTEncoder,
-)
+from networks.backbone import AE, STTEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
