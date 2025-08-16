@@ -18,12 +18,7 @@ from sequence_modeling import SequenceModelingModule
 
 
 class Network(nn.Module):
-    def __init__(
-        self,
-        action_dim: int,
-        args,
-        enable_sequence_modeling: bool,
-    ):
+    def __init__(self, action_dim: int, args):
         super(Network, self).__init__()
         self.gamma = 0.99
         self.num_bins = args.num_bins
@@ -67,7 +62,7 @@ class Network(nn.Module):
         self.detach_critic = args.detach_critic
 
         # Sequence modeling components (optional)
-        if enable_sequence_modeling:
+        if args.enable_sequence_modeling:
             self.sequence_model = SequenceModelingModule(
                 self.state_dim, action_dim, self.seq_len, args
             )
@@ -229,11 +224,7 @@ class SacAgent:
         self.seq_len = args.seq_len
         self.observation_buffer = []
 
-        self.network = Network(
-            action_dim=self.action_dim,
-            args=args,
-            enable_sequence_modeling=False,
-        ).to(self.device)
+        self.network = Network(action_dim=self.action_dim, args=args).to(self.device)
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 
