@@ -113,6 +113,11 @@ class AvgAgent:
             args=args,
             enable_sequence_modeling=False,
         ).to(self.device)
+        self.seq_len = seq_len
+        # Store observation, action, and reward history for sequence modeling
+        self.obs_history = []
+        self.action_history = []
+        self.reward_history = []
 
         self.gamma = args.gamma
 
@@ -143,21 +148,42 @@ class AvgAgent:
         self._prev_obs = None
         self._prev_action = None
 
+    def _update_and_pad_history(self, history, new_item):
+        """Update history with new item and pad to seq_len."""
+        history.append(new_item)
+        if len(history) > self.seq_len:
+            history[:] = history[-self.seq_len :]
+
+        # Pad to seq_len
+        while len(history) < self.seq_len:
+            history.insert(0, history[0])
+
     def initialize_for_episode(self) -> None:
         """Initialize for new episode."""
         self._prev_obs = None
         self._prev_action = None
+        self.obs_history = []
+        self.action_history = []
+        self.reward_history = []
 
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).to(self.device)
-        # Create a dummy sequence with just one frame: (1, 1, C, H, W)
-        obs_sequence = obs_tensor.unsqueeze(0).unsqueeze(0)  # (1, 1, C, H, W)
+
+        # Update observation history
+        self._update_and_pad_history(self.obs_history, obs_tensor)
+
+        # Create sequence tensor
+        obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
         obs_encoded, _ = self.network.encoder_sequence.forward(obs_sequence)
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
-        self._prev_obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
+        curr_obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
+        self._prev_obs = curr_obs_tensor
         self._prev_action = action
+
+        # Update action history (detach to avoid gradient issues)
+        self._update_and_pad_history(self.action_history, action.squeeze(0).detach())
 
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
@@ -173,29 +199,40 @@ class AvgAgent:
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
+        # Update reward history
+        self._update_and_pad_history(self.reward_history, train_reward)
+
         curr_obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
 
-        observations = torch.stack([self._prev_obs, curr_obs], dim=1).to(self.device)
+        # Create observations compatible with SAC's expectations
+        # SAC expects obs_curr = [:, :-1] and obs_next = [:, 1:]
+        # So we need seq_len+1 total frames
 
-        actions = torch.stack(
-            [
-                self._prev_action.squeeze(0),
-                self._prev_action.squeeze(0),  # dummy
-            ],
-            dim=0,
-        ).unsqueeze(0)  # [batch_size=1, seq_len=2, action_dim]
+        # Add batch dimension to obs_history and append current observation
+        # Note: obs_history is always seq_len length after select_action
+        obs_with_batch = [obs.unsqueeze(0) for obs in self.obs_history] + [curr_obs]
+        observations = torch.stack(obs_with_batch, dim=1).to(self.device)  # (1, seq_len+1, C, H, W)
 
-        rewards = torch.tensor(
-            [[train_reward, train_reward]], device=self.device, dtype=torch.float32
+        # Create actions using action history and current action
+        # Note: action_history is always seq_len length after select_action
+        action_list = self.action_history + [self._prev_action.squeeze(0)]
+        actions = torch.stack(action_list, dim=0).unsqueeze(0)
+        # [batch_size=1, seq_len+1, action_dim]
+
+        # Create rewards using reward history and current reward
+        # Note: reward_history is always seq_len length after padding
+        reward_list = self.reward_history + [train_reward]
+        rewards = torch.tensor([reward_list], device=self.device, dtype=torch.float32)
+        dones = torch.tensor(
+            [[False] * (self.seq_len + 1)], device=self.device, dtype=torch.float32
         )
-        dones = torch.tensor([[False, False]], device=self.device, dtype=torch.float32)
 
         data = ReplayBufferData(
             observations=observations, actions=actions, rewards=rewards, dones=dones
         )
 
         # Encode current state
-        raw_obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, seq_len-1, C, H, W)
+        raw_obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, seq_len, C, H, W)
         state_curr, _ = self.network.encoder_sequence.forward(raw_obs_curr)
 
         # Actor
