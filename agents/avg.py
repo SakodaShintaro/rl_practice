@@ -10,6 +10,7 @@ import torch
 from torch import optim
 
 from agents.sac import Network
+from agents.utils import update_and_pad_history
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from replay_buffer import ReplayBufferData
@@ -148,16 +149,6 @@ class AvgAgent:
         self._prev_obs = None
         self._prev_action = None
 
-    def _update_and_pad_history(self, history, new_item):
-        """Update history with new item and pad to seq_len."""
-        history.append(new_item)
-        if len(history) > self.seq_len:
-            history[:] = history[-self.seq_len :]
-
-        # Pad to seq_len
-        while len(history) < self.seq_len:
-            history.insert(0, history[0])
-
     def initialize_for_episode(self) -> None:
         """Initialize for new episode."""
         self._prev_obs = None
@@ -170,7 +161,7 @@ class AvgAgent:
         obs_tensor = torch.Tensor(obs).to(self.device)
 
         # Update observation history
-        self._update_and_pad_history(self.obs_history, obs_tensor)
+        update_and_pad_history(self.obs_history, obs_tensor, self.seq_len)
 
         # Create sequence tensor
         obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
@@ -183,7 +174,7 @@ class AvgAgent:
         self._prev_action = action
 
         # Update action history (detach to avoid gradient issues)
-        self._update_and_pad_history(self.action_history, action.squeeze(0).detach())
+        update_and_pad_history(self.action_history, action.squeeze(0).detach(), self.seq_len)
 
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
@@ -200,7 +191,7 @@ class AvgAgent:
         info_dict["train_reward"] = train_reward
 
         # Update reward history
-        self._update_and_pad_history(self.reward_history, train_reward)
+        update_and_pad_history(self.reward_history, train_reward, self.seq_len)
 
         curr_obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
 

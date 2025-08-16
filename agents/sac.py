@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 from torch import optim
 
+from agents.utils import update_and_pad_history
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import AE, STTEncoder
@@ -278,14 +279,7 @@ class SacAgent:
         obs_tensor = torch.Tensor(obs).to(self.device)
 
         # Update observation buffer for sequence tracking
-        self.observation_buffer.append(obs_tensor)
-        if len(self.observation_buffer) > self.seq_len:
-            self.observation_buffer.pop(0)
-
-        # Pad buffer if not enough observations
-        while len(self.observation_buffer) < self.seq_len:
-            # Repeat first observation if buffer is not full
-            self.observation_buffer.insert(0, self.observation_buffer[0])
+        update_and_pad_history(self.observation_buffer, obs_tensor, self.seq_len)
 
         # Stack observations to create sequence: (T, C, H, W) -> (1, T, C, H, W)
         obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)
