@@ -38,9 +38,9 @@ class Network(nn.Module):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if args.image_encoder == "ae":
-            self.encoder_sequence = AE(seq_len=seq_len - 1, device=device)
+            self.encoder_sequence = AE(seq_len=seq_len, device=device)
         elif args.image_encoder == "stt":
-            self.encoder_sequence = STTEncoder(seq_len=seq_len - 1, device=device)
+            self.encoder_sequence = STTEncoder(seq_len=seq_len, device=device)
         else:
             raise ValueError(
                 f"Unknown image encoder: {args.image_encoder}. Only 'ae' and 'stt' are supported."
@@ -241,7 +241,7 @@ class SacAgent:
 
         self.rb = ReplayBuffer(
             args.buffer_size,
-            self.seq_len,
+            self.seq_len + 1,
             observation_space.shape,
             action_space.shape,
             self.device,
@@ -290,12 +290,8 @@ class SacAgent:
             # Repeat first observation if buffer is not full
             self.observation_buffer.insert(0, self.observation_buffer[0])
 
-        # Use only the required sequence length for encoder (seq_len - 1)
-        encoder_seq_len = self.seq_len - 1
-        encoder_obs = self.observation_buffer[-encoder_seq_len:]  # Take last seq_len-1 observations
-
         # Stack observations to create sequence: (T, C, H, W) -> (1, T, C, H, W)
-        obs_sequence = torch.stack(encoder_obs, dim=0).unsqueeze(0)  # (1, encoder_seq_len, C, H, W)
+        obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)
 
         output_enc, _ = self.network.encoder_sequence.forward(obs_sequence)
 
@@ -340,7 +336,7 @@ class SacAgent:
         data = self.rb.sample(self.batch_size)
 
         # Compute all losses using refactored methods
-        obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, seq_len-1, C, H, W)
+        obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, T, C, H, W)
         state_curr, _ = self.network.encoder_sequence.forward(obs_curr)
 
         # Actor
