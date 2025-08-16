@@ -38,19 +38,15 @@ class Network(nn.Module):
                 f"Unknown image encoder: {args.image_encoder}. Only 'ae' and 'stt' are supported."
             )
 
-        self.state_dim = self.encoder_sequence.output_dim
-        self.reward_dim = 32
-        self.token_dim = self.state_dim + self.reward_dim  # 608
-
         self.actor = DiffusionPolicy(
-            state_dim=self.state_dim,
+            state_dim=self.encoder_sequence.output_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
         self.critic = SacQ(
-            in_channels=self.state_dim,
+            in_channels=self.encoder_sequence.output_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -64,7 +60,7 @@ class Network(nn.Module):
         # Sequence modeling components (optional)
         if args.enable_sequence_modeling:
             self.sequence_model = SequenceModelingModule(
-                self.state_dim, action_dim, self.seq_len, args
+                self.encoder_sequence.output_dim, action_dim, self.seq_len, args
             )
         else:
             self.sequence_model = None
