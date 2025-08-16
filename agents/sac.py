@@ -29,14 +29,12 @@ class Network(nn.Module):
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if args.image_encoder == "ae":
+        if args.encoder == "ae":
             self.encoder_sequence = AE(seq_len=self.seq_len, device=device)
-        elif args.image_encoder == "stt":
+        elif args.encoder == "stt":
             self.encoder_sequence = STTEncoder(seq_len=self.seq_len, device=device)
         else:
-            raise ValueError(
-                f"Unknown image encoder: {args.image_encoder}. Only 'ae' and 'stt' are supported."
-            )
+            raise ValueError(f"Unknown encoder: {args.encoder}. Only 'ae' and 'stt' are supported.")
 
         self.actor = DiffusionPolicy(
             state_dim=self.encoder_sequence.output_dim,
