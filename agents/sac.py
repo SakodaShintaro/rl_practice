@@ -21,7 +21,6 @@ class Network(nn.Module):
     def __init__(
         self,
         action_dim: int,
-        seq_len: int,
         args,
         enable_sequence_modeling: bool,
     ):
@@ -29,16 +28,16 @@ class Network(nn.Module):
         self.gamma = 0.99
         self.num_bins = args.num_bins
         self.sparsity = args.sparsity
-        self.seq_len = seq_len
+        self.seq_len = args.seq_len
 
         self.action_dim = action_dim
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if args.image_encoder == "ae":
-            self.encoder_sequence = AE(seq_len=seq_len, device=device)
+            self.encoder_sequence = AE(seq_len=self.seq_len, device=device)
         elif args.image_encoder == "stt":
-            self.encoder_sequence = STTEncoder(seq_len=seq_len, device=device)
+            self.encoder_sequence = STTEncoder(seq_len=self.seq_len, device=device)
         else:
             raise ValueError(
                 f"Unknown image encoder: {args.image_encoder}. Only 'ae' and 'stt' are supported."
@@ -69,7 +68,9 @@ class Network(nn.Module):
 
         # Sequence modeling components (optional)
         if enable_sequence_modeling:
-            self.sequence_model = SequenceModelingModule(self.state_dim, action_dim, seq_len, args)
+            self.sequence_model = SequenceModelingModule(
+                self.state_dim, action_dim, self.seq_len, args
+            )
         else:
             self.sequence_model = None
 
@@ -230,7 +231,6 @@ class SacAgent:
 
         self.network = Network(
             action_dim=self.action_dim,
-            seq_len=self.seq_len,
             args=args,
             enable_sequence_modeling=False,
         ).to(self.device)

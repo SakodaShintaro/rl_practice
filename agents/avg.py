@@ -107,14 +107,12 @@ class AvgAgent:
         self.action_norm_penalty = args.action_norm_penalty
 
         # Use SAC's Network class
-        seq_len = 3
         self.network = Network(
             action_dim=self.action_dim,
-            seq_len=seq_len,
             args=args,
             enable_sequence_modeling=False,
         ).to(self.device)
-        self.seq_len = seq_len
+        self.seq_len = args.seq_len
         # Store observation, action, and reward history for sequence modeling
         self.obs_history = []
         self.action_history = []
