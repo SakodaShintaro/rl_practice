@@ -112,10 +112,6 @@ class PpoAgent:
                 action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
                 action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
 
-        # パラメータのnorm値を追加
-        for name, p in self.net.named_parameters():
-            action_info[f"params/{name}"] = p.norm().item()
-
         self.episode_states.append(obs)
         self.episode_actions.append(action)
         self.episode_values.append(value)
