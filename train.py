@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--step_limit", type=int, default=200_000)
+    parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--debug", action="store_true")
 
@@ -71,7 +72,6 @@ def parse_args() -> argparse.Namespace:
 
     # for PPO
     parser.add_argument("--buffer_capacity", type=int, default=2000)
-    parser.add_argument("--seq_len", type=int, default=2)
     parser.add_argument(
         "--model_name", type=str, default="default", choices=["default", "paligemma"]
     )
