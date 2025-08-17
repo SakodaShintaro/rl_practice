@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target_score", type=float, default=800.0)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument(
-        "--encoder", type=str, default="ae", choices=["ae", "smolvlm", "mmmamba", "stt", "simple"]
+        "--encoder", type=str, default="stt", choices=["ae", "smolvlm", "mmmamba", "stt", "simple"]
     )
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_weight_projection", action="store_true")
     parser.add_argument("--enable_sequence_modeling", action="store_true")
     parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--detach_critic", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
 
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")
