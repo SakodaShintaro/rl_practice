@@ -9,12 +9,11 @@ from agents.utils import update_and_pad_history
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import AE, STTEncoder
-from networks.diffusion_policy import DiffusionPolicy
+from networks.diffusion_policy import DiffusionPolicy, DiffusionStatePredictor
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
-from sequence_modeling import SequenceModelingModule
 
 
 class Network(nn.Module):
@@ -56,12 +55,15 @@ class Network(nn.Module):
         self.detach_critic = args.detach_critic
 
         # Sequence modeling components (optional)
+        self.enable_sequence_modeling = args.enable_sequence_modeling
         if args.enable_sequence_modeling:
-            self.sequence_model = SequenceModelingModule(
-                self.encoder_sequence.output_dim, action_dim, self.seq_len, args
+            self.state_predictor = DiffusionStatePredictor(
+                input_dim=self.encoder_sequence.output_dim + action_dim,
+                state_dim=self.encoder_sequence.output_dim,
+                hidden_dim=args.actor_hidden_dim,
+                block_num=args.actor_block_num,
+                sparsity=args.sparsity,
             )
-        else:
-            self.sequence_model = None
 
         if self.num_bins > 1:
             value_range = 60
@@ -183,16 +185,54 @@ class Network(nn.Module):
 
         return total_actor_loss, activations_dict, info_dict
 
-    def compute_sequence_loss(self, data):
-        if self.sequence_model is None:
+    def compute_sequence_loss(self, data, state_curr):
+        if not self.enable_sequence_modeling:
             # Return zero loss when sequence modeling is disabled
             return (
-                torch.tensor(0.0, device=data.observations.device),
+                torch.tensor(0.0, device=state_curr.device),
                 {},
                 {},
             )
 
-        return self.sequence_model.compute_sequence_loss(data, self.encoder_sequence)
+        state_curr = state_curr.detach()
+
+        # 最後のactionを取得 (actions[:, -1]がcurrent_stateに対応するaction)
+        action_curr = data.actions[:, -1]  # (B, action_dim)
+
+        # 次のstateをencodeする
+        with torch.no_grad():
+            obs_next_sequence = data.observations[:, 1:]  # (B, T-1, C, H, W)
+            target_state_next, _ = self.encoder_sequence.forward(obs_next_sequence)
+
+        # current_stateとactionを結合
+        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
+
+        # Flow Matching for state prediction
+        x_0_state = torch.randn_like(target_state_next)
+        t_state = torch.rand(size=(target_state_next.shape[0], 1), device=target_state_next.device)
+
+        # Sample from interpolation path for state
+        x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
+
+        # Predict velocity for state using DiffusionStatePredictor
+        pred_state_dict = self.state_predictor.forward(
+            x_t_state, t_state.squeeze(1), state_action_input
+        )
+        pred_states_flat = pred_state_dict["output"]
+
+        # Conditional vector field for state
+        u_t_state = target_state_next - x_0_state
+
+        # Flow Matching loss for state
+        state_loss = F.mse_loss(pred_states_flat, u_t_state)
+
+        activations_dict = {"state_predictor": pred_state_dict["activation"]}
+
+        info_dict = {
+            "seq_loss": state_loss.item(),
+        }
+
+        return state_loss, activations_dict, info_dict
 
 
 class SacAgent:
@@ -236,18 +276,26 @@ class SacAgent:
             "actor": self.network.actor,
             "critic": self.network.critic,
         }
+        if args.enable_sequence_modeling:
+            self.monitoring_targets["state_predictor"] = self.network.state_predictor
 
         # Initialize weight projection if enabled
         self.weight_projection_norms = {}
         if args.use_weight_projection:
             self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
             self.weight_projection_norms["critic"] = get_initial_norms(self.network.critic)
+            if args.enable_sequence_modeling:
+                self.weight_projection_norms["state_predictor"] = get_initial_norms(
+                    self.network.state_predictor
+                )
 
         self.metrics_computers = {
             "state": StatisticalMetricsComputer(),
             "actor": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
         }
+        if args.enable_sequence_modeling:
+            self.metrics_computers["state_predictor"] = StatisticalMetricsComputer()
         self.prev_obs = None
         self.prev_action = None
 
@@ -327,8 +375,15 @@ class SacAgent:
         for key, value in critic_info.items():
             info_dict[f"losses/{key}"] = value
 
+        # Sequence modeling
+        sequence_loss, sequence_activations, sequence_info = self.network.compute_sequence_loss(
+            data, state_curr
+        )
+        for key, value in sequence_info.items():
+            info_dict[f"losses/{key}"] = value
+
         # optimize the model
-        loss = actor_loss + critic_loss
+        loss = actor_loss + critic_loss + sequence_loss
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -346,17 +401,24 @@ class SacAgent:
         if self.use_weight_projection:
             weight_project(self.network.actor, self.weight_projection_norms["actor"])
             weight_project(self.network.critic, self.weight_projection_norms["critic"])
+            if self.network.enable_sequence_modeling:
+                weight_project(
+                    self.network.state_predictor, self.weight_projection_norms["state_predictor"]
+                )
 
         # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
         if self.apply_masks_during_training:
             apply_masks_during_training(self.network.actor)
             apply_masks_during_training(self.network.critic)
+            if self.network.enable_sequence_modeling:
+                apply_masks_during_training(self.network.state_predictor)
 
         # Feature metrics
         feature_dict = {
             "state": state_curr,
             **actor_activations,
             **critic_activations,
+            **sequence_activations,
         }
         for feature_name, feature in feature_dict.items():
             info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
