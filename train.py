@@ -80,7 +80,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main(exp_name: str, seed: int) -> None:
-    wandb.init(project="rl_practice", config=vars(args), name=exp_name, save_code=True)
+    wandb.init(
+        project="rl_practice",
+        config=vars(args),
+        name=exp_name,
+        save_code=True,
+        settings=wandb.Settings(quiet=True),
+    )
 
     # seeding
     random.seed(seed)
