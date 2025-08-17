@@ -228,9 +228,7 @@ class Network(nn.Module):
 
         activations_dict = {"state_predictor": pred_state_dict["activation"]}
 
-        info_dict = {
-            "seq_loss": state_loss.item(),
-        }
+        info_dict = {"seq_loss": state_loss.item()}
 
         return state_loss, activations_dict, info_dict
 
