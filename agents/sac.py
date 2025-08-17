@@ -79,7 +79,8 @@ class Network(nn.Module):
             state_curr = state_curr.detach()
         with torch.no_grad():
             obs_next = data.observations[:, 1:]
-            state_next, _ = self.encoder_sequence.forward(obs_next)
+            actions_next = data.actions[:, 1:]  # Next action sequence
+            state_next, _ = self.encoder_sequence.forward(obs_next, actions_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -202,7 +203,10 @@ class Network(nn.Module):
         # 次のstateをencodeする
         with torch.no_grad():
             obs_next_sequence = data.observations[:, 1:]  # (B, T-1, C, H, W)
-            target_state_next, _ = self.encoder_sequence.forward(obs_next_sequence)
+            actions_next_sequence = data.actions[:, 1:]  # (B, T-1, action_dim)
+            target_state_next, _ = self.encoder_sequence.forward(
+                obs_next_sequence, actions_next_sequence
+            )
 
         # current_stateとactionを結合
         state_action_input = torch.cat([state_curr, action_curr], dim=-1)
@@ -255,6 +259,7 @@ class SacAgent:
         # Sequence observation management
         self.seq_len = args.seq_len
         self.observation_buffer = []
+        self.action_buffer = []
 
         self.network = Network(action_dim=self.action_dim, args=args).to(self.device)
         lr = args.learning_rate
@@ -301,6 +306,9 @@ class SacAgent:
         self.prev_obs = None
         self.prev_action = None
         self.observation_buffer = []
+        self.action_buffer = [
+            torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
+        ]
         self.network.encoder_sequence.reset_inference_params()
 
     @torch.inference_mode()
@@ -315,7 +323,10 @@ class SacAgent:
         # Stack observations to create sequence: (T, C, H, W) -> (1, T, C, H, W)
         obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)
 
-        output_enc, _ = self.network.encoder_sequence.forward(obs_sequence)
+        # Create action sequence for encoder
+        action_sequence = torch.stack(self.action_buffer, dim=0).unsqueeze(0)
+
+        output_enc, _ = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -329,6 +340,10 @@ class SacAgent:
             action = (1 - c) * action + c * action_noise
             action = np.clip(action, self.action_low, self.action_high)
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
+
+        # Update action buffer with action tensor
+        action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
+        update_and_pad_history(self.action_buffer, action_tensor, self.seq_len)
 
         self.prev_obs = obs
         self.prev_action = action
@@ -359,7 +374,8 @@ class SacAgent:
 
         # Compute all losses using refactored methods
         obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, T, C, H, W)
-        state_curr, _ = self.network.encoder_sequence.forward(obs_curr)
+        actions_curr = data.actions[:, :-1]  # Current action sequence: [0:-1] (B, T, action_dim)
+        state_curr, _ = self.network.encoder_sequence.forward(obs_curr, actions_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)

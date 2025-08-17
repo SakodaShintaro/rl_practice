@@ -148,7 +148,9 @@ class AvgAgent:
         self._prev_obs = None
         self._prev_action = None
         self.obs_history = []
-        self.action_history = []
+        self.action_history = [
+            torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
+        ]
         self.reward_history = []
 
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
@@ -159,7 +161,11 @@ class AvgAgent:
 
         # Create sequence tensor
         obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
-        obs_encoded, _ = self.network.encoder_sequence.forward(obs_sequence)
+
+        # Create action sequence for encoder
+        action_sequence = torch.stack(self.action_history, dim=0).unsqueeze(0)
+
+        obs_encoded, _ = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
@@ -217,8 +223,9 @@ class AvgAgent:
         )
 
         # Encode current state
-        raw_obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, seq_len, C, H, W)
-        state_curr, _ = self.network.encoder_sequence.forward(raw_obs_curr)
+        raw_obs_curr = data.observations[:, :-1]
+        actions_curr = data.actions[:, :-1]
+        state_curr, _ = self.network.encoder_sequence.forward(raw_obs_curr, actions_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)

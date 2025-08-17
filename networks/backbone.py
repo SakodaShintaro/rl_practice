@@ -11,7 +11,10 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
-from .spatial_temporal_transformer import SpatialTemporalTransformer
+from .spatial_temporal_transformer import (
+    SpatialTemporalTransformer,
+    get_fourier_embeds_from_coordinates,
+)
 
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = (
@@ -101,8 +104,17 @@ class AE(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, list[str]]:
-        # images : (B, T, C, H, W)
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, list[str]]:
+        """
+        Args:
+            images: Tensor of shape (B, T, 3, H, W)
+            actions: Tensor of shape (B, T, action_dim)
+
+        Returns:
+            Tuple: (encoded features, str)
+        """
         batch_size = images.shape[0]
         x = images[:, -1]  # (B, C, H, W)
         x = self.ae.encode(x).latents.flatten(1)
@@ -398,72 +410,66 @@ class STTEncoder(nn.Module):
 
         self.device = device
 
-        # Use AE encoder for image preprocessing
         self.ae_encoder = AE(self.seq_len, self.device)
 
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
-        vae_dim = 4
+        self.vae_dim = 4
         self.image_tokens_num = 144  # 12 * 12 patches
-
-        # Image projection from VAE to embedding space
-        # self.img_projector = nn.Sequential(
-        #     nn.Linear(vae_dim, vae_dim // 2, bias=False),
-        #     nn.GELU(),
-        #     nn.Linear(vae_dim // 2, vae_dim, bias=False),
-        #     nn.LayerNorm(vae_dim),
-        # ).to(self.device)
-        self.img_projector = nn.Identity()
 
         self.stt = SpatialTemporalTransformer(
             n_layer=1,
             time_len=self.seq_len,
-            hidden_dim=vae_dim,
+            hidden_dim=self.vae_dim,
             n_head=1,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
         ).to(self.device)
 
-        # Add projection layer to match AE encoder output dimension
-        self.output_dim = 576
-        self.obs_history = []
+        self.output_dim = self.vae_dim * self.image_tokens_num
 
     def reset_inference_params(self):
-        """Reset inference parameters for compatibility with other encoders"""
-        self.obs_history = []
+        pass
 
-    def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, list[str]]:
-        """Forward pass for sequence of observations
-
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, list[str]]:
+        """
         Args:
-            observations: Tensor of shape (B, T, 3, H, W)
+            images: Tensor of shape (B, T, 3, H, W)
+            actions: Tensor of shape (B, T, action_dim)
 
         Returns:
-            Tuple: (encoded features from SpatialTemporalTransformer, str)
+            Tuple: (encoded features, str)
         """
         # Encode all frames with AE but preserve spatial structure
-        # observations: (B, T, C, H, W) -> encode all frames
-        batch_size, seq_len = observations.shape[:2]
+        # images: (B, T, C, H, W) -> encode all frames
+        B, T, C, H, W = images.shape
 
         # Reshape to process all frames: (B*T, C, H, W)
-        all_frames = observations.reshape(-1, *observations.shape[2:])
+        all_frames = images.reshape(-1, *images.shape[2:])
 
         with torch.no_grad():
             # Encode all frames at once
-            all_latents = self.ae_encoder.ae.encode(all_frames).latents  # [B*T, 4, 12, 12]
-            # Reshape back to sequence: [B, T, 4, 12, 12]
-            all_latents = all_latents.reshape(batch_size, seq_len, 4, 12, 12)
-            # Convert to tokens: [B, T, 144, 4]
-            all_obs = all_latents.reshape(batch_size, seq_len, 4, -1).transpose(2, 3)
+            all_latents = self.ae_encoder.ae.encode(all_frames).latents  # [B*T, C', H', W']
+            # Reshape back to sequence: [B, T, C', H', W']
+            all_latents = all_latents.reshape(B, T, 4, 12, 12)
+            # Convert to tokens: [B, T, S(=H'*W'), C']
+            image_embed = all_latents.reshape(B, T, 4, -1).transpose(2, 3)
 
-        # Project image features to embedding space
-        feature_embeddings = self.img_projector(all_obs)  # [B, T, 144, hidden_dim]
+        # [B, T, action_dim] -> [B, T, action_dim, C']
+        action_embed = get_fourier_embeds_from_coordinates(self.vae_dim, actions)
+
+        # [B, T, S+action_dim, C']
+        all_embed = torch.cat([image_embed, action_embed], dim=2)
 
         # Apply STT to all frames
-        stt_output = self.stt(feature_embeddings)  # [B, T, 144, hidden_dim]
+        stt_output = self.stt(all_embed)  # [B, T, S+action_dim, C']
 
         # Use last timestep's image tokens for final representation
-        last_frame_emb = stt_output[:, -1, :, :]  # [B, 144, hidden_dim]
+        last_frame_emb = stt_output[:, -1, :, :]  # [B, S+action_dim, C']
 
-        output = last_frame_emb.flatten(start_dim=1)  # [B, 144*hidden_dim]
+        last_frame_emb = last_frame_emb[:, : self.image_tokens_num]  # [B, S, C']
 
-        return output, [""] * batch_size
+        output = last_frame_emb.flatten(start_dim=1)  # [B, S*C']
+
+        return output, [""] * B
