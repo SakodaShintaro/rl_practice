@@ -1,3 +1,4 @@
+# ref. https://github.com/Kevin-thu/Epona/blob/main/models/stt.py
 from dataclasses import dataclass
 
 import torch
