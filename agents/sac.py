@@ -309,7 +309,6 @@ class SacAgent:
         self.action_buffer = [
             torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
         ]
-        self.network.encoder_sequence.reset_inference_params()
 
     @torch.inference_mode()
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:

@@ -63,9 +63,6 @@ class AE(nn.Module):
         x = x.view(x.size(0), 4, 12, 12)
         return self.ae.decode(x).sample
 
-    def reset_inference_params(self):
-        pass
-
 
 class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
@@ -93,9 +90,6 @@ class STTEncoder(nn.Module):
         ).to(self.device)
 
         self.output_dim = self.vae_dim * self.image_tokens_num
-
-    def reset_inference_params(self):
-        pass
 
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor
