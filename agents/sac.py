@@ -8,7 +8,7 @@ from torch import optim
 from agents.utils import update_and_pad_history
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import AE, STTEncoder
+from networks.backbone import AE, SimpleTransformerEncoder, STTEncoder
 from networks.diffusion_policy import DiffusionPolicy, DiffusionStatePredictor
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -32,8 +32,12 @@ class Network(nn.Module):
             self.encoder_sequence = AE(seq_len=self.seq_len, device=device)
         elif args.encoder == "stt":
             self.encoder_sequence = STTEncoder(seq_len=self.seq_len, device=device)
+        elif args.encoder == "simple":
+            self.encoder_sequence = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
         else:
-            raise ValueError(f"Unknown encoder: {args.encoder}. Only 'ae' and 'stt' are supported.")
+            raise ValueError(
+                f"Unknown encoder: {args.encoder}. Only 'ae', 'stt', and 'simple' are supported."
+            )
 
         self.actor = DiffusionPolicy(
             state_dim=self.encoder_sequence.output_dim,

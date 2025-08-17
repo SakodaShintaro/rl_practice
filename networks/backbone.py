@@ -3,6 +3,8 @@ from diffusers.models import AutoencoderTiny
 from torch import nn
 
 from .spatial_temporal_transformer import (
+    CausalTimeBlock,
+    Config,
     SpatialTemporalTransformer,
     get_fourier_embeds_from_coordinates,
 )
@@ -132,5 +134,95 @@ class STTEncoder(nn.Module):
         last_frame_emb = last_frame_emb[:, : self.image_tokens_num]  # [B, S, C']
 
         output = last_frame_emb.flatten(start_dim=1)  # [B, S*C']
+
+        return output, [""] * B
+
+
+class SimpleTransformerEncoder(nn.Module):
+    def __init__(
+        self,
+        seq_len: int,
+        device: str,
+    ):
+        super().__init__()
+
+        self.seq_len = seq_len
+        self.device = device
+
+        # d_model is determined by AE output: 4 * 12 * 12 = 576
+        self.d_model = 4 * 12 * 12  # 576
+        n_heads = 8  # Fixed number of attention heads
+        n_blocks = 2  # Number of CausalTimeBlocks
+
+        # AE encoder for processing images
+        self.ae_encoder = AE(seq_len, device)
+
+        # Positional encoding
+        self.pos_encoding = nn.Parameter(torch.randn(seq_len * 2, self.d_model))
+
+        # CausalTimeBlocks using existing implementation
+        config = Config(
+            hidden_dim=self.d_model,
+            n_head=n_heads,
+            attn_drop_prob=0.0,
+            res_drop_prob=0.0,
+        )
+
+        self.blocks = nn.ModuleList([CausalTimeBlock(config) for _ in range(n_blocks)])
+
+        # Create causal mask for sequence length
+        matrix = torch.tril(torch.ones(seq_len * 2, seq_len * 2))
+        self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
+        self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
+
+        # Final projection
+        self.output_proj = nn.Linear(self.d_model, self.d_model)
+
+        self.output_dim = self.d_model
+
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, list[str]]:
+        """
+        Args:
+            images: Tensor of shape (B, T, 3, H, W) - treated as states by flattening
+            actions: Tensor of shape (B, T, action_dim)
+
+        Returns:
+            Tuple: (encoded features, str)
+        """
+        # Encode images using AE to get states
+        B, T = images.shape[:2]
+
+        # Process all images through AE
+        all_images = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
+        with torch.no_grad():
+            states = self.ae_encoder.ae.encode(all_images).latents  # (B*T, 4, 12, 12)
+            states = states.view(B, T, -1)  # (B, T, 576) - flatten AE output
+
+        # Use fourier embeddings for actions (same as STTEncoder)
+        action_emb = get_fourier_embeds_from_coordinates(
+            self.d_model, actions
+        )  # (B, T, action_dim, d_model)
+
+        # Sum over action dimensions to get (B, T, d_model)
+        action_emb = action_emb.sum(dim=2)  # (B, T, d_model)
+
+        # Interleave states and actions: [s_0, a_0, s_1, a_1, ...]
+        sequence = torch.stack([states, action_emb], dim=2)  # (B, T, 2, d_model)
+        sequence = sequence.view(B, T * 2, self.d_model)  # (B, T*2, d_model)
+
+        # Add positional encoding
+        sequence = sequence + self.pos_encoding.unsqueeze(0)
+
+        # Apply CausalTimeBlocks
+        for block in self.blocks:
+            sequence = block(sequence, self.causal_mask.to(sequence.device))
+
+        # Take the last token's representation
+        final_repr = sequence[:, -1, :]  # (B, d_model)
+
+        # Final projection
+        output = self.output_proj(final_repr)  # (B, d_model)
 
         return output, [""] * B
