@@ -179,7 +179,7 @@ class SimpleTransformerEncoder(nn.Module):
     def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            images: Tensor of shape (B, T, 3, H, W) - treated as states by flattening
+            images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
 
         Returns:
