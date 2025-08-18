@@ -43,22 +43,20 @@ class AE(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    def forward(
-        self, images: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, list[str]]:
+    def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         """
         Args:
             images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
 
         Returns:
-            Tuple: (encoded features, str)
+            encoded features: (B, output_dim)
         """
         batch_size = images.shape[0]
         x = images[:, -1]  # (B, C, H, W)
         x = self.ae.encode(x).latents.flatten(1)
         x = self.norm(x)
-        return x, [""] * batch_size
+        return x
 
     @torch.no_grad()
     def decode(self, x):
@@ -93,16 +91,14 @@ class STTEncoder(nn.Module):
 
         self.output_dim = self.vae_dim * self.image_tokens_num
 
-    def forward(
-        self, images: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, list[str]]:
+    def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         """
         Args:
             images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
 
         Returns:
-            Tuple: (encoded features, str)
+            encoded features: (B, output_dim)
         """
         # Encode all frames with AE but preserve spatial structure
         # images: (B, T, C, H, W) -> encode all frames
@@ -135,7 +131,7 @@ class STTEncoder(nn.Module):
 
         output = last_frame_emb.flatten(start_dim=1)  # [B, S*C']
 
-        return output, [""] * B
+        return output
 
 
 class SimpleTransformerEncoder(nn.Module):
@@ -180,16 +176,14 @@ class SimpleTransformerEncoder(nn.Module):
 
         self.output_dim = self.d_model
 
-    def forward(
-        self, images: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, list[str]]:
+    def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         """
         Args:
             images: Tensor of shape (B, T, 3, H, W) - treated as states by flattening
             actions: Tensor of shape (B, T, action_dim)
 
         Returns:
-            Tuple: (encoded features, str)
+            encoded features: (B, output_dim)
         """
         # Encode images using AE to get states
         B, T = images.shape[:2]
@@ -225,4 +219,4 @@ class SimpleTransformerEncoder(nn.Module):
         # Final projection
         output = self.output_proj(final_repr)  # (B, d_model)
 
-        return output, [""] * B
+        return output

@@ -83,7 +83,7 @@ class Network(nn.Module):
         with torch.no_grad():
             obs_next = data.observations[:, 1:]
             actions_next = data.actions[:, 1:]  # Next action sequence
-            state_next, _ = self.encoder_sequence.forward(obs_next, actions_next)
+            state_next = self.encoder_sequence.forward(obs_next, actions_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -207,7 +207,7 @@ class Network(nn.Module):
         with torch.no_grad():
             obs_next_sequence = data.observations[:, 1:]  # (B, T-1, C, H, W)
             actions_next_sequence = data.actions[:, 1:]  # (B, T-1, action_dim)
-            target_state_next, _ = self.encoder_sequence.forward(
+            target_state_next = self.encoder_sequence.forward(
                 obs_next_sequence, actions_next_sequence
             )
 
@@ -332,7 +332,7 @@ class SacAgent:
         # Create action sequence for encoder
         action_sequence = torch.stack(self.action_buffer, dim=0).unsqueeze(0)
 
-        output_enc, _ = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
+        output_enc = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -377,7 +377,7 @@ class SacAgent:
         # Compute all losses using refactored methods
         obs_curr = data.observations[:, :-1]  # Current sequence: [0:-1] (B, T, C, H, W)
         actions_curr = data.actions[:, :-1]  # Current action sequence: [0:-1] (B, T, action_dim)
-        state_curr, _ = self.network.encoder_sequence.forward(obs_curr, actions_curr)
+        state_curr = self.network.encoder_sequence.forward(obs_curr, actions_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)

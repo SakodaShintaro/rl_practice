@@ -165,7 +165,7 @@ class AvgAgent:
         # Create action sequence for encoder
         action_sequence = torch.stack(self.action_history, dim=0).unsqueeze(0)
 
-        obs_encoded, _ = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
+        obs_encoded = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
@@ -225,7 +225,7 @@ class AvgAgent:
         # Encode current state
         raw_obs_curr = data.observations[:, :-1]
         actions_curr = data.actions[:, :-1]
-        state_curr, _ = self.network.encoder_sequence.forward(raw_obs_curr, actions_curr)
+        state_curr = self.network.encoder_sequence.forward(raw_obs_curr, actions_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
