@@ -5,7 +5,6 @@ import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 from torch import optim
 
-from agents.utils import update_and_pad_history
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import AE, SimpleTransformerEncoder, STTEncoder
@@ -245,6 +244,8 @@ class SacAgent:
     def __init__(self, args, observation_space, action_space) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        self.observation_space = observation_space
+
         # action properties
         self.action_space = action_space
         self.action_dim = np.prod(action_space.shape)
@@ -303,13 +304,15 @@ class SacAgent:
         }
         if args.enable_sequence_modeling:
             self.metrics_computers["state_predictor"] = StatisticalMetricsComputer()
-        self.prev_obs = None
         self.prev_action = None
 
     def initialize_for_episode(self) -> None:
         self.prev_obs = None
         self.prev_action = None
-        self.observation_buffer = []
+        self.observation_buffer = [
+            torch.zeros(self.observation_space.shape, device=self.device)
+            for _ in range(self.seq_len)
+        ]
         self.action_buffer = [
             torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
         ]
@@ -318,10 +321,10 @@ class SacAgent:
     def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        obs_tensor = torch.Tensor(obs).to(self.device)
-
         # Update observation buffer for sequence tracking
-        update_and_pad_history(self.observation_buffer, obs_tensor, self.seq_len)
+        obs_tensor = torch.Tensor(obs).to(self.device)
+        self.observation_buffer.append(obs_tensor)
+        self.observation_buffer.pop(0)
 
         # Stack observations to create sequence: (T, C, H, W) -> (1, T, C, H, W)
         obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)
@@ -346,7 +349,8 @@ class SacAgent:
 
         # Update action buffer with action tensor
         action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
-        update_and_pad_history(self.action_buffer, action_tensor, self.seq_len)
+        self.action_buffer.append(action_tensor)
+        self.action_buffer.pop(0)
 
         self.prev_obs = obs
         self.prev_action = action
@@ -360,12 +364,7 @@ class SacAgent:
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        self.rb.add(
-            self.prev_obs,
-            self.prev_action,
-            train_reward,
-            False,
-        )
+        self.rb.add(self.prev_obs, self.prev_action, train_reward, False)
 
         if global_step < self.learning_starts:
             return info_dict
