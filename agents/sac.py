@@ -91,11 +91,11 @@ class Network(nn.Module):
                 next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
             else:
                 next_critic_value = next_critic_value.view(-1)
-            curr_reward = data.rewards[:, -2].flatten()
-            curr_continue = 1 - data.dones[:, -2].flatten()
+            curr_reward = data.rewards[:, -1].flatten()
+            curr_continue = 1 - data.dones[:, -1].flatten()
             target_value = curr_reward + curr_continue * self.gamma * next_critic_value
 
-        curr_critic_output_dict = self.critic(state_curr, data.actions[:, -2])
+        curr_critic_output_dict = self.critic(state_curr, data.actions[:, -1])
 
         if self.num_bins > 1:
             curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
@@ -307,7 +307,6 @@ class SacAgent:
         self.prev_action = None
 
     def initialize_for_episode(self) -> None:
-        self.prev_obs = None
         self.prev_action = None
         self.observation_buffer = [
             torch.zeros(self.observation_space.shape, device=self.device)
@@ -352,7 +351,6 @@ class SacAgent:
         self.action_buffer.append(action_tensor)
         self.action_buffer.pop(0)
 
-        self.prev_obs = obs
         self.prev_action = action
         return action, info_dict
 
@@ -364,7 +362,7 @@ class SacAgent:
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        self.rb.add(self.prev_obs, self.prev_action, train_reward, False)
+        self.rb.add(obs, self.prev_action, train_reward, False)
 
         if global_step < self.learning_starts:
             return info_dict
