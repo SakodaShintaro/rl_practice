@@ -28,8 +28,8 @@ class PpoBetaPolicyAndValue(nn.Module):
         a_seq: torch.Tensor,
         action: torch.Tensor | None = None,
     ) -> tuple:
-        # s_seq is (B, T, C, H, W), encoder expects (B, T, C, H, W) and (B, T, action_dim)
-        x = self.encoder(s_seq, a_seq)
+        # (B, T, C, H, W), (B, T, action_dim), (B, T)
+        x = self.encoder(s_seq, a_seq, r_seq)
         x = self.linear(x)  # (batch_size, rep_dim)
         x = self.norm(x)
 
