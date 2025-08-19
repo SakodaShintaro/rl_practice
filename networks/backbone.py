@@ -52,7 +52,6 @@ class AE(nn.Module):
         Returns:
             encoded features: (B, output_dim)
         """
-        batch_size = images.shape[0]
         x = images[:, -1]  # (B, C, H, W)
         x = self.ae.encode(x).latents.flatten(1)
         x = self.norm(x)
