@@ -94,9 +94,9 @@ class PpoAgent:
         self.episode_values = []
         self.episode_logps = []
 
-    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
-        reward = getattr(self, "episode_reward", 0.0)
-        action, a_logp, value, result_dict = self._select_action_original(reward, obs)
+    def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
+        episode_reward = getattr(self, "episode_reward", 0.0)
+        action, a_logp, value, result_dict = self._select_action_original(episode_reward, obs)
 
         action_info = {
             "a_logp": a_logp,
@@ -152,7 +152,7 @@ class PpoAgent:
                 info_dict["weighted_reward"] = getattr(self, "episode_reward", 0.0)
 
         # make decision
-        action, action_info = self.select_action(global_step, obs)
+        action, action_info = self.select_action(global_step, obs, reward)
         info_dict.update(action_info)
 
         return action, info_dict

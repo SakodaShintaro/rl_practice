@@ -82,8 +82,9 @@ class Network(nn.Module):
             state_curr = state_curr.detach()
         with torch.no_grad():
             obs_next = data.observations[:, 1:]
-            actions_next = data.actions[:, 1:]  # Next action sequence
-            state_next = self.encoder_sequence.forward(obs_next, actions_next)
+            actions_next = data.actions[:, 1:]
+            rewards_next = data.rewards[:, 1:]
+            state_next = self.encoder_sequence.forward(obs_next, actions_next, rewards_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -207,8 +208,9 @@ class Network(nn.Module):
         with torch.no_grad():
             obs_next_sequence = data.observations[:, 1:]  # (B, T, C, H, W)
             actions_next_sequence = data.actions[:, 1:]  # (B, T, action_dim)
+            rewards_next_sequence = data.rewards[:, 1:]  # (B, T)
             target_state_next = self.encoder_sequence.forward(
-                obs_next_sequence, actions_next_sequence
+                obs_next_sequence, actions_next_sequence, rewards_next_sequence
             )
 
         # current_stateとactionを結合
@@ -265,6 +267,7 @@ class SacAgent:
         self.seq_len = args.seq_len
         self.observation_buffer = []
         self.action_buffer = []
+        self.reward_buffer = []
 
         self.network = Network(action_dim=self.action_dim, args=args).to(self.device)
         lr = args.learning_rate
@@ -315,9 +318,10 @@ class SacAgent:
         self.action_buffer = [
             torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
         ]
+        self.reward_buffer = [0.0 for _ in range(self.seq_len)]
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
+    def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         # Update observation buffer for sequence tracking
@@ -325,13 +329,24 @@ class SacAgent:
         self.observation_buffer.append(obs_tensor)
         self.observation_buffer.pop(0)
 
+        # Update reward buffer
+        self.reward_buffer.append(reward)
+        self.reward_buffer.pop(0)
+
         # (1, T, C, H, W)
         obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)
 
         # (1, T, action_dim)
         action_sequence = torch.stack(self.action_buffer, dim=0).unsqueeze(0)
 
-        output_enc = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
+        # (1, T)
+        reward_sequence = torch.tensor(
+            [self.reward_buffer], device=self.device, dtype=torch.float32
+        )
+
+        output_enc = self.network.encoder_sequence.forward(
+            obs_sequence, action_sequence, reward_sequence
+        )
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -375,7 +390,8 @@ class SacAgent:
         # Compute all losses using refactored methods
         obs_curr = data.observations[:, :-1]  # (B, T, C, H, W)
         actions_curr = data.actions[:, :-1]  # (B, T, action_dim)
-        state_curr = self.network.encoder_sequence.forward(obs_curr, actions_curr)
+        rewards_curr = data.rewards[:, :-1]  # (B, T)
+        state_curr = self.network.encoder_sequence.forward(obs_curr, actions_curr, rewards_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
@@ -451,7 +467,7 @@ class SacAgent:
         info_dict.update(train_info)
 
         # make decision
-        action, action_info = self.select_action(global_step, obs)
+        action, action_info = self.select_action(global_step, obs, reward)
         info_dict.update(action_info)
 
         return action, info_dict

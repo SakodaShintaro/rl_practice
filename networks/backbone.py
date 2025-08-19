@@ -43,11 +43,14 @@ class AE(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
             images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
+            rewards: Tensor of shape (B, T, 1)
 
         Returns:
             encoded features: (B, output_dim)
@@ -90,11 +93,14 @@ class STTEncoder(nn.Module):
 
         self.output_dim = self.vae_dim * self.image_tokens_num
 
-    def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
             images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
+            rewards: Tensor of shape (B, T, 1)
 
         Returns:
             encoded features: (B, output_dim)
@@ -117,14 +123,17 @@ class STTEncoder(nn.Module):
         # [B, T, action_dim] -> [B, T, action_dim, C']
         action_embed = get_fourier_embeds_from_coordinates(self.vae_dim, actions)
 
-        # [B, T, S+action_dim, C']
-        all_embed = torch.cat([image_embed, action_embed], dim=2)
+        # [B, T, 1] -> [B, T, 1, C']
+        reward_embed = get_fourier_embeds_from_coordinates(self.vae_dim, rewards)
+
+        # [B, T, S+action_dim+1, C']
+        all_embed = torch.cat([image_embed, action_embed, reward_embed], dim=2)
 
         # Apply STT to all frames
-        stt_output = self.stt(all_embed)  # [B, T, S+action_dim, C']
+        stt_output = self.stt(all_embed)  # [B, T, S+action_dim+1, C']
 
         # Use last timestep's image tokens for final representation
-        last_frame_emb = stt_output[:, -1, :, :]  # [B, S+action_dim, C']
+        last_frame_emb = stt_output[:, -1, :, :]  # [B, S+action_dim+1, C']
 
         last_frame_emb = last_frame_emb[:, : self.image_tokens_num]  # [B, S, C']
 
@@ -152,8 +161,8 @@ class SimpleTransformerEncoder(nn.Module):
         # AE encoder for processing images
         self.ae_encoder = AE(seq_len, device)
 
-        # Positional encoding
-        self.pos_encoding = nn.Parameter(torch.randn(seq_len * 2, self.d_model))
+        # Positional encoding (for max possible sequence length with rewards)
+        self.pos_encoding = nn.Parameter(torch.randn(seq_len * 3, self.d_model))
 
         # CausalTimeBlocks using existing implementation
         config = Config(
@@ -165,8 +174,9 @@ class SimpleTransformerEncoder(nn.Module):
 
         self.blocks = nn.ModuleList([CausalTimeBlock(config) for _ in range(n_blocks)])
 
-        # Create causal mask for sequence length
-        matrix = torch.tril(torch.ones(seq_len * 2, seq_len * 2))
+        # Create causal mask for sequence length (considering max possible length with rewards)
+        max_seq_len = seq_len * 3  # Maximum length when rewards are included
+        matrix = torch.tril(torch.ones(max_seq_len, max_seq_len))
         self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
 
@@ -175,11 +185,14 @@ class SimpleTransformerEncoder(nn.Module):
 
         self.output_dim = self.d_model
 
-    def forward(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
             images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
+            rewards: Tensor of shape (B, T, 1)
 
         Returns:
             encoded features: (B, output_dim)
@@ -201,16 +214,24 @@ class SimpleTransformerEncoder(nn.Module):
         # Sum over action dimensions to get (B, T, d_model)
         action_emb = action_emb.sum(dim=2)  # (B, T, d_model)
 
-        # Interleave states and actions: [s_0, a_0, s_1, a_1, ...]
-        sequence = torch.stack([states, action_emb], dim=2)  # (B, T, 2, d_model)
-        sequence = sequence.view(B, T * 2, self.d_model)  # (B, T*2, d_model)
+        # Add rewards
+        reward_emb = get_fourier_embeds_from_coordinates(
+            self.d_model, rewards
+        )  # (B, T, 1, d_model)
+        reward_emb = reward_emb.sum(dim=2)  # (B, T, d_model)
 
-        # Add positional encoding
-        sequence = sequence + self.pos_encoding.unsqueeze(0)
+        # Interleave states, actions, and rewards: [s_0, a_0, r_0, s_1, a_1, r_1, ...]
+        sequence = torch.stack([states, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
+        sequence = sequence.view(B, T * 3, self.d_model)  # (B, T*3, d_model)
 
-        # Apply CausalTimeBlocks
+        # Add positional encoding (adjust for actual sequence length)
+        actual_seq_len = sequence.size(1)
+        sequence = sequence + self.pos_encoding[:actual_seq_len].unsqueeze(0)
+
+        # Apply CausalTimeBlocks with adjusted mask
+        current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)
         for block in self.blocks:
-            sequence = block(sequence, self.causal_mask.to(sequence.device))
+            sequence = block(sequence, current_mask)
 
         # Take the last token's representation
         final_repr = sequence[:, -1, :]  # (B, d_model)

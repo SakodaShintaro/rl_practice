@@ -153,11 +153,14 @@ class AvgAgent:
         ]
         self.reward_history = []
 
-    def select_action(self, global_step, obs) -> tuple[np.ndarray, dict]:
+    def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).to(self.device)
 
         # Update observation history
         update_and_pad_history(self.obs_history, obs_tensor, self.seq_len)
+
+        # Update reward history
+        update_and_pad_history(self.reward_history, reward, self.seq_len)
 
         # Create sequence tensor
         obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
@@ -165,7 +168,14 @@ class AvgAgent:
         # Create action sequence for encoder
         action_sequence = torch.stack(self.action_history, dim=0).unsqueeze(0)
 
-        obs_encoded = self.network.encoder_sequence.forward(obs_sequence, action_sequence)
+        # Create reward sequence for encoder
+        reward_sequence = torch.tensor(
+            [self.reward_history], device=self.device, dtype=torch.float32
+        )
+
+        obs_encoded = self.network.encoder_sequence.forward(
+            obs_sequence, action_sequence, reward_sequence
+        )
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
@@ -225,7 +235,8 @@ class AvgAgent:
         # Encode current state
         raw_obs_curr = data.observations[:, :-1]
         actions_curr = data.actions[:, :-1]
-        state_curr = self.network.encoder_sequence.forward(raw_obs_curr, actions_curr)
+        rewards_curr = data.rewards[:, :-1]
+        state_curr = self.network.encoder_sequence.forward(raw_obs_curr, actions_curr, rewards_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
@@ -272,7 +283,7 @@ class AvgAgent:
                 info_dict[f"{key}/{feature_name}"] = value
 
         # make decision
-        action, action_info = self.select_action(global_step, obs)
+        action, action_info = self.select_action(global_step, obs, reward)
         info_dict.update(action_info)
 
         return action, info_dict
