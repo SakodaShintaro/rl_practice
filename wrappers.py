@@ -24,6 +24,7 @@ def make_env(env_id: str, partial_obs: bool) -> gym.Env:
     elif env_id.startswith("CarRacing"):
         env = env.env  # Unwrap the original TimeLimit wrapper
         env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
+        env = CarRacingRewardFixWrapper(env)
         env = ActionRepeatWrapper(env, repeat=REPEAT)
         env = AverageRewardEarlyStopWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -114,6 +115,24 @@ class TransposeAndNormalizeObs(gym.ObservationWrapper):
         o = obs.astype(np.float32) / 255.0
         o = np.transpose(o, (2, 0, 1))  # (3, H, W)
         return o
+
+
+class CarRacingRewardFixWrapper(gym.Wrapper):
+    """
+    Fix CarRacing's -100 penalty for going off-track.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # Fix the -100 penalty
+        if reward < -30:
+            reward += 100
+
+        return obs, reward, terminated, truncated, info
 
 
 class ResizeObs(gym.ObservationWrapper):

@@ -96,21 +96,26 @@ def main(exp_name: str, seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.cuda.set_device(0)
 
-    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
-    result_dir.mkdir(parents=True, exist_ok=True)
+    # Create result directories and save files only if not in debug mode
+    if not args.debug:
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
+        result_dir.mkdir(parents=True, exist_ok=True)
 
-    # save seed to file
-    with open(result_dir / "seed.txt", "w") as f:
-        f.write(str(seed))
+        # save seed to file
+        with open(result_dir / "seed.txt", "w") as f:
+            f.write(str(seed))
 
-    # git show -sの結果とgit diffの結果を保存
-    with open(result_dir / "git_info.txt", "w") as f:
-        f.write(f"git show -s:\n{os.popen('git show -s').read()}\n")
-        f.write(f"git diff:\n{os.popen('git diff').read()}\n")
+        # git show -sの結果とgit diffの結果を保存
+        with open(result_dir / "git_info.txt", "w") as f:
+            f.write(f"git show -s:\n{os.popen('git show -s').read()}\n")
+            f.write(f"git diff:\n{os.popen('git diff').read()}\n")
 
-    video_dir = result_dir / "video"
-    video_dir.mkdir(parents=True, exist_ok=True)
+        video_dir = result_dir / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        result_dir = None
+        video_dir = None
     image_save_interval = 50
     log_episode = []
 
@@ -195,9 +200,10 @@ def main(exp_name: str, seed: int) -> None:
         }
         wandb.log(data_dict)
 
-        log_episode.append(data_dict)
-        log_episode_df = pd.DataFrame(log_episode)
-        log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
+        if result_dir is not None:
+            log_episode.append(data_dict)
+            log_episode_df = pd.DataFrame(log_episode)
+            log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
 
         is_solved = recent_average_score > target_score
 
@@ -208,7 +214,7 @@ def main(exp_name: str, seed: int) -> None:
 
         is_best = score > best_score
 
-        if is_best:
+        if is_best and result_dir is not None:
             with open(result_dir / "best_score.txt", "w") as f:
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
@@ -217,7 +223,9 @@ def main(exp_name: str, seed: int) -> None:
                 rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
                 imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
-        if episode_id == 0 or (episode_id + 1) % image_save_interval == 0:
+        if (
+            episode_id == 0 or (episode_id + 1) % image_save_interval == 0
+        ) and result_dir is not None:
             video_path = video_dir / f"ep_{episode_id + 1:08d}.mp4"
             if bgr_image_list:
                 rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
