@@ -10,7 +10,6 @@ import torch
 from torch import optim
 
 from agents.sac import Network
-from agents.utils import update_and_pad_history
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from replay_buffer import ReplayBufferData
@@ -160,10 +159,12 @@ class AvgAgent:
         obs_tensor = torch.Tensor(obs).to(self.device)
 
         # Update observation history
-        update_and_pad_history(self.obs_history, obs_tensor, self.seq_len)
+        self.obs_history.append(obs_tensor)
+        self.obs_history.pop(0)
 
         # Update reward history
-        update_and_pad_history(self.reward_history, reward, self.seq_len)
+        self.reward_history.append(reward)
+        self.reward_history.pop(0)
 
         # Create sequence tensor
         obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
@@ -185,7 +186,8 @@ class AvgAgent:
         self._prev_action = action
 
         # Update action history (detach to avoid gradient issues)
-        update_and_pad_history(self.action_history, action.squeeze(0).detach(), self.seq_len)
+        self.action_history.append(action.squeeze(0).detach())
+        self.action_history.pop(0)
 
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
@@ -208,20 +210,17 @@ class AvgAgent:
         # So we need seq_len+1 total frames
 
         # Add batch dimension to obs_history and append current observation
-        # Note: obs_history is always seq_len length after select_action
         obs_with_batch = [obs.unsqueeze(0) for obs in self.obs_history] + [curr_obs]
         observations = torch.stack(obs_with_batch, dim=1).to(self.device)  # (1, seq_len+1, C, H, W)
 
         # Create actions using action history and current action
-        # Note: action_history is always seq_len length after select_action
         action_list = self.action_history + [self._prev_action.squeeze(0)]
-        actions = torch.stack(action_list, dim=0).unsqueeze(0)
-        # [batch_size=1, seq_len+1, action_dim]
+        actions = torch.stack(action_list, dim=0).unsqueeze(0)  # [1, seq_len+1, action_dim]
 
         # Create rewards using reward history and current reward
-        # Note: reward_history is always seq_len length after padding
         reward_list = self.reward_history + [train_reward]
         rewards = torch.tensor([reward_list], device=self.device, dtype=torch.float32)
+
         dones = torch.tensor(
             [[False] * (self.seq_len + 1)], device=self.device, dtype=torch.float32
         )
@@ -231,19 +230,19 @@ class AvgAgent:
         )
 
         # Encode current state
-        raw_obs_curr = data.observations[:, :-1]
-        actions_curr = data.actions[:, :-1]
-        rewards_curr = data.rewards[:, :-1]
-        state_curr = self.network.encoder_sequence.forward(raw_obs_curr, actions_curr, rewards_curr)
+        curr_obs = data.observations[:, :-1]
+        curr_action = data.actions[:, :-1]
+        curr_reward = data.rewards[:, :-1]
+        curr_state = self.network.encoder_sequence.forward(curr_obs, curr_action, curr_reward)
 
         # Actor
-        actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
+        actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(curr_state)
         for key, value in actor_info.items():
             info_dict[f"losses/{key}"] = value
 
         # Critic
         critic_loss, critic_activations, critic_info = self.network.compute_critic_loss(
-            data, state_curr
+            data, curr_state
         )
         for key, value in critic_info.items():
             info_dict[f"losses/{key}"] = value
@@ -269,7 +268,7 @@ class AvgAgent:
 
         # Feature metrics
         feature_dict = {
-            "state": state_curr,
+            "state": curr_state,
             **actor_activations,
             **critic_activations,
         }
