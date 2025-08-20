@@ -258,7 +258,6 @@ class SacAgent:
         self.action_norm_penalty = args.action_norm_penalty
 
         self.learning_starts = args.learning_starts
-        self.action_noise = args.action_noise
         self.batch_size = args.batch_size
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
@@ -354,10 +353,6 @@ class SacAgent:
             action, selected_log_pi = self.network.actor.get_action(output_enc)
             action = action[0].detach().cpu().numpy()
             action = action * self.action_scale + self.action_bias
-
-            action_noise = self.action_space.sample()
-            c = self.action_noise
-            action = (1 - c) * action + c * action_noise
             action = np.clip(action, self.action_low, self.action_high)
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
 

@@ -57,7 +57,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_size", type=int, default=int(2e4))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=4000)
-    parser.add_argument("--action_noise", type=float, default=0.0)
     parser.add_argument("--predictor_hidden_dim", type=int, default=1024)
     parser.add_argument("--predictor_block_num", type=int, default=2)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
