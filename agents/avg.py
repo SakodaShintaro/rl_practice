@@ -97,6 +97,8 @@ class AvgAgent:
     def __init__(self, args: argparse.Namespace, observation_space, action_space) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        self.observation_space = observation_space
+
         # action properties
         self.action_space = action_space
         self.action_dim = np.prod(action_space.shape)
@@ -140,18 +142,19 @@ class AvgAgent:
             self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
 
         # Initialize state tracking
-        self._prev_obs = None
         self._prev_action = None
 
     def initialize_for_episode(self) -> None:
         """Initialize for new episode."""
-        self._prev_obs = None
         self._prev_action = None
-        self.obs_history = []
+        self.obs_history = [
+            torch.zeros(self.observation_space.shape, device=self.device)
+            for _ in range(self.seq_len)
+        ]
         self.action_history = [
             torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
         ]
-        self.reward_history = []
+        self.reward_history = [0.0 for _ in range(self.seq_len)]
 
     def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).to(self.device)
@@ -179,8 +182,6 @@ class AvgAgent:
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
-        curr_obs_tensor = torch.Tensor(obs).unsqueeze(0).to(self.device)
-        self._prev_obs = curr_obs_tensor
         self._prev_action = action
 
         # Update action history (detach to avoid gradient issues)
@@ -199,9 +200,6 @@ class AvgAgent:
         train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
-
-        # Update reward history
-        update_and_pad_history(self.reward_history, train_reward, self.seq_len)
 
         curr_obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
 
