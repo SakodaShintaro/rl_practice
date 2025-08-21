@@ -145,7 +145,7 @@ class AvgAgent:
 
     def initialize_for_episode(self) -> None:
         """Initialize for new episode."""
-        self._prev_action = None
+        self._prev_action = torch.zeros(self.action_dim, device=self.device)
         self.obs_history = [
             torch.zeros(self.observation_space.shape, device=self.device)
             for _ in range(self.seq_len)
@@ -167,6 +167,10 @@ class AvgAgent:
         self.reward_history.append(reward)
         self.reward_history.pop(0)
 
+        # Update action history
+        self.action_history.append(self._prev_action.squeeze(0))
+        self.action_history.pop(0)
+
         # Create sequence tensor
         obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
 
@@ -185,10 +189,6 @@ class AvgAgent:
 
         # Store current state and action for next update
         self._prev_action = action
-
-        # Update action history (detach to avoid gradient issues)
-        self.action_history.append(action.squeeze(0).detach())
-        self.action_history.pop(0)
 
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
