@@ -155,6 +155,7 @@ class AvgAgent:
         ]
         self.reward_history = [0.0 for _ in range(self.seq_len)]
 
+    @torch.inference_mode()
     def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).to(self.device)
 
