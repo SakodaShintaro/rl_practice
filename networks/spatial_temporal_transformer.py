@@ -124,16 +124,16 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class CausalTimeSpaceBlock(nn.Module):
+class SpatialTemporalBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.causal_time_block = TransformerBlock(config)
+        self.tempo_block = TransformerBlock(config)
         self.space_block = TransformerBlock(config)
 
     def forward(self, x, attn_mask):
         b, f, l, c = x.shape
         x = rearrange(x, "b f l c -> (b l) f c")
-        x = self.causal_time_block(x, attn_mask)
+        x = self.tempo_block(x, attn_mask)
         x = rearrange(x, "(b l) f c -> (b f) l c", b=b, l=l, f=f)
         x = self.space_block(x)
         x = rearrange(x, "(b f) l c -> b f l c", b=b, f=f)
@@ -165,7 +165,7 @@ class SpatialTemporalTransformer(nn.Module):
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
 
         self.causal_time_space_blocks = nn.Sequential(
-            *[CausalTimeSpaceBlock(config) for _ in range(self.causal_time_space_num)]
+            *[SpatialTemporalBlock(config) for _ in range(self.causal_time_space_num)]
         )
 
         self.apply(self._init_weights)
