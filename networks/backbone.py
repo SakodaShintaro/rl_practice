@@ -81,10 +81,13 @@ class STTEncoder(nn.Module):
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
         self.vae_dim = 4
         self.image_tokens_num = 144  # 12 * 12 patches
+        action_tokens_num = 3
+        reward_tokens_num = 1
 
         self.stt = SpatialTemporalTransformer(
             n_layer=1,
-            time_len=self.seq_len,
+            space_len=(self.image_tokens_num + action_tokens_num + reward_tokens_num),
+            tempo_len=self.seq_len,
             hidden_dim=self.vae_dim,
             n_head=1,
             attn_drop_prob=0.0,

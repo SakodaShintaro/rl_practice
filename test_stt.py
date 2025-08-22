@@ -10,11 +10,12 @@ if __name__ == "__main__":
 
     model = SpatialTemporalTransformer(
         n_layer=2,
-        n_head=8,
+        space_len=S,
+        tempo_len=T,
         hidden_dim=C,
+        n_head=8,
         res_drop_prob=0.1,
         attn_drop_prob=0.1,
-        time_len=T,
     )
 
     feature_total = torch.randn(B, T, S, C)

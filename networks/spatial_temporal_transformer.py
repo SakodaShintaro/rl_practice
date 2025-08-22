@@ -143,12 +143,13 @@ class SpatialTemporalBlock(nn.Module):
 class SpatialTemporalTransformer(nn.Module):
     def __init__(
         self,
-        n_layer,
-        time_len,
-        hidden_dim,
-        n_head,
-        attn_drop_prob,
-        res_drop_prob,
+        n_layer: int,
+        space_len: int,
+        tempo_len: int,
+        hidden_dim: int,
+        n_head: int,
+        attn_drop_prob: float,
+        res_drop_prob: float,
     ):
         super().__init__()
         config = Config(
@@ -161,8 +162,10 @@ class SpatialTemporalTransformer(nn.Module):
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
 
-        self.time_emb = nn.Parameter(torch.zeros(1, time_len, 1, self.hidden_dim))
-        nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
+        self.tempo_emb = nn.Parameter(torch.zeros(1, tempo_len, 1, self.hidden_dim))
+        nn.init.normal_(self.tempo_emb.data, mean=0, std=0.02)
+        self.space_emb = nn.Parameter(torch.zeros(1, 1, space_len, self.hidden_dim))
+        nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
         self.spatial_temporal_blocks = nn.Sequential(
             *[SpatialTemporalBlock(config) for _ in range(self.n_layer)]
@@ -170,7 +173,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.apply(self._init_weights)
 
-        matrix = torch.tril(torch.ones(time_len, time_len))
+        matrix = torch.tril(torch.ones(tempo_len, tempo_len))
         time_causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         time_causal_mask = torch.where(matrix == 1, 0, time_causal_mask)
         self.register_buffer("mask_time", time_causal_mask.contiguous())
@@ -196,9 +199,10 @@ class SpatialTemporalTransformer(nn.Module):
         """
         _, T, S, _ = x.shape
 
-        time_emb = torch.repeat_interleave(self.time_emb, S, dim=2)
+        tempo_emb = torch.repeat_interleave(self.tempo_emb, S, dim=2)
+        space_emb = torch.repeat_interleave(self.space_emb, T, dim=1)
 
-        out = x + time_emb
+        out = x + tempo_emb + space_emb
 
         for i in range(self.n_layer):
             out = self.spatial_temporal_blocks[i](out, self.mask_time)
