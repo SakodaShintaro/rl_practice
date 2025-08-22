@@ -317,7 +317,7 @@ class SacAgent:
         self.action_buffer = [
             torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
         ]
-        self.reward_buffer = [0.0 for _ in range(self.seq_len)]
+        self.reward_buffer = [torch.tensor(0.0, device=self.device) for _ in range(self.seq_len)]
 
     @torch.inference_mode()
     def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
@@ -329,7 +329,8 @@ class SacAgent:
         self.observation_buffer.pop(0)
 
         # Update reward buffer
-        self.reward_buffer.append(reward)
+        reward_tensor = torch.tensor(reward, device=self.device)
+        self.reward_buffer.append(reward_tensor)
         self.reward_buffer.pop(0)
 
         # (1, T, C, H, W)
@@ -339,9 +340,7 @@ class SacAgent:
         action_sequence = torch.stack(self.action_buffer, dim=0).unsqueeze(0)
 
         # (1, T)
-        reward_sequence = torch.tensor(
-            [self.reward_buffer], device=self.device, dtype=torch.float32
-        )
+        reward_sequence = torch.stack(self.reward_buffer, dim=0).unsqueeze(0)
 
         output_enc = self.network.encoder_sequence.forward(
             obs_sequence, action_sequence, reward_sequence
