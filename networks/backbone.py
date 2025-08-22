@@ -144,6 +144,12 @@ class STTEncoder(nn.Module):
 
         return output
 
+    @torch.no_grad()
+    def decode(self, x):
+        x = x.view(x.size(0), 4, 12, 12)
+        x = self.ae_encoder.decode(x)
+        return x
+
 
 class SimpleTransformerEncoder(nn.Module):
     def __init__(
@@ -243,3 +249,9 @@ class SimpleTransformerEncoder(nn.Module):
         output = self.output_proj(final_repr)  # (B, d_model)
 
         return output
+
+    @torch.no_grad()
+    def decode(self, x):
+        x = x.view(x.size(0), 4, 12, 12)
+        x = self.ae_encoder.decode(x)
+        return x
