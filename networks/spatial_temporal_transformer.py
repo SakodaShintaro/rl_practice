@@ -161,7 +161,7 @@ class SpatialTemporalTransformer(nn.Module):
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
 
-        self.time_emb = nn.Parameter(torch.zeros(time_len, self.hidden_dim))
+        self.time_emb = nn.Parameter(torch.zeros(1, time_len, 1, self.hidden_dim))
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
 
         self.spatial_temporal_blocks = nn.Sequential(
@@ -196,10 +196,9 @@ class SpatialTemporalTransformer(nn.Module):
         """
         _, T, S, _ = feature_embeddings.shape
 
-        time_emb_T = self.time_emb[:T, :].unsqueeze(0)
-        time_emb_T = torch.repeat_interleave(time_emb_T[:, :, None, :], S, dim=2)
+        time_emb = torch.repeat_interleave(self.time_emb, S, dim=2)
 
-        time_space_token_embeddings = feature_embeddings + time_emb_T
+        time_space_token_embeddings = feature_embeddings + time_emb
 
         for i in range(self.n_layer):
             time_space_token_embeddings = self.spatial_temporal_blocks[i](
