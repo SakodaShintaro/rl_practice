@@ -119,10 +119,8 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(self, x, attn_mask=None):
-        attn = self.attn(self.ln1(x), attn_mask)
-        x = x + attn
+        x = x + self.attn(self.ln1(x), attn_mask)
         x = x + self.mlp(self.ln2(x))
-
         return x
 
 
