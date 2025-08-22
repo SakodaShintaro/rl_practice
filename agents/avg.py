@@ -153,7 +153,7 @@ class AvgAgent:
         self.action_history = [
             torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
         ]
-        self.reward_history = [0.0 for _ in range(self.seq_len)]
+        self.reward_history = [torch.tensor(0.0, device=self.device) for _ in range(self.seq_len)]
 
     @torch.inference_mode()
     def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
@@ -164,7 +164,8 @@ class AvgAgent:
         self.obs_history.pop(0)
 
         # Update reward history
-        self.reward_history.append(reward)
+        reward_tensor = torch.tensor(reward, device=self.device)
+        self.reward_history.append(reward_tensor)
         self.reward_history.pop(0)
 
         # Update action history
@@ -178,9 +179,7 @@ class AvgAgent:
         action_sequence = torch.stack(self.action_history, dim=0).unsqueeze(0)
 
         # Create reward sequence for encoder
-        reward_sequence = torch.tensor(
-            [self.reward_history], device=self.device, dtype=torch.float32
-        )
+        reward_sequence = torch.stack(self.reward_history, dim=0).unsqueeze(0)
 
         obs_encoded = self.network.encoder_sequence.forward(
             obs_sequence, action_sequence, reward_sequence
@@ -219,8 +218,9 @@ class AvgAgent:
         actions = torch.stack(action_list, dim=0).unsqueeze(0)  # [1, seq_len+1, action_dim]
 
         # Create rewards using reward history and current reward
-        reward_list = self.reward_history + [train_reward]
-        rewards = torch.tensor([reward_list], device=self.device, dtype=torch.float32)
+        train_reward_tensor = torch.tensor(train_reward, device=self.device)
+        reward_list = self.reward_history + [train_reward_tensor]
+        rewards = torch.stack(reward_list, dim=0).unsqueeze(0)
 
         dones = torch.tensor(
             [[False] * (self.seq_len + 1)], device=self.device, dtype=torch.float32
