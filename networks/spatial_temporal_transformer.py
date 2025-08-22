@@ -159,13 +159,13 @@ class SpatialTemporalTransformer(nn.Module):
         )
 
         self.hidden_dim = hidden_dim
-        self.causal_time_space_num = n_layer
+        self.n_layer = n_layer
 
-        self.time_emb = nn.Parameter(torch.zeros(50, self.hidden_dim))
+        self.time_emb = nn.Parameter(torch.zeros(time_len, self.hidden_dim))
         nn.init.normal_(self.time_emb.data, mean=0, std=0.02)
 
-        self.causal_time_space_blocks = nn.Sequential(
-            *[SpatialTemporalBlock(config) for _ in range(self.causal_time_space_num)]
+        self.spatial_temporal_blocks = nn.Sequential(
+            *[SpatialTemporalBlock(config) for _ in range(self.n_layer)]
         )
 
         self.apply(self._init_weights)
@@ -201,8 +201,8 @@ class SpatialTemporalTransformer(nn.Module):
 
         time_space_token_embeddings = feature_embeddings + time_emb_T
 
-        for i in range(self.causal_time_space_num):
-            time_space_token_embeddings = self.causal_time_space_blocks[i](
+        for i in range(self.n_layer):
+            time_space_token_embeddings = self.spatial_temporal_blocks[i](
                 time_space_token_embeddings, self.mask_time
             )
 
