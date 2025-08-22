@@ -184,25 +184,23 @@ class SpatialTemporalTransformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, feature_embeddings):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass of the SpatialTemporalTransformer.
 
         Args:
-            feature_embeddings: [B, T, S, C]
+            x: [B, T, S, C]
 
         Returns:
             torch.Tensor: shape [B, T, S, C]
         """
-        _, T, S, _ = feature_embeddings.shape
+        _, T, S, _ = x.shape
 
         time_emb = torch.repeat_interleave(self.time_emb, S, dim=2)
 
-        time_space_token_embeddings = feature_embeddings + time_emb
+        out = x + time_emb
 
         for i in range(self.n_layer):
-            time_space_token_embeddings = self.spatial_temporal_blocks[i](
-                time_space_token_embeddings, self.mask_time
-            )
+            out = self.spatial_temporal_blocks[i](out, self.mask_time)
 
-        return time_space_token_embeddings
+        return out
