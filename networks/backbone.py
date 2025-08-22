@@ -3,9 +3,9 @@ from diffusers.models import AutoencoderTiny
 from torch import nn
 
 from .spatial_temporal_transformer import (
-    CausalTimeBlock,
     Config,
     SpatialTemporalTransformer,
+    TransformerBlock,
     get_fourier_embeds_from_coordinates,
 )
 
@@ -172,7 +172,7 @@ class SimpleTransformerEncoder(nn.Module):
             res_drop_prob=0.0,
         )
 
-        self.blocks = nn.ModuleList([CausalTimeBlock(config) for _ in range(n_blocks)])
+        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(n_blocks)])
 
         # Create causal mask for sequence length (considering max possible length with rewards)
         max_seq_len = seq_len * 3  # Maximum length when rewards are included

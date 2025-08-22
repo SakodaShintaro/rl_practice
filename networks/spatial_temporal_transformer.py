@@ -58,7 +58,7 @@ class Config:
     res_drop_prob: float
 
 
-class CausalSpaceSelfAttention(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.hidden_dim % config.n_head == 0
@@ -77,7 +77,7 @@ class CausalSpaceSelfAttention(nn.Module):
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
-    def forward(self, x, attn_mask):
+    def forward(self, x, attn_mask=None):
         B, T, C = x.size()
 
         k = self.key(x)
@@ -105,12 +105,12 @@ class CausalSpaceSelfAttention(nn.Module):
         return y
 
 
-class CausalSpaceBlock(nn.Module):
+class TransformerBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.hidden_dim)
         self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = CausalSpaceSelfAttention(config)
+        self.attn = SelfAttention(config)
         self.mlp = nn.Sequential(
             nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
@@ -118,148 +118,19 @@ class CausalSpaceBlock(nn.Module):
             nn.Dropout(config.res_drop_prob),
         )
 
-    def forward(self, x, attn_mask):
+    def forward(self, x, attn_mask=None):
         attn = self.attn(self.ln1(x), attn_mask)
         x = x + attn
         x = x + self.mlp(self.ln2(x))
 
-        return x
-
-
-class SpaceSelfAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        assert config.hidden_dim % config.n_head == 0
-        self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.query = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.value = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.res_drop_prob = nn.Dropout(config.res_drop_prob)
-        self.attn_dropout_rate = config.attn_drop_prob
-        self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.n_head = config.n_head
-        self.qk_norm = True
-
-        if self.qk_norm:
-            self.q_norm = nn.LayerNorm(config.hidden_dim)
-            self.k_norm = nn.LayerNorm(config.hidden_dim)
-        else:
-            self.q_norm = self.k_norm = nn.Identity()
-
-    def forward(self, x):
-        B, T, C = x.size()
-
-        k = self.key(x)
-        q = self.query(x)
-        v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-
-        y = (
-            F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_dropout_rate)
-            .transpose(1, 2)
-            .contiguous()
-            .view(B, T, C)
-        )
-
-        y = self.res_drop_prob(self.proj(y))
-        return y
-
-
-class SpaceBlock(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.ln1 = nn.LayerNorm(config.hidden_dim)
-        self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = SpaceSelfAttention(config)
-        self.mlp = nn.Sequential(
-            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
-            nn.GELU(),
-            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
-            nn.Dropout(config.res_drop_prob),
-        )
-
-    def forward(self, x):
-        attn = self.attn(self.ln1(x))
-        x = x + attn
-        x = x + self.mlp(self.ln2(x))
-
-        return x
-
-
-class CausalTimeSelfAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        assert config.hidden_dim % config.n_head == 0
-        self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.query = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.value = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.res_drop_prob = nn.Dropout(config.res_drop_prob)
-        self.attn_dropout_rate = config.attn_drop_prob
-        self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.n_head = config.n_head
-        self.qk_norm = True
-
-        if self.qk_norm:
-            self.q_norm = nn.LayerNorm(config.hidden_dim)
-            self.k_norm = nn.LayerNorm(config.hidden_dim)
-        else:
-            self.q_norm = self.k_norm = nn.Identity()
-
-    def forward(self, x, attn_mask):
-        B, T, C = x.size()
-
-        k = self.key(x)
-        q = self.query(x)
-        v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-
-        y = (
-            F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask.to(q.dtype), dropout_p=self.attn_dropout_rate
-            )
-            .transpose(1, 2)
-            .contiguous()
-            .view(B, T, C)
-        )
-
-        y = self.res_drop_prob(self.proj(y))
-        return y
-
-
-class CausalTimeBlock(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.ln1 = nn.LayerNorm(config.hidden_dim)
-        self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = CausalTimeSelfAttention(config)
-        self.mlp = nn.Sequential(
-            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
-            nn.GELU(),
-            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
-            nn.Dropout(config.res_drop_prob),
-        )
-
-    def forward(self, x, attn_mask):
-        attn = self.attn(self.ln1(x), attn_mask)
-        x = x + attn
-        x = x + self.mlp(self.ln2(x))
         return x
 
 
 class CausalTimeSpaceBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.causal_time_block = CausalTimeBlock(config)
-        self.space_block = SpaceBlock(config)
+        self.causal_time_block = TransformerBlock(config)
+        self.space_block = TransformerBlock(config)
 
     def forward(self, x, attn_mask):
         b, f, l, c = x.shape
