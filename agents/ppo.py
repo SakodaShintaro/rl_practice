@@ -59,11 +59,11 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.net = {
+        self.network = {
             "default": PpoBetaPolicyAndValue(3, self.seq_len).to(self.device),
             "paligemma": PpoPaligemmaPolicyAndValue(3).to(self.device),
         }[args.model_name]
-        num_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+        num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
         self.buffer = np.empty(
             self.buffer_capacity,
@@ -81,7 +81,7 @@ class PpoAgent:
         self.counter = 0
 
         lr = args.learning_rate
-        self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
         self.r_list = []
         self.s_list = []
@@ -187,7 +187,7 @@ class PpoAgent:
         assert curr_s.shape[1] == self.seq_len
         assert curr_a.shape[1] == self.seq_len
 
-        result_dict = self.net(curr_r, curr_s, curr_a)
+        result_dict = self.network(curr_r, curr_s, curr_a)
         action = result_dict["action"]
         a_logp = result_dict["a_logp"]
         value = result_dict["value"]
@@ -242,7 +242,7 @@ class PpoAgent:
                 dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=self.device)
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
 
-                net_out_dict = self.net(r[indices], s[indices], curr_action, a[index])
+                net_out_dict = self.network(r[indices], s[indices], curr_action, a[index])
                 a_logp = net_out_dict["a_logp"]
                 value = net_out_dict["value"]
                 ratio = torch.exp(a_logp - old_a_logp[index])
@@ -277,7 +277,7 @@ class PpoAgent:
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
             ave_action_loss = sum_action_loss / self.buffer_capacity
