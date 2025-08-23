@@ -16,7 +16,7 @@ def concat_images(main: np.ndarray, sub_image_list: list[np.ndarray]) -> np.ndar
     Returns:
         np.ndarray: The concatenated image.
     """
-    concat = cv2.hconcat(sub_image_list)
+    concat = cv2.vconcat(sub_image_list)
     rem = main.shape[0] - concat.shape[0]
     concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
     concat *= 255
