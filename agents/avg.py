@@ -181,9 +181,7 @@ class AvgAgent:
         # Create reward sequence for encoder
         reward_sequence = torch.stack(self.reward_history, dim=0).unsqueeze(0)
 
-        obs_encoded = self.network.encoder_sequence.forward(
-            obs_sequence, action_sequence, reward_sequence
-        )
+        obs_encoded = self.network.encoder.forward(obs_sequence, action_sequence, reward_sequence)
         action, log_prob = self.network.actor.get_action(obs_encoded)
 
         # Store current state and action for next update
@@ -234,7 +232,7 @@ class AvgAgent:
         curr_obs = data.observations[:, :-1]
         curr_action = data.actions[:, :-1]
         curr_reward = data.rewards[:, :-1]
-        curr_state = self.network.encoder_sequence.forward(curr_obs, curr_action, curr_reward)
+        curr_state = self.network.encoder.forward(curr_obs, curr_action, curr_reward)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(curr_state)

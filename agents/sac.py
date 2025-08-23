@@ -28,25 +28,25 @@ class Network(nn.Module):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if args.encoder == "ae":
-            self.encoder_sequence = AE(seq_len=self.seq_len, device=device)
+            self.encoder = AE(seq_len=self.seq_len, device=device)
         elif args.encoder == "stt":
-            self.encoder_sequence = STTEncoder(seq_len=self.seq_len, device=device)
+            self.encoder = STTEncoder(seq_len=self.seq_len, device=device)
         elif args.encoder == "simple":
-            self.encoder_sequence = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
+            self.encoder = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
         else:
             raise ValueError(
                 f"Unknown encoder: {args.encoder}. Only 'ae', 'stt', and 'simple' are supported."
             )
 
         self.actor = DiffusionPolicy(
-            state_dim=self.encoder_sequence.output_dim,
+            state_dim=self.encoder.output_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
         self.critic = SacQ(
-            in_channels=self.encoder_sequence.output_dim,
+            in_channels=self.encoder.output_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -61,8 +61,8 @@ class Network(nn.Module):
         self.enable_sequence_modeling = args.enable_sequence_modeling
         if args.enable_sequence_modeling:
             self.state_predictor = DiffusionStatePredictor(
-                input_dim=self.encoder_sequence.output_dim + action_dim,
-                state_dim=self.encoder_sequence.output_dim,
+                input_dim=self.encoder.output_dim + action_dim,
+                state_dim=self.encoder.output_dim,
                 hidden_dim=args.actor_hidden_dim,
                 block_num=args.actor_block_num,
                 sparsity=args.sparsity,
@@ -84,7 +84,7 @@ class Network(nn.Module):
             obs_next = data.observations[:, 1:]
             actions_next = data.actions[:, 1:]
             rewards_next = data.rewards[:, 1:]
-            state_next = self.encoder_sequence.forward(obs_next, actions_next, rewards_next)
+            state_next = self.encoder.forward(obs_next, actions_next, rewards_next)
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]
@@ -209,7 +209,7 @@ class Network(nn.Module):
             obs_next_sequence = data.observations[:, 1:]  # (B, T, C, H, W)
             actions_next_sequence = data.actions[:, 1:]  # (B, T, action_dim)
             rewards_next_sequence = data.rewards[:, 1:]  # (B, T)
-            target_state_next = self.encoder_sequence.forward(
+            target_state_next = self.encoder.forward(
                 obs_next_sequence, actions_next_sequence, rewards_next_sequence
             )
 
@@ -240,6 +240,19 @@ class Network(nn.Module):
         info_dict = {"seq_loss": state_loss.item()}
 
         return state_loss, activations_dict, info_dict
+
+    @torch.inference_mode()
+    def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
+        if self.enable_sequence_modeling:
+            state_action_input = torch.cat([state_curr, action_curr], dim=-1)
+            next_hidden_state, _ = self.state_predictor.get_state(state_action_input)
+            next_image = self.encoder.decode(next_hidden_state)
+            next_image = next_image.detach().cpu().numpy()
+        else:
+            next_image = np.zeros((1, 3, 96, 96), dtype=np.float32)
+        next_image = next_image.squeeze(0)
+        next_image = next_image.transpose(1, 2, 0)
+        return next_image
 
 
 class SacAgent:
@@ -342,9 +355,7 @@ class SacAgent:
         # (1, T)
         reward_sequence = torch.stack(self.reward_buffer, dim=0).unsqueeze(0)
 
-        output_enc = self.network.encoder_sequence.forward(
-            obs_sequence, action_sequence, reward_sequence
-        )
+        output_enc = self.network.encoder.forward(obs_sequence, action_sequence, reward_sequence)
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -359,6 +370,10 @@ class SacAgent:
         action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
         self.action_buffer.append(action_tensor)
         self.action_buffer.pop(0)
+
+        # predict next state
+        next_image = self.network.predict_next_state(output_enc, action_tensor.unsqueeze(0))
+        info_dict["next_image"] = next_image
 
         self.prev_action = action
         return action, info_dict
@@ -385,7 +400,7 @@ class SacAgent:
         obs_curr = data.observations[:, :-1]  # (B, T, C, H, W)
         actions_curr = data.actions[:, :-1]  # (B, T, action_dim)
         rewards_curr = data.rewards[:, :-1]  # (B, T)
-        state_curr = self.network.encoder_sequence.forward(obs_curr, actions_curr, rewards_curr)
+        state_curr = self.network.encoder.forward(obs_curr, actions_curr, rewards_curr)
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)

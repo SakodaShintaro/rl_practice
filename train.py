@@ -147,6 +147,7 @@ def main(exp_name: str, seed: int) -> None:
         # initialize episode
         obs, _ = env.reset()
         obs_for_render = obs.copy().transpose(1, 2, 0)
+        prediction = np.zeros_like(obs_for_render)
         bgr_image_list = [concat_images(env.render(), [obs_for_render])]
         agent.initialize_for_episode()
         action, agent_info = agent.select_action(global_step, obs, 0.0)
@@ -171,11 +172,12 @@ def main(exp_name: str, seed: int) -> None:
 
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)
-            bgr_image = concat_images(env.render(), [obs_for_render])
+            bgr_image = concat_images(env.render(), [obs_for_render, prediction])
             bgr_image_list.append(bgr_image)
             if args.render:
                 cv2.imshow("CarRacing", bgr_image)
                 cv2.waitKey(1)
+            prediction = agent_info.get("next_image", np.zeros_like(obs_for_render))
 
             if termination or truncation:
                 break
