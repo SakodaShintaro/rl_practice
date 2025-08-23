@@ -76,7 +76,9 @@ class STTEncoder(nn.Module):
 
         self.device = device
 
-        self.ae_encoder = AE(self.seq_len, self.device)
+        self.ae = AutoencoderTiny.from_pretrained(
+            "madebyollin/taesd", cache_dir="./cache", device_map=device
+        )
 
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
         self.vae_dim = 4
@@ -117,7 +119,7 @@ class STTEncoder(nn.Module):
 
         with torch.no_grad():
             # Encode all frames at once
-            all_latents = self.ae_encoder.ae.encode(all_frames).latents  # [B*T, C', H', W']
+            all_latents = self.ae.encode(all_frames).latents  # [B*T, C', H', W']
             # Reshape back to sequence: [B, T, C', H', W']
             all_latents = all_latents.reshape(B, T, 4, 12, 12)
             # Convert to tokens: [B, T, S(=H'*W'), C']
@@ -147,16 +149,13 @@ class STTEncoder(nn.Module):
     @torch.no_grad()
     def decode(self, x):
         x = x.view(x.size(0), 4, 12, 12)
-        x = self.ae_encoder.decode(x)
-        return x
+        return self.ae.decode(x).sample
 
 
 class SimpleTransformerEncoder(nn.Module):
-    def __init__(
-        self,
-        seq_len: int,
-        device: str,
-    ):
+    """Sequence encoder using simple Transformer"""
+
+    def __init__(self, seq_len: int, device: str):
         super().__init__()
 
         self.seq_len = seq_len
@@ -167,8 +166,9 @@ class SimpleTransformerEncoder(nn.Module):
         n_heads = 8  # Fixed number of attention heads
         n_blocks = 2  # Number of CausalTimeBlocks
 
-        # AE encoder for processing images
-        self.ae_encoder = AE(seq_len, device)
+        self.ae = AutoencoderTiny.from_pretrained(
+            "madebyollin/taesd", cache_dir="./cache", device_map=device
+        )
 
         # Positional encoding (for max possible sequence length with rewards)
         self.pos_encoding = nn.Parameter(torch.randn(seq_len * 3, self.d_model))
@@ -212,7 +212,7 @@ class SimpleTransformerEncoder(nn.Module):
         # Process all images through AE
         all_images = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
         with torch.no_grad():
-            states = self.ae_encoder.ae.encode(all_images).latents  # (B*T, 4, 12, 12)
+            states = self.ae.encode(all_images).latents  # (B*T, 4, 12, 12)
             states = states.view(B, T, -1)  # (B, T, 576) - flatten AE output
 
         # Use fourier embeddings for actions (same as STTEncoder)
@@ -253,5 +253,4 @@ class SimpleTransformerEncoder(nn.Module):
     @torch.no_grad()
     def decode(self, x):
         x = x.view(x.size(0), 4, 12, 12)
-        x = self.ae_encoder.decode(x)
-        return x
+        return self.ae.decode(x).sample
