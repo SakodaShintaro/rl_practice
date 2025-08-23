@@ -6,12 +6,20 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
+from networks.backbone import (
+    MMMambaEncoder,
+    QwenVLEncoder,
+    SingleFrameEncoder,
+    SmolVLMEncoder,
+    parse_action_text,
+)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("encoder", type=str, choices=["ae", "mmmamba", "smolvlm", "qwenvl"])
+    parser.add_argument(
+        "encoder", type=str, choices=["single_frame", "mmmamba", "smolvlm", "qwenvl"]
+    )
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
     parser.add_argument("--num_images", type=int, default=5)
     return parser.parse_args()
@@ -63,8 +71,8 @@ if __name__ == "__main__":
 
     # VLMエンコーダーの初期化
     print("Initializing Encoder")
-    if args.encoder == "ae":
-        encoder = AE(device=device)
+    if args.encoder == "single_frame":
+        encoder = SingleFrameEncoder(device=device)
     elif args.encoder == "mmmamba":
         encoder = MMMambaEncoder(device=device)
     elif args.encoder == "smolvlm":

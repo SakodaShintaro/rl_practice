@@ -7,7 +7,7 @@ from torch import optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import AE, SimpleTransformerEncoder, STTEncoder
+from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
 from networks.diffusion_policy import DiffusionPolicy, DiffusionStatePredictor
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -27,15 +27,15 @@ class Network(nn.Module):
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if args.encoder == "ae":
-            self.encoder = AE(seq_len=self.seq_len, device=device)
+        if args.encoder == "single_frame":
+            self.encoder = SingleFrameEncoder(seq_len=self.seq_len, device=device)
         elif args.encoder == "stt":
             self.encoder = STTEncoder(seq_len=self.seq_len, device=device)
         elif args.encoder == "simple":
             self.encoder = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
         else:
             raise ValueError(
-                f"Unknown encoder: {args.encoder}. Only 'ae', 'stt', and 'simple' are supported."
+                f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', and 'simple' are supported."
             )
 
         self.actor = DiffusionPolicy(

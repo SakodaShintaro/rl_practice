@@ -38,7 +38,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target_score", type=float, default=800.0)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument(
-        "--encoder", type=str, default="stt", choices=["ae", "smolvlm", "mmmamba", "stt", "simple"]
+        "--encoder",
+        type=str,
+        default="stt",
+        choices=["single_frame", "smolvlm", "mmmamba", "stt", "simple"],
     )
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)

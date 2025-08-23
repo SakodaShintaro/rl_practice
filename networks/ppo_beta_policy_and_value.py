@@ -2,14 +2,14 @@ import torch
 from torch import nn
 from torch.distributions import Beta
 
-from .backbone import AE
+from .backbone import SingleFrameEncoder
 
 
 class PpoBetaPolicyAndValue(nn.Module):
     def __init__(self, action_dim: int, seq_len: int) -> None:
         super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.encoder = AE(seq_len, device)
+        self.encoder = SingleFrameEncoder(seq_len, device)
         seq_hidden_dim = self.encoder.output_dim
         rep_dim = 256
         hidden_dim = 100

@@ -6,7 +6,13 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import AE, MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, STTEncoder
+from networks.backbone import (
+    MMMambaEncoder,
+    QwenVLEncoder,
+    SingleFrameEncoder,
+    SmolVLMEncoder,
+    STTEncoder,
+)
 
 
 def parse_args():
@@ -14,7 +20,7 @@ def parse_args():
     parser.add_argument(
         "--encoder",
         type=str,
-        choices=["ae", "mmmamba", "smolvlm", "qwenvl", "stt", "all"],
+        choices=["single_frame", "mmmamba", "smolvlm", "qwenvl", "stt", "all"],
         default="all",
     )
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
@@ -72,8 +78,8 @@ if __name__ == "__main__":
     # エンコーダーの初期化
     print("Initializing Encoder")
     target_encoder_list = []
-    if args.encoder == "ae":
-        target_encoder_list.append(AE(num_images, device))
+    if args.encoder == "single_frame":
+        target_encoder_list.append(SingleFrameEncoder(num_images, device))
     elif args.encoder == "mmmamba":
         target_encoder_list.append(MMMambaEncoder(num_images, device))
     elif args.encoder == "smolvlm":
@@ -83,7 +89,7 @@ if __name__ == "__main__":
     elif args.encoder == "stt":
         target_encoder_list.append(STTEncoder(num_images, device))
     else:  # all
-        target_encoder_list.append(AE(num_images, device))
+        target_encoder_list.append(SingleFrameEncoder(num_images, device))
         target_encoder_list.append(MMMambaEncoder(num_images, device))
         target_encoder_list.append(SmolVLMEncoder(num_images, device))
         target_encoder_list.append(QwenVLEncoder(num_images, device))

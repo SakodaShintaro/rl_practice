@@ -3,7 +3,7 @@ import time
 import torch
 from torch import nn
 
-from networks.backbone import AE, VAE, SmolVLMEncoder
+from networks.backbone import VAE, SingleFrameEncoder, SmolVLMEncoder
 
 
 def parameter_count(model):
@@ -35,14 +35,14 @@ def test_inference_speed(model, name, batch_size, dtype):
 if __name__ == "__main__":
     device = torch.device("cuda")
 
-    model_ae = AE().to(device)
+    model_ae = SingleFrameEncoder().to(device)
     model_vae = VAE().to(device)
     model_smolvlm = SmolVLMEncoder(device=device)
     model_smolvlm_image_encoder = model_smolvlm.model.model.vision_model
 
     for batch_size in [4, 8, 16]:
         print(f"{batch_size=}")
-        test_inference_speed(model_ae, "AE", batch_size, torch.float32)
+        test_inference_speed(model_ae, "SingleFrameEncoder", batch_size, torch.float32)
 
         test_inference_speed(model_vae, "VAE", batch_size, torch.float32)
 

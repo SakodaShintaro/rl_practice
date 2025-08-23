@@ -28,7 +28,7 @@ def init_weights(m):
             nn.init.constant_(m.bias, 0)
 
 
-class AE(nn.Module):
+class SingleFrameEncoder(nn.Module):
     def __init__(self, seq_len: int, device: str) -> None:
         super().__init__()
         self.seq_len = seq_len
