@@ -172,7 +172,19 @@ def main(exp_name: str, seed: int) -> None:
 
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)
-            bgr_image = concat_images(env.render(), [obs_for_render, prediction])
+            render_reconstruction = False
+            if render_reconstruction:
+                with torch.inference_mode():
+                    net = agent.network.encoder.ae
+                    x = torch.tensor(obs.copy(), device=net.device).unsqueeze(0)
+                    x = net.encode(x).latents
+                    x = net.decode(x).sample
+                    curr_reconstruction = x.cpu().numpy().squeeze(0).transpose(1, 2, 0)
+            else:
+                curr_reconstruction = np.zeros_like(obs_for_render)
+            bgr_image = concat_images(
+                env.render(), [obs_for_render, curr_reconstruction, prediction]
+            )
             bgr_image_list.append(bgr_image)
             if args.render:
                 cv2.imshow("CarRacing", bgr_image)
