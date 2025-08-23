@@ -206,12 +206,9 @@ class Network(nn.Module):
 
         # 次のstateをencodeする
         with torch.no_grad():
-            obs_next_sequence = data.observations[:, 1:]  # (B, T, C, H, W)
-            actions_next_sequence = data.actions[:, 1:]  # (B, T, action_dim)
-            rewards_next_sequence = data.rewards[:, 1:]  # (B, T)
-            target_state_next = self.encoder.forward(
-                obs_next_sequence, actions_next_sequence, rewards_next_sequence
-            )
+            last_obs = data.observations[:, -1]  # (B, C, H, W)
+            target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C' H', W')
+            target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
         # current_stateとactionを結合
         state_action_input = torch.cat([state_curr, action_curr], dim=-1)
