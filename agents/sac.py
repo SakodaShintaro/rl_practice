@@ -60,8 +60,8 @@ class Network(nn.Module):
         self.state_predictor = DiffusionStatePredictor(
             input_dim=self.encoder.output_dim + action_dim,
             state_dim=self.encoder.output_dim,
-            hidden_dim=args.actor_hidden_dim,
-            block_num=args.actor_block_num,
+            hidden_dim=args.predictor_hidden_dim,
+            block_num=args.predictor_block_num,
             sparsity=args.sparsity,
         )
 
