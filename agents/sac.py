@@ -53,10 +53,6 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-
-        self.detach_actor = args.detach_actor
-        self.detach_critic = args.detach_critic
-
         self.state_predictor = DiffusionStatePredictor(
             input_dim=self.encoder.output_dim + action_dim,
             state_dim=self.encoder.output_dim,
@@ -64,6 +60,10 @@ class Network(nn.Module):
             block_num=args.predictor_block_num,
             sparsity=args.sparsity,
         )
+
+        self.detach_actor = args.detach_actor
+        self.detach_critic = args.detach_critic
+        self.detach_predictor = args.detach_predictor
 
         if self.num_bins > 1:
             value_range = 60
@@ -188,7 +188,8 @@ class Network(nn.Module):
         return total_actor_loss, activations_dict, info_dict
 
     def compute_sequence_loss(self, data, state_curr):
-        state_curr = state_curr.detach()
+        if self.detach_predictor:
+            state_curr = state_curr.detach()
 
         # 最後のactionを取得 (actions[:, -1]がcurrent_stateに対応するaction)
         action_curr = data.actions[:, -1]  # (B, action_dim)
