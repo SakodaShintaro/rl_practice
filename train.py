@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step_limit", type=int, default=100_000)
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
+    parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
@@ -175,8 +176,7 @@ def main(exp_name: str, seed: int) -> None:
 
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)
-            render_reconstruction = False
-            if render_reconstruction:
+            if args.render_reconstruction:
                 with torch.inference_mode():
                     net = agent.network.encoder.ae
                     x = torch.tensor(obs.copy(), device=net.device).unsqueeze(0)
