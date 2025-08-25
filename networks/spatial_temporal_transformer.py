@@ -131,12 +131,12 @@ class SpatialTemporalBlock(nn.Module):
         self.space_block = TransformerBlock(config)
 
     def forward(self, x, attn_mask):
-        b, f, l, c = x.shape
-        x = rearrange(x, "b f l c -> (b l) f c")
+        b, t, s, c = x.shape
+        x = rearrange(x, "b t s c -> (b s) t c")
         x = self.tempo_block(x, attn_mask)
-        x = rearrange(x, "(b l) f c -> (b f) l c", b=b, l=l, f=f)
+        x = rearrange(x, "(b s) t c -> (b t) s c", b=b, s=s, t=t)
         x = self.space_block(x)
-        x = rearrange(x, "(b f) l c -> b f l c", b=b, f=f)
+        x = rearrange(x, "(b t) s c -> b t s c", b=b, t=t)
         return x
 
 
