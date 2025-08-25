@@ -57,16 +57,13 @@ class Network(nn.Module):
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
 
-        # Sequence modeling components (optional)
-        self.enable_sequence_modeling = args.enable_sequence_modeling
-        if args.enable_sequence_modeling:
-            self.state_predictor = DiffusionStatePredictor(
-                input_dim=self.encoder.output_dim + action_dim,
-                state_dim=self.encoder.output_dim,
-                hidden_dim=args.actor_hidden_dim,
-                block_num=args.actor_block_num,
-                sparsity=args.sparsity,
-            )
+        self.state_predictor = DiffusionStatePredictor(
+            input_dim=self.encoder.output_dim + action_dim,
+            state_dim=self.encoder.output_dim,
+            hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
+            sparsity=args.sparsity,
+        )
 
         if self.num_bins > 1:
             value_range = 60
@@ -191,14 +188,6 @@ class Network(nn.Module):
         return total_actor_loss, activations_dict, info_dict
 
     def compute_sequence_loss(self, data, state_curr):
-        if not self.enable_sequence_modeling:
-            # Return zero loss when sequence modeling is disabled
-            return (
-                torch.tensor(0.0, device=state_curr.device),
-                {},
-                {},
-            )
-
         state_curr = state_curr.detach()
 
         # 最後のactionを取得 (actions[:, -1]がcurrent_stateに対応するaction)
@@ -240,13 +229,10 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        if self.enable_sequence_modeling:
-            state_action_input = torch.cat([state_curr, action_curr], dim=-1)
-            next_hidden_state, _ = self.state_predictor.get_state(state_action_input)
-            next_image = self.encoder.decode(next_hidden_state)
-            next_image = next_image.detach().cpu().numpy()
-        else:
-            next_image = np.zeros((1, 3, 96, 96), dtype=np.float32)
+        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
+        next_hidden_state, _ = self.state_predictor.get_state(state_action_input)
+        next_image = self.encoder.decode(next_hidden_state)
+        next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
         next_image = next_image.transpose(1, 2, 0)
         return next_image
@@ -295,27 +281,24 @@ class SacAgent:
             "total": self.network,
             "actor": self.network.actor,
             "critic": self.network.critic,
+            "state_predictor": self.network.state_predictor,
         }
-        if args.enable_sequence_modeling:
-            self.monitoring_targets["state_predictor"] = self.network.state_predictor
 
         # Initialize weight projection if enabled
         self.weight_projection_norms = {}
         if args.use_weight_projection:
             self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
             self.weight_projection_norms["critic"] = get_initial_norms(self.network.critic)
-            if args.enable_sequence_modeling:
-                self.weight_projection_norms["state_predictor"] = get_initial_norms(
-                    self.network.state_predictor
-                )
+            self.weight_projection_norms["state_predictor"] = get_initial_norms(
+                self.network.state_predictor
+            )
 
         self.metrics_computers = {
             "state": StatisticalMetricsComputer(),
             "actor": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
+            "state_predictor": StatisticalMetricsComputer(),
         }
-        if args.enable_sequence_modeling:
-            self.metrics_computers["state_predictor"] = StatisticalMetricsComputer()
         self.prev_action = None
 
     def initialize_for_episode(self) -> None:
@@ -437,17 +420,15 @@ class SacAgent:
         if self.use_weight_projection:
             weight_project(self.network.actor, self.weight_projection_norms["actor"])
             weight_project(self.network.critic, self.weight_projection_norms["critic"])
-            if self.network.enable_sequence_modeling:
-                weight_project(
-                    self.network.state_predictor, self.weight_projection_norms["state_predictor"]
-                )
+            weight_project(
+                self.network.state_predictor, self.weight_projection_norms["state_predictor"]
+            )
 
         # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
         if self.apply_masks_during_training:
             apply_masks_during_training(self.network.actor)
             apply_masks_during_training(self.network.critic)
-            if self.network.enable_sequence_modeling:
-                apply_masks_during_training(self.network.state_predictor)
+            apply_masks_during_training(self.network.state_predictor)
 
         # Feature metrics
         feature_dict = {

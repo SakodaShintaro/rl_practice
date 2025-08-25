@@ -65,7 +65,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--predictor_block_num", type=int, default=2)
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
-    parser.add_argument("--enable_sequence_modeling", action="store_true")
     parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
     parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
 
