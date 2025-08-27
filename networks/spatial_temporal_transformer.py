@@ -5,6 +5,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from mamba_ssm.modules.block import Block
+from mamba_ssm.modules.mamba2 import Mamba2
+from mamba_ssm.ops.triton.layer_norm import RMSNorm
 
 
 def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) -> torch.Tensor:
@@ -124,10 +127,44 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class SpatialTemporalBlock(nn.Module):
+class MambaBlock(nn.Module):
+    """
+    Mamba状態空間モデルブロック（TransformerBlockと置き換え可能）
+
+    Args:
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+            - res_drop_prob: residual dropout確率
+    """
+
     def __init__(self, config):
         super().__init__()
-        self.tempo_block = TransformerBlock(config)
+        d_ssm = 2 * config.hidden_dim
+        self.block = Block(
+            dim=config.hidden_dim,
+            mixer_cls=lambda dim: Mamba2(d_model=dim, headdim=d_ssm),
+            norm_cls=lambda dim: RMSNorm(dim),
+            mlp_cls=lambda dim: nn.Sequential(
+                nn.Linear(dim, 4 * dim, bias=False),
+                nn.GELU(),
+                nn.Linear(4 * dim, dim, bias=False),
+                nn.Dropout(config.res_drop_prob),
+            ),
+        )
+
+    def forward(self, x, attn_mask=None):
+        return self.block(x)[0]
+
+
+class SpatialTemporalBlock(nn.Module):
+    def __init__(self, config, tempo_block_type):
+        super().__init__()
+        if tempo_block_type == "mamba":
+            self.tempo_block = MambaBlock(config)
+        elif tempo_block_type == "transformer":
+            self.tempo_block = TransformerBlock(config)
+        else:
+            raise ValueError(f"Unknown tempo_block_type: {tempo_block_type}")
         self.space_block = TransformerBlock(config)
 
     def forward(self, x, attn_mask):
@@ -150,6 +187,7 @@ class SpatialTemporalTransformer(nn.Module):
         n_head: int,
         attn_drop_prob: float,
         res_drop_prob: float,
+        tempo_block_type: str,
     ):
         super().__init__()
         config = Config(
@@ -168,7 +206,7 @@ class SpatialTemporalTransformer(nn.Module):
         nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
         self.spatial_temporal_blocks = nn.Sequential(
-            *[SpatialTemporalBlock(config) for _ in range(self.n_layer)]
+            *[SpatialTemporalBlock(config, tempo_block_type) for _ in range(self.n_layer)]
         )
 
         self.apply(self._init_weights)

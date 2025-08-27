@@ -87,13 +87,13 @@ if __name__ == "__main__":
     elif args.encoder == "qwenvl":
         target_encoder_list.append(QwenVLEncoder(num_images, device))
     elif args.encoder == "stt":
-        target_encoder_list.append(STTEncoder(num_images, device))
+        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
     else:  # all
         target_encoder_list.append(SingleFrameEncoder(num_images, device))
         target_encoder_list.append(MMMambaEncoder(num_images, device))
         target_encoder_list.append(SmolVLMEncoder(num_images, device))
         target_encoder_list.append(QwenVLEncoder(num_images, device))
-        target_encoder_list.append(STTEncoder(num_images, device))
+        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
 
     for encoder in target_encoder_list:
         start = time.time()

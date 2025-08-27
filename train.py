@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--action_norm_penalty", type=float, default=0.1)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--tempo_block_type", type=str, default="transformer", choices=["transformer", "mamba"])
     parser.add_argument("--debug", action="store_true")
 
     # for SAC

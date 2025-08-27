@@ -30,7 +30,7 @@ class Network(nn.Module):
         if args.encoder == "single_frame":
             self.encoder = SingleFrameEncoder(seq_len=self.seq_len, device=device)
         elif args.encoder == "stt":
-            self.encoder = STTEncoder(seq_len=self.seq_len, device=device)
+            self.encoder = STTEncoder(seq_len=self.seq_len, device=device, tempo_block_type=args.tempo_block_type)
         elif args.encoder == "simple":
             self.encoder = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
         else:
