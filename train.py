@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--step_limit", type=int, default=100_000)
     parser.add_argument("--seq_len", type=int, default=8)
-    parser.add_argument("--action_norm_penalty", type=float, default=0.0)
+    parser.add_argument("--action_norm_penalty", type=float, default=0.1)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
     parser.add_argument("--debug", action="store_true")
 
