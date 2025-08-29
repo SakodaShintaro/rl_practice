@@ -6,15 +6,8 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import (
-    SingleFrameEncoder,
-    STTEncoder,
-)
-from networks.vlm import (
-    MMMambaEncoder,
-    QwenVLEncoder,
-    SmolVLMEncoder,
-)
+from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
+from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder
 
 
 def parse_args():
@@ -22,7 +15,15 @@ def parse_args():
     parser.add_argument(
         "--encoder",
         type=str,
-        choices=["single_frame", "mmmamba", "smolvlm", "qwenvl", "stt", "all"],
+        choices=[
+            "single_frame",
+            "stt",
+            "simple_transformer",
+            "mmmamba",
+            "smolvlm",
+            "qwenvl",
+            "all",
+        ],
         default="all",
     )
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
@@ -86,26 +87,27 @@ if __name__ == "__main__":
     target_encoder_list = []
     if args.encoder == "single_frame":
         target_encoder_list.append(SingleFrameEncoder(num_images, device))
+    elif args.encoder == "stt":
+        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
+    elif args.encoder == "simple_transformer":
+        target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
     elif args.encoder == "mmmamba":
         target_encoder_list.append(MMMambaEncoder(num_images, device))
     elif args.encoder == "smolvlm":
         target_encoder_list.append(SmolVLMEncoder(num_images, device))
     elif args.encoder == "qwenvl":
         target_encoder_list.append(QwenVLEncoder(num_images, device))
-    elif args.encoder == "stt":
-        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
     else:  # all
         target_encoder_list.append(SingleFrameEncoder(num_images, device))
+        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
+        target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
         target_encoder_list.append(MMMambaEncoder(num_images, device))
         target_encoder_list.append(SmolVLMEncoder(num_images, device))
         target_encoder_list.append(QwenVLEncoder(num_images, device))
-        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
 
     for encoder in target_encoder_list:
         start = time.time()
         representation = encoder(images_sequence, action_sequence, reward_sequence)
         end = time.time()
         elapsed_msec = (end - start) * 1000
-        print(
-            f"{encoder.__class__.__name__}, {representation.shape=}, {elapsed_msec=:.1f}"
-        )
+        print(f"{encoder.__class__.__name__}, {representation.shape=}, {elapsed_msec=:.1f}")
