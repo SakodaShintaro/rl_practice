@@ -7,11 +7,13 @@ import torch
 from torchvision import transforms
 
 from networks.backbone import (
+    SingleFrameEncoder,
+    STTEncoder,
+)
+from networks.vlm import (
     MMMambaEncoder,
     QwenVLEncoder,
-    SingleFrameEncoder,
     SmolVLMEncoder,
-    STTEncoder,
 )
 
 
@@ -66,6 +68,7 @@ if __name__ == "__main__":
     # 画像をシーケンスとして結合し、GPUに移動
     image_list = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in image_list]
     image_list = [transform(image) for image in image_list]
+    seq_len = len(image_list)
     images_sequence = torch.stack(image_list)  # shape: (sequence_length, 3, height, width)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     images_sequence = images_sequence.to(device)
@@ -74,6 +77,9 @@ if __name__ == "__main__":
     images_sequence = images_sequence.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
     print(f"Images sequence shape: {images_sequence.shape}")
     print(f"Using device: {device}")
+
+    action_sequence = torch.randn((batch_size, seq_len, 3), device=device)
+    reward_sequence = torch.randn((batch_size, seq_len, 1), device=device)
 
     # エンコーダーの初期化
     print("Initializing Encoder")
@@ -97,9 +103,9 @@ if __name__ == "__main__":
 
     for encoder in target_encoder_list:
         start = time.time()
-        representation, action_text = encoder(images_sequence)
+        representation = encoder(images_sequence, action_sequence, reward_sequence)
         end = time.time()
         elapsed_msec = (end - start) * 1000
         print(
-            f"{encoder.__class__.__name__}, {representation.shape=}, {action_text=}, {elapsed_msec=:.1f}"
+            f"{encoder.__class__.__name__}, {representation.shape=}, {elapsed_msec=:.1f}"
         )
