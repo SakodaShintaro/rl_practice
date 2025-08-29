@@ -193,6 +193,9 @@ class SimpleTransformerEncoder(nn.Module):
         # Final projection
         self.output_proj = nn.Linear(self.d_model, self.d_model)
 
+        # Move all parameters to the specified device
+        self.to(device)
+
         self.output_dim = self.d_model
 
     def forward(
