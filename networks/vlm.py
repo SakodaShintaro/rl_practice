@@ -186,9 +186,6 @@ class VLMEncoderBase(nn.Module):
         action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
         return action_text
 
-    def reset_inference_params(self):
-        self.frame_buffer = []
-
 
 class SmolVLMEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
@@ -258,10 +255,6 @@ class MMMambaEncoder(nn.Module):
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         self.output_dim = 2048
-
-    def reset_inference_params(self):
-        """Reset inference parameters to default values."""
-        self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
 
     def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
         device = image.device

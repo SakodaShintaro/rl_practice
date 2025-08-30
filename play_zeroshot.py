@@ -76,9 +76,6 @@ class VLMAgent:
         action_array = parse_action_text(action_text)
         return action_array
 
-    def initialize_for_episode(self):
-        self.encoder.reset_inference_params()
-
 
 def run_episode(env, agent, render=False):
     obs, _ = env.reset()

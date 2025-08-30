@@ -83,9 +83,7 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown encoder type: {args.encoder}")
 
     # Test step
-    encoder.reset_inference_params()
     encoder(images_sequence[0:1])
-    encoder.reset_inference_params()
 
     start = time.time()
 
