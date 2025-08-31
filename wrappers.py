@@ -111,9 +111,9 @@ class TransposeAndNormalizeObs(gym.ObservationWrapper):
         )
 
     def observation(self, obs):
-        # obs: (H, W, 3)
         o = obs.astype(np.float32) / 255.0
-        o = np.transpose(o, (2, 0, 1))  # (3, H, W)
+        # Convert from (H, W, C) to (C, H, W)
+        o = np.transpose(o, (2, 0, 1))
         return o
 
 
@@ -139,7 +139,10 @@ class ResizeObs(gym.ObservationWrapper):
     def __init__(self, env, shape):
         super().__init__(env)
         self.shape = shape
-        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=shape, dtype=np.float32)
+        h, w = shape[1:]  # shape is (C, H, W), so extract H, W
+        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(h, w, 3), dtype=np.float32)
 
     def observation(self, obs):
-        return cv2.resize(obs, self.shape[1:], interpolation=cv2.INTER_AREA)
+        # obs is (H, W, C), resize and return (H, W, C)
+        h, w = self.shape[1:]  # target height and width
+        return cv2.resize(obs, (w, h), interpolation=cv2.INTER_AREA)

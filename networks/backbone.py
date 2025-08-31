@@ -69,7 +69,7 @@ class SingleFrameEncoder(nn.Module):
 class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
-    def __init__(self, seq_len: int, device: str, tempo_block_type: str):
+    def __init__(self, seq_len: int, device: str, tempo_block_type: str, action_dim: int):
         super().__init__()
 
         self.seq_len = seq_len
@@ -83,7 +83,7 @@ class STTEncoder(nn.Module):
         # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
         self.vae_dim = 4
         self.image_tokens_num = 144  # 12 * 12 patches
-        action_tokens_num = 3
+        action_tokens_num = action_dim
         reward_tokens_num = 1
 
         self.stt = SpatialTemporalTransformer(

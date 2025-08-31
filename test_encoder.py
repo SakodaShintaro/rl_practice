@@ -88,7 +88,7 @@ if __name__ == "__main__":
     if args.encoder == "single_frame":
         target_encoder_list.append(SingleFrameEncoder(num_images, device))
     elif args.encoder == "stt":
-        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
+        target_encoder_list.append(STTEncoder(num_images, device, "transformer", action_dim=3))
     elif args.encoder == "simple_transformer":
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
     elif args.encoder == "mmmamba":
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         target_encoder_list.append(QwenVLEncoder(num_images, device))
     else:  # all
         target_encoder_list.append(SingleFrameEncoder(num_images, device))
-        target_encoder_list.append(STTEncoder(num_images, device, "transformer"))
+        target_encoder_list.append(STTEncoder(num_images, device, "transformer", action_dim=3))
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
         target_encoder_list.append(MMMambaEncoder(num_images, device))
         target_encoder_list.append(SmolVLMEncoder(num_images, device))

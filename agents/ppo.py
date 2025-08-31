@@ -60,8 +60,8 @@ class PpoAgent:
         self.training_step = 0
         self.device = torch.device("cuda")
         self.network = {
-            "default": PpoBetaPolicyAndValue(3, self.seq_len).to(self.device),
-            "paligemma": PpoPaligemmaPolicyAndValue(3).to(self.device),
+            "default": PpoBetaPolicyAndValue(self.action_dim, self.seq_len).to(self.device),
+            "paligemma": PpoPaligemmaPolicyAndValue(self.action_dim).to(self.device),
         }[args.model_name]
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
@@ -70,7 +70,7 @@ class PpoAgent:
             dtype=np.dtype(
                 [
                     ("s", np.float32, (3, 96, 96)),
-                    ("a", np.float32, (3,)),
+                    ("a", np.float32, (self.action_dim,)),
                     ("a_logp", np.float32),
                     ("r", np.float32),
                     ("v", np.float32),
@@ -172,7 +172,8 @@ class PpoAgent:
 
         curr_r = torch.cat(self.r_list, dim=0).unsqueeze(0).unsqueeze(-1)
         curr_s = torch.cat(self.s_list, dim=0).unsqueeze(0)
-        a_with_dummy = self.a_list + [torch.tensor([[0.0, 0.0, 0.0]], device=self.device)]
+        dummy_action = torch.zeros(1, self.action_dim, device=self.device)
+        a_with_dummy = self.a_list + [dummy_action]
         curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
 
         if curr_r.shape[1] < self.seq_len:
