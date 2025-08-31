@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--env_id",
         type=str,
-        default="CarRacing-v3",
+        default="MiniGrid-MemoryS11-v0",
         choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0", "MiniGrid-MemoryS11-v0"],
     )
     parser.add_argument("--partial_obs", type=int, default=0, choices=[0, 1])
@@ -57,7 +57,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--action_norm_penalty", type=float, default=0.1)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--tempo_block_type", type=str, default="transformer", choices=["transformer", "mamba"])
+    parser.add_argument(
+        "--tempo_block_type", type=str, default="transformer", choices=["transformer", "mamba"]
+    )
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
@@ -83,9 +85,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main(exp_name: str, seed: int) -> None:
+def main(args, exp_name: str, seed: int) -> None:
     wandb.init(
-        project="rl_practice",
+        project=f"rl_practice_{args.env_id}",
         config=vars(args),
         name=exp_name,
         save_code=True,
@@ -276,4 +278,4 @@ if __name__ == "__main__":
 
     for i in range(args.trial_num):
         suffix = f"_{i:02d}" if args.trial_num > 1 else ""
-        main(exp_name + suffix, seed + i)
+        main(args, exp_name + suffix, seed + i)
