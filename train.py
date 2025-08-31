@@ -167,11 +167,12 @@ def main(args, exp_name: str, seed: int) -> None:
             action, agent_info = agent.step(global_step, obs, reward, termination, truncation)
 
             # log
-            elapsed_time = time.time() - start_time
+            elapsed_time_sec = time.time() - start_time
+            elapsed_time_min = elapsed_time_sec / 60
             data_dict = {
                 "global_step": global_step,
-                "charts/elapse_time_sec": elapsed_time,
-                "charts/SPS": global_step / elapsed_time,
+                "elapsed_time_min": elapsed_time_min,
+                "SPS": global_step / elapsed_time_sec,
                 "reward": reward,
                 **agent_info,
             }
