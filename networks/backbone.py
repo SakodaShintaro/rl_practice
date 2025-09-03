@@ -43,6 +43,7 @@ class SingleFrameEncoder(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
+    @torch.inference_mode()
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
     ) -> torch.Tensor:
