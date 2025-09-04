@@ -131,49 +131,7 @@ class FluxDiT(nn.Module):
 
         return {"output": output, "activation": activation}
 
-    def training_losses(
-        self,
-        img: Tensor,  # (B, L, C)
-        img_ids: Tensor,
-        cond: Tensor,
-        cond_ids: Tensor,
-        t: Tensor,
-        y: Tensor,
-        guidance: Tensor | None = None,
-        noise: Tensor | None = None,
-        return_predict=False,
-    ) -> Tensor:
-        if noise is None:
-            noise = torch.randn_like(img)
-        terms = {}
-
-        x_t = t * img + (1.0 - t) * noise
-        target = img - noise
-        pred = self(
-            img=x_t,
-            img_ids=img_ids,
-            cond=cond,
-            cond_ids=cond_ids,
-            timesteps=t.reshape(-1),
-            y=y,
-            guidance=guidance,
-        )
-        assert pred.shape == target.shape == img.shape
-        predict = x_t + pred * (1.0 - t)
-        terms["mse"] = mean_flat((target - pred) ** 2)
-
-        terms["loss"] = terms["mse"].mean()
-        if return_predict:
-            terms["predict"] = predict
-        else:
-            terms["predict"] = None
-        return terms
-
-    def sample(
-        self,
-        state: Tensor,
-        action: Tensor,
-    ):
+    def sample(self, state: Tensor, action: Tensor) -> Tensor:
         batch_size = state.shape[0]
         state_dim = state.shape[-1]
 
