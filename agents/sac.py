@@ -228,13 +228,13 @@ class Network(nn.Module):
         state_action = torch.cat([state_curr.clone(), action_curr], dim=-1)
         cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
 
-        pred_state_output = self.state_predictor(
+        pred_state_dict = self.state_predictor(
             img=img,
             cond=cond,
             timesteps=t_state.squeeze(1),
             y=action_curr,
         )
-        pred_states_flat = pred_state_output.squeeze(1)
+        pred_states_flat = pred_state_dict["output"].squeeze(1)
 
         # Conditional vector field for state
         u_t_state = target_state_next - x_0_state
@@ -242,7 +242,7 @@ class Network(nn.Module):
         # Flow Matching loss for state
         state_loss = F.mse_loss(pred_states_flat, u_t_state)
 
-        activations_dict = {"state_predictor": pred_states_flat.detach()}
+        activations_dict = {"state_predictor": pred_state_dict["activation"].flatten(1)}
 
         info_dict = {"seq_loss": state_loss.item()}
 

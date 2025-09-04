@@ -92,7 +92,7 @@ class FluxDiT(nn.Module):
         timesteps: Tensor,
         y: Tensor,
         guidance: Tensor | None = None,
-    ) -> Tensor:
+    ) -> dict:
         if img.ndim != 3 or cond.ndim != 3:
             raise ValueError("Input img and cond tensors must have 3 dimensions.")
 
@@ -125,8 +125,11 @@ class FluxDiT(nn.Module):
             img = block(img, vec=vec, pe=pe)
         img = img[:, cond.shape[1] :, ...]
 
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-        return img
+        # activationとしてfinal_layerの前の中間表現を保存
+        activation = img.detach()
+        output = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+
+        return {"output": output, "activation": activation}
 
     def training_losses(
         self,
@@ -175,11 +178,12 @@ class FluxDiT(nn.Module):
     ):
         for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
             t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
-            pred = self(
+            pred_dict = self(
                 img=img,
                 cond=cond,
                 y=vec,
                 timesteps=t_vec,
             )
+            pred = pred_dict["output"]
             img = img + (t_prev - t_curr) * pred
         return img
