@@ -63,7 +63,7 @@ class Network(nn.Module):
             in_channels=self.encoder.output_dim,
             out_channels=self.encoder.output_dim,
             vec_in_dim=action_dim,
-            context_in_dim=self.encoder.output_dim,
+            context_in_dim=self.encoder.output_dim + action_dim,
             hidden_size=args.predictor_hidden_dim,
             mlp_ratio=4.0,
             num_heads=8,
@@ -215,9 +215,6 @@ class Network(nn.Module):
             target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C' H', W')
             target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
-        # current_stateとactionを結合
-        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
-
         # Flow Matching for state prediction
         x_0_state = torch.randn_like(target_state_next)
         t_state = torch.rand(size=(target_state_next.shape[0], 1), device=target_state_next.device)
@@ -226,17 +223,14 @@ class Network(nn.Module):
         x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
         # Predict velocity for state using FluxDiT - FluxDiTインターフェースに適応
-        batch_size = state_curr.shape[0]
         img = x_t_state.unsqueeze(1)  # (B, 1, state_dim)
-        cond = state_curr.clone().unsqueeze(1)  # (B, 1, state_dim)
-        img_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
-        cond_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
+        # current_stateとactionを結合してconditionとして使用
+        state_action = torch.cat([state_curr.clone(), action_curr], dim=-1)
+        cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
 
         pred_state_output = self.state_predictor(
             img=img,
-            img_ids=img_ids,
             cond=cond,
-            cond_ids=cond_ids,
             timesteps=t_state.squeeze(1),
             y=action_curr,
         )
@@ -256,25 +250,22 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-
         # FluxDiTでサンプリング - DiffusionStatePredictorのget_stateメソッドを模倣
         batch_size = state_curr.shape[0]
         state_dim = state_curr.shape[-1]
 
         # ランダムノイズから開始
         img = torch.randn((batch_size, 1, state_dim), device=state_curr.device)
-        cond = state_curr.unsqueeze(1)  # (B, 1, state_dim)
-        img_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
-        cond_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
+        # current_stateとactionを結合してconditionとして使用
+        state_action = torch.cat([state_curr, action_curr], dim=-1)
+        cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
 
         # サンプリング用のタイムステップ
         timesteps = [1.0, 0.0]  # 1から0へ
 
         next_hidden_state = self.state_predictor.sample(
             img=img,
-            img_ids=img_ids,
             cond=cond,
-            cond_ids=cond_ids,
             vec=action_curr,
             timesteps=timesteps,
         )

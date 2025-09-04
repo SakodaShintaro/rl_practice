@@ -88,15 +88,21 @@ class FluxDiT(nn.Module):
     def forward(
         self,
         img: Tensor,
-        img_ids: Tensor,
         cond: Tensor,
-        cond_ids: Tensor,
         timesteps: Tensor,
         y: Tensor,
         guidance: Tensor | None = None,
     ) -> Tensor:
         if img.ndim != 3 or cond.ndim != 3:
             raise ValueError("Input img and cond tensors must have 3 dimensions.")
+
+        batch_size = img.shape[0]
+        cond_seq_len = cond.shape[1]
+        img_seq_len = img.shape[1]
+
+        # Generate position IDs internally
+        cond_ids = torch.zeros((batch_size, cond_seq_len, 2), device=img.device)
+        img_ids = torch.zeros((batch_size, img_seq_len, 2), device=img.device)
 
         # running on sequences img
         img = self.img_in(img)
@@ -163,9 +169,7 @@ class FluxDiT(nn.Module):
     def sample(
         self,
         img: Tensor,
-        img_ids: Tensor,
         cond: Tensor,
-        cond_ids: Tensor,
         vec: Tensor,
         timesteps: list[float],
     ):
@@ -173,9 +177,7 @@ class FluxDiT(nn.Module):
             t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
             pred = self(
                 img=img,
-                img_ids=img_ids,
                 cond=cond,
-                cond_ids=cond_ids,
                 y=vec,
                 timesteps=t_vec,
             )
