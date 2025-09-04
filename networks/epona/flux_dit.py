@@ -171,11 +171,25 @@ class FluxDiT(nn.Module):
 
     def sample(
         self,
-        img: Tensor,
-        cond: Tensor,
-        vec: Tensor,
-        timesteps: list[float],
+        state: Tensor,
+        action: Tensor,
     ):
+        batch_size = state.shape[0]
+        state_dim = state.shape[-1]
+
+        # ランダムノイズから開始
+        img = torch.randn((batch_size, 1, state_dim), device=state.device)
+
+        # current_stateとactionを結合してconditionとして使用
+        state_action = torch.cat([state, action], dim=-1)
+        cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
+
+        # vecはactionと同じ
+        vec = action
+
+        # サンプリング用のタイムステップを内部で設定
+        timesteps = [1.0, 0.0]  # 1から0へ
+
         for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
             t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
             pred_dict = self(

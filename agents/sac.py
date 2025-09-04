@@ -250,24 +250,9 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        # FluxDiTでサンプリング - DiffusionStatePredictorのget_stateメソッドを模倣
-        batch_size = state_curr.shape[0]
-        state_dim = state_curr.shape[-1]
-
-        # ランダムノイズから開始
-        img = torch.randn((batch_size, 1, state_dim), device=state_curr.device)
-        # current_stateとactionを結合してconditionとして使用
-        state_action = torch.cat([state_curr, action_curr], dim=-1)
-        cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
-
-        # サンプリング用のタイムステップ
-        timesteps = [1.0, 0.0]  # 1から0へ
-
         next_hidden_state = self.state_predictor.sample(
-            img=img,
-            cond=cond,
-            vec=action_curr,
-            timesteps=timesteps,
+            state=state_curr,
+            action=action_curr,
         )
 
         next_hidden_state = next_hidden_state.squeeze(1)  # (B, state_dim)
