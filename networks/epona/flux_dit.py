@@ -131,9 +131,6 @@ class FluxDiT(nn.Module):
         state_action = torch.cat([state, action], dim=-1)
         cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
 
-        # vecはactionと同じ
-        vec = action
-
         # サンプリング用のタイムステップを内部で設定
         timesteps = [1.0, 0.0]  # 1から0へ
 
@@ -142,7 +139,7 @@ class FluxDiT(nn.Module):
             pred_dict = self(
                 img=img,
                 cond=cond,
-                y=vec,
+                y=action,
                 timesteps=t_vec,
             )
             pred = pred_dict["output"]
