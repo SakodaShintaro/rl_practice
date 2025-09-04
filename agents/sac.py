@@ -72,7 +72,6 @@ class Network(nn.Module):
             axes_dim=[32, 32],
             theta=10000,
             qkv_bias=True,
-            guidance_embed=False,
         )
         self.state_predictor = FluxDiT(flux_params)
 
