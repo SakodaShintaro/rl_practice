@@ -221,7 +221,7 @@ class Network(nn.Module):
         # Sample from interpolation path for state
         x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
-        # Predict velocity for state using FluxDiT - FluxDiTインターフェースに適応
+        # Predict velocity for state
         img = x_t_state.unsqueeze(1)  # (B, 1, state_dim)
         cond = state_curr.unsqueeze(1)  # (B, 1, state_dim)
 
