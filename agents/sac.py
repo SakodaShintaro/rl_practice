@@ -8,7 +8,8 @@ from torch import optim
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
-from networks.diffusion_policy import DiffusionPolicy, DiffusionStatePredictor
+from networks.diffusion_policy import DiffusionPolicy
+from networks.epona.flux_dit import FluxDiT, FluxParams
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
@@ -58,13 +59,22 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-        self.state_predictor = DiffusionStatePredictor(
-            input_dim=self.encoder.output_dim + action_dim,
-            state_dim=self.encoder.output_dim,
-            hidden_dim=args.predictor_hidden_dim,
-            block_num=args.predictor_block_num,
-            sparsity=args.sparsity,
+        flux_params = FluxParams(
+            in_channels=self.encoder.output_dim,
+            out_channels=self.encoder.output_dim,
+            vec_in_dim=action_dim,
+            context_in_dim=self.encoder.output_dim,
+            hidden_size=args.predictor_hidden_dim,
+            mlp_ratio=4.0,
+            num_heads=8,
+            depth=4,
+            depth_single_blocks=2,
+            axes_dim=[32, 32],
+            theta=10000,
+            qkv_bias=True,
+            guidance_embed=False,
         )
+        self.state_predictor = FluxDiT(flux_params)
 
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
@@ -215,11 +225,22 @@ class Network(nn.Module):
         # Sample from interpolation path for state
         x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
-        # Predict velocity for state using DiffusionStatePredictor
-        pred_state_dict = self.state_predictor.forward(
-            x_t_state, t_state.squeeze(1), state_action_input
+        # Predict velocity for state using FluxDiT - FluxDiTインターフェースに適応
+        batch_size = state_curr.shape[0]
+        img = x_t_state.unsqueeze(1)  # (B, 1, state_dim)
+        cond = state_curr.clone().unsqueeze(1)  # (B, 1, state_dim)
+        img_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
+        cond_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
+
+        pred_state_output = self.state_predictor(
+            img=img,
+            img_ids=img_ids,
+            cond=cond,
+            cond_ids=cond_ids,
+            timesteps=t_state.squeeze(1),
+            y=action_curr,
         )
-        pred_states_flat = pred_state_dict["output"]
+        pred_states_flat = pred_state_output.squeeze(1)
 
         # Conditional vector field for state
         u_t_state = target_state_next - x_0_state
@@ -227,7 +248,7 @@ class Network(nn.Module):
         # Flow Matching loss for state
         state_loss = F.mse_loss(pred_states_flat, u_t_state)
 
-        activations_dict = {"state_predictor": pred_state_dict["activation"]}
+        activations_dict = {"state_predictor": pred_states_flat.detach()}
 
         info_dict = {"seq_loss": state_loss.item()}
 
@@ -235,8 +256,30 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
-        next_hidden_state, _ = self.state_predictor.get_state(state_action_input)
+
+        # FluxDiTでサンプリング - DiffusionStatePredictorのget_stateメソッドを模倣
+        batch_size = state_curr.shape[0]
+        state_dim = state_curr.shape[-1]
+
+        # ランダムノイズから開始
+        img = torch.randn((batch_size, 1, state_dim), device=state_curr.device)
+        cond = state_curr.unsqueeze(1)  # (B, 1, state_dim)
+        img_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
+        cond_ids = torch.zeros((batch_size, 1, 2), device=state_curr.device)
+
+        # サンプリング用のタイムステップ
+        timesteps = [1.0, 0.0]  # 1から0へ
+
+        next_hidden_state = self.state_predictor.sample(
+            img=img,
+            img_ids=img_ids,
+            cond=cond,
+            cond_ids=cond_ids,
+            vec=action_curr,
+            timesteps=timesteps,
+        )
+
+        next_hidden_state = next_hidden_state.squeeze(1)  # (B, state_dim)
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)

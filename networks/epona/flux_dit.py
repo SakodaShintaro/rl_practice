@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 
 import torch
-from layers import (
+from torch import Tensor, nn
+
+from .layers import (
     DoubleStreamBlock,
     EmbedND,
     LastLayer,
@@ -9,7 +11,6 @@ from layers import (
     SingleStreamBlock,
     timestep_embedding,
 )
-from torch import Tensor, nn
 
 
 def mean_flat(tensor):
