@@ -63,7 +63,7 @@ class Network(nn.Module):
             in_channels=self.encoder.output_dim,
             out_channels=self.encoder.output_dim,
             vec_in_dim=action_dim,
-            context_in_dim=self.encoder.output_dim + action_dim,
+            context_in_dim=self.encoder.output_dim,
             hidden_size=args.predictor_hidden_dim,
             mlp_ratio=4.0,
             num_heads=8,
@@ -223,9 +223,7 @@ class Network(nn.Module):
 
         # Predict velocity for state using FluxDiT - FluxDiTインターフェースに適応
         img = x_t_state.unsqueeze(1)  # (B, 1, state_dim)
-        # current_stateとactionを結合してconditionとして使用
-        state_action = torch.cat([state_curr.clone(), action_curr], dim=-1)
-        cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
+        cond = state_curr.unsqueeze(1)  # (B, 1, state_dim)
 
         pred_state_dict = self.state_predictor(
             img=img,

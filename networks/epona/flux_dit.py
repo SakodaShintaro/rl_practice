@@ -127,9 +127,8 @@ class FluxDiT(nn.Module):
         # ランダムノイズから開始
         img = torch.randn((batch_size, 1, state_dim), device=state.device)
 
-        # current_stateとactionを結合してconditionとして使用
-        state_action = torch.cat([state, action], dim=-1)
-        cond = state_action.unsqueeze(1)  # (B, 1, state_dim + action_dim)
+        # conditionはstateのみ
+        cond = state.unsqueeze(1)  # (B, 1, state_dim)
 
         # サンプリング用のタイムステップを内部で設定
         timesteps = [1.0, 0.0]  # 1から0へ
