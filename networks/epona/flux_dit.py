@@ -108,9 +108,10 @@ class FluxDiT(nn.Module):
             img = block(img, vec=vec, pe=pe)
         img = img[:, cond.shape[1] :, ...]
 
-        # activationとしてfinal_layerの前の中間表現を保存
-        activation = img.flatten(start_dim=1).detach()
         output = self.final_layer(img, vec)  # (B, H*W, out_channels)
         output = output.permute(0, 2, 1).view(B, self.out_channels, H, W)
+
+        # dummy
+        activation = torch.zeros((B, 1))
 
         return {"output": output, "activation": activation}
