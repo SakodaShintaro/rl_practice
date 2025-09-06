@@ -8,7 +8,7 @@ from torch import optim
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
-from networks.diffusion_policy import DiffusionPolicy
+from networks.diffusion_policy import DiffusionPolicy, DiffusionStatePredictor
 from networks.epona.flux_dit import FluxDiT, FluxParams
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -59,23 +59,31 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-        # encoderのlatent形状を取得（C'次元）
-        latent_channels = self.encoder.ae.config.latent_channels
-        flux_params = FluxParams(
-            in_channels=latent_channels,
-            out_channels=latent_channels,
-            vec_in_dim=action_dim,
-            context_in_dim=latent_channels,
-            hidden_size=args.predictor_hidden_dim,
-            mlp_ratio=4.0,
-            num_heads=8,
-            depth=args.predictor_block_num,
-            depth_single_blocks=args.predictor_block_num // 2,
-            axes_dim=[32, 32],
-            theta=10000,
-            qkv_bias=True,
-        )
-        self.state_predictor = FluxDiT(flux_params)
+        if args.predictor_type == "linear":
+            self.state_predictor = DiffusionStatePredictor(
+                input_dim=self.encoder.output_dim + action_dim,
+                state_dim=self.encoder.output_dim,
+                hidden_dim=args.predictor_hidden_dim,
+                block_num=args.predictor_block_num,
+                sparsity=args.sparsity,
+            )
+        elif args.predictor_type == "dit":
+            flux_params = FluxParams(
+                in_channels=self.encoder.output_dim,
+                out_channels=self.encoder.output_dim,
+                vec_in_dim=action_dim,
+                context_in_dim=self.encoder.output_dim,
+                hidden_size=args.predictor_hidden_dim,
+                mlp_ratio=4.0,
+                num_heads=8,
+                depth=4,
+                depth_single_blocks=2,
+                axes_dim=[32, 32],
+                theta=10000,
+                qkv_bias=True,
+                guidance_embed=False,
+            )
+            self.state_predictor = FluxDiT(flux_params)
 
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
@@ -220,22 +228,13 @@ class Network(nn.Module):
         t_state = torch.rand(size=(target_state_next.shape[0], 1), device=target_state_next.device)
 
         # Sample from interpolation path for state
-        t_expanded = t_state.unsqueeze(-1).unsqueeze(-1)  # (B, 1, 1, 1)
-        x_t_state = (1.0 - t_expanded) * x_0_state + t_expanded * target_state_next
+        x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
-        # Predict velocity for state - FluxDiTに(B, C', H', W')形状で渡す
-        B, C, H, W = target_state_next.shape
-
-        # condもimgと同じ4次元形状に変換
-        cond_4d = state_curr.view(B, C, H, W)
-
-        pred_state_dict = self.state_predictor(
-            img=x_t_state,
-            cond=cond_4d,
-            timesteps=t_state.squeeze(1),
-            y=action_curr,
+        # Predict velocity for state using DiffusionStatePredictor
+        pred_state_dict = self.state_predictor.forward(
+            x_t_state, t_state.squeeze(1), state_action_input
         )
-        pred_states = pred_state_dict["output"]  # (B, H'*W', C')
+        pred_states_flat = pred_state_dict["output"]
 
         # Conditional vector field for state - (B, C', H', W')を(B, H'*W', C')に変換
         target_flat = target_state_next.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
@@ -245,7 +244,7 @@ class Network(nn.Module):
         # Flow Matching loss for state
         state_loss = F.mse_loss(pred_states, u_t_state)
 
-        activations_dict = {"state_predictor": pred_state_dict["activation"].flatten(1)}
+        activations_dict = {"state_predictor": pred_state_dict["activation"]}
 
         info_dict = {"seq_loss": state_loss.item()}
 
@@ -253,16 +252,8 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        # latent形状を設定（エンコーダーが期待する12x12サイズ）
-        latent_size = 12
-
-        next_hidden_state = self.state_predictor.sample(
-            state=state_curr,
-            action=action_curr,
-            img_shape=(latent_size, latent_size),
-        )
-
-        # next_hidden_stateは既に(B, C, H, W)形状で返される
+        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
+        next_hidden_state, _ = self.state_predictor.sample(state_action_input)
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
