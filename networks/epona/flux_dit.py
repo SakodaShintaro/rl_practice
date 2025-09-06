@@ -86,16 +86,19 @@ class FluxDiT(nn.Module):
         timesteps: Tensor,
         y: Tensor,
     ) -> dict:
-        if img.ndim != 3 or cond.ndim != 3:
-            raise ValueError("Input img and cond tensors must have 3 dimensions.")
+        # imgは常に4次元(B, C, H, W)として処理
+        B, C, H, W = img.shape
+        # 4次元の画像から2D位置エンコーディングを生成
+        y_pos = torch.arange(H, device=img.device).repeat_interleave(W)
+        x_pos = torch.arange(W, device=img.device).repeat(H)
+        img_ids = torch.stack([y_pos, x_pos], dim=-1).unsqueeze(0).expand(B, -1, -1).float()
+        cond_ids = img_ids
 
-        batch_size = img.shape[0]
-        cond_seq_len = cond.shape[1]
-        img_seq_len = img.shape[1]
+        # 3次元に変換
+        img = img.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
 
-        # Generate position IDs internally
-        cond_ids = torch.zeros((batch_size, cond_seq_len, 2), device=img.device)
-        img_ids = torch.zeros((batch_size, img_seq_len, 2), device=img.device)
+        # condを3次元に変換
+        cond = cond.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
 
         # running on sequences img
         img = self.img_in(img)
@@ -115,20 +118,20 @@ class FluxDiT(nn.Module):
         img = img[:, cond.shape[1] :, ...]
 
         # activationとしてfinal_layerの前の中間表現を保存
-        activation = img.detach()
+        activation = img.flatten(start_dim=1).detach()
         output = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
         return {"output": output, "activation": activation}
 
-    def sample(self, state: Tensor, action: Tensor) -> Tensor:
+    def sample(self, state: Tensor, action: Tensor, img_shape: tuple[int, int]) -> Tensor:
         batch_size = state.shape[0]
-        state_dim = state.shape[-1]
+        H, W = img_shape
 
-        # ランダムノイズから開始
-        img = torch.randn((batch_size, 1, state_dim), device=state.device)
+        # ランダムノイズから開始 - (B, C, H, W)形状
+        img = torch.randn((batch_size, self.in_channels, H, W), device=state.device)
 
-        # conditionはstateのみ
-        cond = state.unsqueeze(1)  # (B, 1, state_dim)
+        # stateを4次元に変換してconditionとして使用
+        cond = state.view(batch_size, self.in_channels, H, W)
 
         # サンプリング用のタイムステップを内部で設定
         timesteps = [1.0, 0.0]  # 1から0へ
@@ -141,6 +144,8 @@ class FluxDiT(nn.Module):
                 y=action,
                 timesteps=t_vec,
             )
-            pred = pred_dict["output"]
-            img = img + (t_prev - t_curr) * pred
+            pred = pred_dict["output"]  # (B, H*W, C)
+            # predを(B, C, H, W)に戻して更新
+            pred_4d = pred.permute(0, 2, 1).view(batch_size, self.in_channels, H, W)
+            img = img + (t_prev - t_curr) * pred_4d
         return img

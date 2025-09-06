@@ -59,11 +59,13 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
+        # encoderのlatent形状を取得（C'次元）
+        latent_channels = self.encoder.ae.config.latent_channels
         flux_params = FluxParams(
-            in_channels=self.encoder.output_dim,
-            out_channels=self.encoder.output_dim,
+            in_channels=latent_channels,
+            out_channels=latent_channels,
             vec_in_dim=action_dim,
-            context_in_dim=self.encoder.output_dim,
+            context_in_dim=latent_channels,
             hidden_size=args.predictor_hidden_dim,
             mlp_ratio=4.0,
             num_heads=8,
@@ -212,32 +214,36 @@ class Network(nn.Module):
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
             target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C', H', W')
-            target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
         # Flow Matching for state prediction
         x_0_state = torch.randn_like(target_state_next)
         t_state = torch.rand(size=(target_state_next.shape[0], 1), device=target_state_next.device)
 
         # Sample from interpolation path for state
-        x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
+        t_expanded = t_state.unsqueeze(-1).unsqueeze(-1)  # (B, 1, 1, 1)
+        x_t_state = (1.0 - t_expanded) * x_0_state + t_expanded * target_state_next
 
-        # Predict velocity for state
-        img = x_t_state.unsqueeze(1)  # (B, 1, state_dim)
-        cond = state_curr.unsqueeze(1)  # (B, 1, state_dim)
+        # Predict velocity for state - FluxDiTに(B, C', H', W')形状で渡す
+        B, C, H, W = target_state_next.shape
+
+        # condもimgと同じ4次元形状に変換
+        cond_4d = state_curr.view(B, C, H, W)
 
         pred_state_dict = self.state_predictor(
-            img=img,
-            cond=cond,
+            img=x_t_state,
+            cond=cond_4d,
             timesteps=t_state.squeeze(1),
             y=action_curr,
         )
-        pred_states_flat = pred_state_dict["output"].squeeze(1)
+        pred_states = pred_state_dict["output"]  # (B, H'*W', C')
 
-        # Conditional vector field for state
-        u_t_state = target_state_next - x_0_state
+        # Conditional vector field for state - (B, C', H', W')を(B, H'*W', C')に変換
+        target_flat = target_state_next.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        x_0_flat = x_0_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        u_t_state = target_flat - x_0_flat
 
         # Flow Matching loss for state
-        state_loss = F.mse_loss(pred_states_flat, u_t_state)
+        state_loss = F.mse_loss(pred_states, u_t_state)
 
         activations_dict = {"state_predictor": pred_state_dict["activation"].flatten(1)}
 
@@ -247,12 +253,16 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
+        # latent形状を設定（エンコーダーが期待する12x12サイズ）
+        latent_size = 12
+
         next_hidden_state = self.state_predictor.sample(
             state=state_curr,
             action=action_curr,
+            img_shape=(latent_size, latent_size),
         )
 
-        next_hidden_state = next_hidden_state.squeeze(1)  # (B, state_dim)
+        # next_hidden_stateは既に(B, C, H, W)形状で返される
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
