@@ -147,7 +147,11 @@ class DiffusionStatePredictor(nn.Module):
     ) -> dict[str, torch.Tensor]:
         result_dict = {}
 
+        original_shape = target.shape
+        target = target.flatten(1)
         t = self.t_embedder(t)
+        t = t.view(t.shape[0], t.shape[-1])
+        state_curr = state_curr.flatten(1)
         x = torch.cat([target, t, state_curr, action_curr], 1)
         x = self.fc_in(x)
 
@@ -157,6 +161,7 @@ class DiffusionStatePredictor(nn.Module):
         result_dict["activation"] = x
 
         x = self.fc_out(x)
+        x = x.view(original_shape)
         result_dict["output"] = x
         return result_dict
 
