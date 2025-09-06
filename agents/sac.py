@@ -69,15 +69,15 @@ class Network(nn.Module):
             )
         elif args.predictor_type == "dit":
             flux_params = FluxParams(
-                in_channels=self.encoder.output_dim,
-                out_channels=self.encoder.output_dim,
+                in_channels=4,
+                out_channels=4,
                 vec_in_dim=action_dim,
-                context_in_dim=self.encoder.output_dim,
+                context_in_dim=4,
                 hidden_size=args.predictor_hidden_dim,
                 mlp_ratio=4.0,
                 num_heads=8,
-                depth=4,
-                depth_single_blocks=2,
+                depth=2,
+                depth_single_blocks=1,
                 axes_dim=[32, 32],
                 theta=10000,
                 qkv_bias=True,
@@ -251,6 +251,7 @@ class Network(nn.Module):
         self, state_curr: torch.Tensor, action_curr: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         bs = state_curr.size(0)
+        state_curr = state_curr.view(bs, 4, 12, 12)
         normal = torch.distributions.Normal(
             torch.zeros(state_curr.shape, device=state_curr.device),
             torch.ones(state_curr.shape, device=state_curr.device),

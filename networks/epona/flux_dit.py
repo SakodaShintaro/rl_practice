@@ -75,17 +75,24 @@ class FluxDiT(nn.Module):
     def forward(
         self,
         img: Tensor,
-        img_ids: Tensor,
-        cond: Tensor,
-        cond_ids: Tensor,
         timesteps: Tensor,
+        cond: Tensor,
         y: Tensor,
     ) -> Tensor:
-        if img.ndim != 3 or cond.ndim != 3:
-            raise ValueError("Input img and cond tensors must have 3 dimensions.")
+        B, C, H, W = img.shape
+        # 4次元の画像から2D位置エンコーディングを生成
+        y_pos = torch.arange(H, device=img.device).repeat_interleave(W)
+        x_pos = torch.arange(W, device=img.device).repeat(H)
+        img_ids = torch.stack([y_pos, x_pos], dim=-1).unsqueeze(0).expand(B, -1, -1).float()
+        cond_ids = img_ids
+
+        # 3次元に変換
+        img = img.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        cond = cond.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
 
         # running on sequences img
         img = self.img_in(img)
+        timesteps = timesteps.flatten()
         vec = self.time_in(timestep_embedding(timesteps, 256))
         vec = vec + self.vector_in(y)
         cond = self.cond_in(cond)
@@ -101,27 +108,9 @@ class FluxDiT(nn.Module):
             img = block(img, vec=vec, pe=pe)
         img = img[:, cond.shape[1] :, ...]
 
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-        return img
+        # activationとしてfinal_layerの前の中間表現を保存
+        activation = img.flatten(start_dim=1).detach()
+        output = self.final_layer(img, vec)  # (B, H*W, out_channels)
+        output = output.permute(0, 2, 1).view(B, self.out_channels, H, W)
 
-    def sample(
-        self,
-        img: Tensor,
-        img_ids: Tensor,
-        cond: Tensor,
-        cond_ids: Tensor,
-        vec: Tensor,
-        timesteps: list[float],
-    ):
-        for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
-            t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
-            pred = self(
-                img=img,
-                img_ids=img_ids,
-                cond=cond,
-                cond_ids=cond_ids,
-                y=vec,
-                timesteps=t_vec,
-            )
-            img = img + (t_prev - t_curr) * pred
-        return img
+        return {"output": output, "activation": activation}
