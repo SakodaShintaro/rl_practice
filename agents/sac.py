@@ -232,7 +232,7 @@ class Network(nn.Module):
 
         # Predict velocity for state using DiffusionStatePredictor
         pred_state_dict = self.state_predictor.forward(
-            x_t_state, t_state.squeeze(1), state_action_input
+            x_t_state, t_state.squeeze(1), state_curr, action_curr
         )
         pred_states_flat = pred_state_dict["output"]
 
@@ -252,8 +252,7 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
-        next_hidden_state, _ = self.state_predictor.sample(state_action_input)
+        next_hidden_state, _ = self.state_predictor.sample(state_curr, action_curr)
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
