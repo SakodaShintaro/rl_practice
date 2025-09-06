@@ -160,9 +160,7 @@ class DiffusionStatePredictor(nn.Module):
         result_dict["output"] = x
         return result_dict
 
-    def get_state(
-        self, input_token: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def sample(self, input_token: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         bs = input_token.size(0)
         normal = torch.distributions.Normal(
             torch.zeros((bs, self.state_dim), device=input_token.device),
