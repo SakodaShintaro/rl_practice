@@ -81,7 +81,6 @@ class Network(nn.Module):
                 axes_dim=[32, 32],
                 theta=10000,
                 qkv_bias=True,
-                guidance_embed=False,
             )
             self.state_predictor = FluxDiT(flux_params)
 
@@ -222,6 +221,7 @@ class Network(nn.Module):
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
             target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C', H', W')
+            target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
         # Flow Matching for state prediction
         x_0_state = torch.randn_like(target_state_next)
