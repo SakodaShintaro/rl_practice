@@ -140,7 +140,9 @@ class ResizeObs(gym.ObservationWrapper):
         super().__init__(env)
         self.shape = shape
         h, w = shape[1:]  # shape is (C, H, W), so extract H, W
-        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(h, w, 3), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(
+            low=0.0, high=1.0, shape=(h, w, 3), dtype=np.float32
+        )
 
     def observation(self, obs):
         # obs is (H, W, C), resize and return (H, W, C)
