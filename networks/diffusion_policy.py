@@ -143,12 +143,12 @@ class DiffusionStatePredictor(nn.Module):
         )
 
     def forward(
-        self, target: torch.Tensor, t: torch.Tensor, input_token: torch.Tensor
+        self, target: torch.Tensor, t: torch.Tensor, state_curr: torch.Tensor, action_curr: torch.Tensor
     ) -> dict[str, torch.Tensor]:
         result_dict = {}
 
         t = self.t_embedder(t)
-        x = torch.cat([target, t, input_token], 1)
+        x = torch.cat([target, t, state_curr, action_curr], 1)
         x = self.fc_in(x)
 
         x = self.fc_mid(x)
@@ -160,20 +160,20 @@ class DiffusionStatePredictor(nn.Module):
         result_dict["output"] = x
         return result_dict
 
-    def sample(self, input_token: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        bs = input_token.size(0)
+    def sample(self, state_curr: torch.Tensor, action_curr: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        bs = state_curr.size(0)
         normal = torch.distributions.Normal(
-            torch.zeros((bs, self.state_dim), device=input_token.device),
-            torch.ones((bs, self.state_dim), device=input_token.device),
+            torch.zeros((bs, self.state_dim), device=state_curr.device),
+            torch.ones((bs, self.state_dim), device=state_curr.device),
         )
-        target = normal.sample().to(input_token.device)
+        target = normal.sample().to(state_curr.device)
         target = torch.clamp(target, -3.0, 3.0)
         dt = 1.0 / self.step_num
 
-        curr_time = torch.zeros((bs), device=input_token.device)
+        curr_time = torch.zeros((bs), device=state_curr.device)
 
         for _ in range(self.step_num):
-            tmp_dict = self.forward(target, curr_time, input_token)
+            tmp_dict = self.forward(target, curr_time, state_curr, action_curr)
             v = tmp_dict["output"]
             target = target + dt * v
             curr_time += dt
@@ -185,5 +185,5 @@ class DiffusionStatePredictor(nn.Module):
 
             sys.exit(1)
 
-        dummy_log_p = torch.zeros((bs, 1), device=input_token.device)
+        dummy_log_p = torch.zeros((bs, 1), device=state_curr.device)
         return target, dummy_log_p

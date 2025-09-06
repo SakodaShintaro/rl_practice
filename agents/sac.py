@@ -224,9 +224,6 @@ class Network(nn.Module):
             target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C' H', W')
             target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
-        # current_stateとactionを結合
-        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
-
         # Flow Matching for state prediction
         x_0_state = torch.randn_like(target_state_next)
         t_state = torch.rand(size=(target_state_next.shape[0], 1), device=target_state_next.device)
@@ -236,7 +233,7 @@ class Network(nn.Module):
 
         # Predict velocity for state using DiffusionStatePredictor
         pred_state_dict = self.state_predictor.forward(
-            x_t_state, t_state.squeeze(1), state_action_input
+            x_t_state, t_state.squeeze(1), state_curr, action_curr
         )
         pred_states_flat = pred_state_dict["output"]
 
@@ -254,8 +251,7 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        state_action_input = torch.cat([state_curr, action_curr], dim=-1)
-        next_hidden_state, _ = self.state_predictor.sample(state_action_input)
+        next_hidden_state, _ = self.state_predictor.sample(state_curr, action_curr)
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
