@@ -143,7 +143,11 @@ class DiffusionStatePredictor(nn.Module):
         )
 
     def forward(
-        self, target: torch.Tensor, t: torch.Tensor, state_curr: torch.Tensor, action_curr: torch.Tensor
+        self,
+        target: torch.Tensor,
+        t: torch.Tensor,
+        state_curr: torch.Tensor,
+        action_curr: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         result_dict = {}
 
