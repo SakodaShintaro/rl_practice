@@ -221,20 +221,18 @@ class Network(nn.Module):
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
             target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C', H', W')
-            target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
         # Flow Matching for state prediction
         x_0_state = torch.randn_like(target_state_next)
-        t_state = torch.rand(size=(target_state_next.shape[0], 1), device=target_state_next.device)
+        shape_t = (x_0_state.shape[0],) + (1,) * (len(x_0_state.shape) - 1)
+        t_state = torch.rand(shape_t, device=target_state_next.device)
 
         # Sample from interpolation path for state
         x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
         # Predict velocity for state using DiffusionStatePredictor
-        pred_state_dict = self.state_predictor.forward(
-            x_t_state, t_state.squeeze(1), state_curr, action_curr
-        )
-        pred_states_flat = pred_state_dict["output"]
+        pred_state_dict = self.state_predictor.forward(x_t_state, t_state, state_curr, action_curr)
+        pred_state = pred_state_dict["output"]
 
         # Conditional vector field for state - (B, C', H', W')を(B, H'*W', C')に変換
         target_flat = target_state_next.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
@@ -242,7 +240,7 @@ class Network(nn.Module):
         u_t_state = target_flat - x_0_flat
 
         # Flow Matching loss for state
-        state_loss = F.mse_loss(pred_states, u_t_state)
+        state_loss = F.mse_loss(pred_state, u_t_state)
 
         activations_dict = {"state_predictor": pred_state_dict["activation"]}
 
