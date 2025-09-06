@@ -269,13 +269,6 @@ class Network(nn.Module):
             target = target + dt * v
             curr_time += dt
 
-        if torch.isnan(target).any():
-            print(f"{target=}")
-            print(f"{self.fc_in.weight=}")
-            import sys
-
-            sys.exit(1)
-
         dummy_log_p = torch.zeros((bs, 1), device=state_curr.device)
         return target, dummy_log_p
 
