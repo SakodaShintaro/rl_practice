@@ -247,8 +247,40 @@ class Network(nn.Module):
         return state_loss, activations_dict, info_dict
 
     @torch.inference_mode()
+    def sample_next_state(
+        self, state_curr: torch.Tensor, action_curr: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        bs = state_curr.size(0)
+        normal = torch.distributions.Normal(
+            torch.zeros(state_curr.shape, device=state_curr.device),
+            torch.ones(state_curr.shape, device=state_curr.device),
+        )
+        target = normal.sample().to(state_curr.device)
+        target = torch.clamp(target, -3.0, 3.0)
+        step_num = 50
+        dt = 1.0 / step_num
+
+        curr_time = torch.zeros((bs), device=state_curr.device)
+
+        for _ in range(step_num):
+            tmp_dict = self.state_predictor.forward(target, curr_time, state_curr, action_curr)
+            v = tmp_dict["output"]
+            target = target + dt * v
+            curr_time += dt
+
+        if torch.isnan(target).any():
+            print(f"{target=}")
+            print(f"{self.fc_in.weight=}")
+            import sys
+
+            sys.exit(1)
+
+        dummy_log_p = torch.zeros((bs, 1), device=state_curr.device)
+        return target, dummy_log_p
+
+    @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        next_hidden_state, _ = self.state_predictor.sample(state_curr, action_curr)
+        next_hidden_state, _ = self.sample_next_state(state_curr, action_curr)
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)

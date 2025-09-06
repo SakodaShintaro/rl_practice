@@ -164,31 +164,3 @@ class DiffusionStatePredictor(nn.Module):
         x = x.view(original_shape)
         result_dict["output"] = x
         return result_dict
-
-    def sample(self, state_curr: torch.Tensor, action_curr: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        bs = state_curr.size(0)
-        normal = torch.distributions.Normal(
-            torch.zeros((bs, self.state_dim), device=state_curr.device),
-            torch.ones((bs, self.state_dim), device=state_curr.device),
-        )
-        target = normal.sample().to(state_curr.device)
-        target = torch.clamp(target, -3.0, 3.0)
-        dt = 1.0 / self.step_num
-
-        curr_time = torch.zeros((bs), device=state_curr.device)
-
-        for _ in range(self.step_num):
-            tmp_dict = self.forward(target, curr_time, state_curr, action_curr)
-            v = tmp_dict["output"]
-            target = target + dt * v
-            curr_time += dt
-
-        if torch.isnan(target).any():
-            print(f"{target=}")
-            print(f"{self.fc_in.weight=}")
-            import sys
-
-            sys.exit(1)
-
-        dummy_log_p = torch.zeros((bs, 1), device=state_curr.device)
-        return target, dummy_log_p
