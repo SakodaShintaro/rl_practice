@@ -221,7 +221,7 @@ class Network(nn.Module):
         # 次のstateをencodeする
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
-            target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C' H', W')
+            target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C', H', W')
             target_state_next = target_state_next.flatten(1)  # (B, state_dim)
 
         # Flow Matching for state prediction
