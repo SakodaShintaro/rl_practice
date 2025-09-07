@@ -25,6 +25,7 @@ class Network(nn.Module):
         self.seq_len = args.seq_len
 
         self.action_dim = action_dim
+        self.predictor_step_num = args.predictor_step_num
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -258,12 +259,11 @@ class Network(nn.Module):
         )
         target = normal.sample().to(state_curr.device)
         target = torch.clamp(target, -3.0, 3.0)
-        step_num = 50
-        dt = 1.0 / step_num
+        dt = 1.0 / self.predictor_step_num
 
         curr_time = torch.zeros((bs), device=state_curr.device)
 
-        for _ in range(step_num):
+        for _ in range(self.predictor_step_num):
             tmp_dict = self.state_predictor.forward(target, curr_time, state_curr, action_curr)
             v = tmp_dict["output"]
             target = target + dt * v
