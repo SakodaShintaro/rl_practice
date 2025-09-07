@@ -157,6 +157,7 @@ def main(args, exp_name: str, seed: int) -> None:
         obs, _ = env.reset()
         obs_for_render = obs.copy().transpose(1, 2, 0)
         prediction = np.zeros_like(obs_for_render)
+        obs_l1_loss = np.mean(np.abs(prediction - obs_for_render))
         bgr_image_list = [concat_images(env.render(), [obs_for_render])]
         agent.initialize_for_episode()
         action, agent_info = agent.select_action(global_step, obs, 0.0)
@@ -176,6 +177,7 @@ def main(args, exp_name: str, seed: int) -> None:
                 "elapsed_time_min": elapsed_time_min,
                 "SPS": global_step / elapsed_time_sec,
                 "reward": reward,
+                "obs_l1_loss": obs_l1_loss,
                 **agent_info,
             }
             wandb.log(data_dict)
@@ -199,6 +201,7 @@ def main(args, exp_name: str, seed: int) -> None:
                 cv2.imshow("CarRacing", bgr_image)
                 cv2.waitKey(1)
             prediction = agent_info.get("next_image", np.zeros_like(obs_for_render))
+            obs_l1_loss = np.mean(np.abs(prediction - obs_for_render))
 
             if termination or truncation:
                 break
