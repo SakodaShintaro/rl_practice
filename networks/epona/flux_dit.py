@@ -46,7 +46,7 @@ class FluxDiT(nn.Module):
         self.hidden_size = params.hidden_size
         self.num_heads = params.num_heads
         self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
-        self.img_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
+        self.noise_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
         self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
         self.vector_in = MLPEmbedder(params.vec_in_dim, self.hidden_size)
         self.cond_in = nn.Linear(params.context_in_dim, self.hidden_size)
@@ -74,41 +74,40 @@ class FluxDiT(nn.Module):
 
     def forward(
         self,
-        img: Tensor,
+        noise: Tensor,
         timesteps: Tensor,
         cond: Tensor,
         y: Tensor,
     ) -> Tensor:
-        B, C, H, W = img.shape
+        B, C, H, W = noise.shape
         # 4次元の画像から2D位置エンコーディングを生成
-        y_pos = torch.arange(H, device=img.device).repeat_interleave(W)
-        x_pos = torch.arange(W, device=img.device).repeat(H)
-        img_ids = torch.stack([y_pos, x_pos], dim=-1).unsqueeze(0).expand(B, -1, -1).float()
-        cond_ids = img_ids
+        y_pos = torch.arange(H, device=noise.device).repeat_interleave(W)
+        x_pos = torch.arange(W, device=noise.device).repeat(H)
+        noise_ids = torch.stack([y_pos, x_pos], dim=-1).unsqueeze(0).expand(B, -1, -1).float()
+        cond_ids = noise_ids
 
         # 3次元に変換
-        img = img.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        noise = noise.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
         cond = cond.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
 
         # running on sequences img
-        img = self.img_in(img)
+        noise = self.noise_in(noise)
         timesteps = timesteps.flatten()
-        vec = self.time_in(timestep_embedding(timesteps, 256))
-        vec = vec + self.vector_in(y)
+        vec = self.time_in(timestep_embedding(timesteps, 256)) + self.vector_in(y)
         cond = self.cond_in(cond)
 
-        ids = torch.cat((cond_ids, img_ids), dim=1)
+        ids = torch.cat((cond_ids, noise_ids), dim=1)
         pe = self.pe_embedder(ids)
 
         for block in self.double_blocks:
-            img, cond = block(img=img, cond=cond, vec=vec, pe=pe)
+            noise, cond = block(img=noise, cond=cond, vec=vec, pe=pe)
 
-        img = torch.cat((cond, img), 1)
+        noise = torch.cat((cond, noise), 1)
         for block in self.single_blocks:
-            img = block(img, vec=vec, pe=pe)
-        img = img[:, cond.shape[1] :, ...]
+            noise = block(noise, vec=vec, pe=pe)
+        noise = noise[:, cond.shape[1] :, ...]
 
-        output = self.final_layer(img, vec)  # (B, H*W, out_channels)
+        output = self.final_layer(noise, vec)  # (B, H*W, out_channels)
         output = output.permute(0, 2, 1).view(B, self.out_channels, H, W)
 
         # dummy
