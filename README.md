@@ -6,7 +6,7 @@
 
 ```bash
 sudo apt update
-sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils
+sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils python3.10-venv
 ```
 
 ## venv利用
