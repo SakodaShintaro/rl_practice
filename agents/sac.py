@@ -68,7 +68,7 @@ class Network(nn.Module):
             hidden_size=args.predictor_hidden_dim,
             mlp_ratio=4.0,
             num_heads=8,
-            depth=args.predictor_block_num,
+            depth_double_blocks=args.predictor_block_num,
             depth_single_blocks=args.predictor_block_num // 2,
             axes_dim=[64],
             theta=10000,

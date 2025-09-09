@@ -22,7 +22,7 @@ class FluxParams:
     hidden_size: int
     mlp_ratio: float
     num_heads: int
-    depth: int
+    depth_double_blocks: int
     depth_single_blocks: int
     axes_dim: list[int]
     theta: int
@@ -59,7 +59,7 @@ class FluxDiT(nn.Module):
                     mlp_ratio=params.mlp_ratio,
                     qkv_bias=params.qkv_bias,
                 )
-                for _ in range(params.depth)
+                for _ in range(params.depth_double_blocks)
             ]
         )
 
