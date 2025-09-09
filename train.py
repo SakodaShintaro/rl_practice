@@ -279,6 +279,10 @@ if __name__ == "__main__":
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
+    if not os.environ.get("DISPLAY"):
+        print("Because a headless environment is detected, rendering is automatically disabled.")
+        args.render = 0
+
     exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
     seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
 
