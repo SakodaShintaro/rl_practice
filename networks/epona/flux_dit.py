@@ -80,10 +80,9 @@ class FluxDiT(nn.Module):
         y: Tensor,
     ) -> Tensor:
         B, C, H, W = noise.shape
-        # 4次元の画像から2D位置エンコーディングを生成
-        y_pos = torch.arange(H, device=noise.device).repeat_interleave(W)
-        x_pos = torch.arange(W, device=noise.device).repeat(H)
-        noise_ids = torch.stack([y_pos, x_pos], dim=-1).unsqueeze(0).expand(B, -1, -1).float()
+        # 位置エンコーディングを生成
+        pos_id = torch.arange(H * W, device=noise.device)
+        noise_ids = pos_id.unsqueeze(0).expand(B, -1).unsqueeze(-1).float()
         cond_ids = noise_ids
 
         # 3次元に変換

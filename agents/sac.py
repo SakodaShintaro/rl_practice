@@ -79,7 +79,7 @@ class Network(nn.Module):
                 num_heads=8,
                 depth=2,
                 depth_single_blocks=1,
-                axes_dim=[32, 32],
+                axes_dim=[64],
                 theta=10000,
                 qkv_bias=True,
             )
