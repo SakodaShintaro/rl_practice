@@ -8,7 +8,7 @@ from torch import optim
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
-from networks.diffusion_policy import DiffusionPolicy, DiffusionStatePredictor
+from networks.diffusion_policy import DiffusionPolicy
 from networks.epona.flux_dit import FluxDiT, FluxParams
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
@@ -60,30 +60,21 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-        if args.predictor_type == "linear":
-            self.state_predictor = DiffusionStatePredictor(
-                input_dim=self.encoder.output_dim + action_dim,
-                state_dim=self.encoder.output_dim,
-                hidden_dim=args.predictor_hidden_dim,
-                block_num=args.predictor_block_num,
-                sparsity=args.sparsity,
-            )
-        elif args.predictor_type == "dit":
-            flux_params = FluxParams(
-                in_channels=4,
-                out_channels=4,
-                vec_in_dim=action_dim,
-                context_in_dim=4,
-                hidden_size=args.predictor_hidden_dim,
-                mlp_ratio=4.0,
-                num_heads=8,
-                depth=2,
-                depth_single_blocks=1,
-                axes_dim=[64],
-                theta=10000,
-                qkv_bias=True,
-            )
-            self.state_predictor = FluxDiT(flux_params)
+        flux_params = FluxParams(
+            in_channels=4,
+            out_channels=4,
+            vec_in_dim=action_dim,
+            context_in_dim=4,
+            hidden_size=args.predictor_hidden_dim,
+            mlp_ratio=4.0,
+            num_heads=8,
+            depth=2,
+            depth_single_blocks=1,
+            axes_dim=[64],
+            theta=10000,
+            qkv_bias=True,
+        )
+        self.state_predictor = FluxDiT(flux_params)
 
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
@@ -231,7 +222,7 @@ class Network(nn.Module):
         # Sample from interpolation path for state
         x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
-        # Predict velocity for state using DiffusionStatePredictor
+        # Predict velocity for state
         pred_state_dict = self.state_predictor.forward(x_t_state, t_state, state_curr, action_curr)
         pred_state = pred_state_dict["output"]
 
