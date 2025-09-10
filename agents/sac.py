@@ -69,7 +69,7 @@ class Network(nn.Module):
             mlp_ratio=4.0,
             num_heads=8,
             depth_double_blocks=args.predictor_block_num,
-            depth_single_blocks=args.predictor_block_num // 2,
+            depth_single_blocks=args.predictor_block_num,
             axes_dim=[64],
             theta=10000,
             qkv_bias=True,
