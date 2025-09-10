@@ -270,6 +270,29 @@ class SingleStreamBlock(nn.Module):
         return x + mod.gate * output
 
 
+class LinearEmbedder(nn.Module):
+    def __init__(self, embed_dim, bias=False):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.use_bias = bias
+        self.encoder = nn.Linear(1, embed_dim, bias=bias)
+
+    def embed(self, x):
+        x = x.unsqueeze(-1)
+        embedded = self.encoder(x)
+        return embedded
+
+    def decode(self, embedded):
+        if self.use_bias:
+            bias_expanded = self.encoder.bias.unsqueeze(0).unsqueeze(0)
+            decoded_values = (embedded - bias_expanded) / self.encoder.weight[:, 0]
+        else:
+            decoded_values = embedded / self.encoder.weight[:, 0]
+
+        decoded = decoded_values.mean(dim=-1)
+        return decoded
+
+
 class LastLayer(nn.Module):
     def __init__(self, hidden_size: int, patch_size: int, out_channels: int):
         super().__init__()
