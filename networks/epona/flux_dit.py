@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-
 import torch
 from torch import Tensor, nn
 
@@ -13,60 +11,57 @@ from .layers import (
 )
 
 
-@dataclass
-class FluxParams:
-    in_channels: int
-    out_channels: int
-    vec_in_dim: int
-    context_in_dim: int
-    hidden_size: int
-    mlp_ratio: float
-    num_heads: int
-    depth_double_blocks: int
-    depth_single_blocks: int
-    axes_dim: list[int]
-    theta: int
-    qkv_bias: bool
-
-
 class FluxDiT(nn.Module):
-    def __init__(self, params: FluxParams):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        vec_in_dim: int,
+        context_in_dim: int,
+        hidden_size: int,
+        mlp_ratio: float,
+        num_heads: int,
+        depth_double_blocks: int,
+        depth_single_blocks: int,
+        axes_dim: list[int],
+        theta: int,
+        qkv_bias: bool,
+    ):
         super().__init__()
 
-        self.params = params
-        self.in_channels = params.in_channels
-        self.out_channels = params.out_channels
-        if params.hidden_size % params.num_heads != 0:
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        if hidden_size % num_heads != 0:
             raise ValueError(
-                f"Hidden size {params.hidden_size} must be divisible by num_heads {params.num_heads}"
+                f"Hidden size {hidden_size} must be divisible by num_heads {num_heads}"
             )
-        pe_dim = params.hidden_size // params.num_heads
-        if sum(params.axes_dim) != pe_dim:
-            raise ValueError(f"Got {params.axes_dim} but expected positional dim {pe_dim}")
-        self.hidden_size = params.hidden_size
-        self.num_heads = params.num_heads
-        self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
+        pe_dim = hidden_size // num_heads
+        if sum(axes_dim) != pe_dim:
+            raise ValueError(f"Got {axes_dim} but expected positional dim {pe_dim}")
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.pe_embedder = EmbedND(dim=pe_dim, theta=theta, axes_dim=axes_dim)
         self.noise_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
         self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
-        self.vector_in = MLPEmbedder(params.vec_in_dim, self.hidden_size)
-        self.cond_in = nn.Linear(params.context_in_dim, self.hidden_size)
+        self.vector_in = MLPEmbedder(vec_in_dim, self.hidden_size)
+        self.cond_in = nn.Linear(context_in_dim, self.hidden_size)
 
         self.double_blocks = nn.ModuleList(
             [
                 DoubleStreamBlock(
                     self.hidden_size,
                     self.num_heads,
-                    mlp_ratio=params.mlp_ratio,
-                    qkv_bias=params.qkv_bias,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
                 )
-                for _ in range(params.depth_double_blocks)
+                for _ in range(depth_double_blocks)
             ]
         )
 
         self.single_blocks = nn.ModuleList(
             [
-                SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=params.mlp_ratio)
-                for _ in range(params.depth_single_blocks)
+                SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio)
+                for _ in range(depth_single_blocks)
             ]
         )
 

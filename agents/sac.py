@@ -9,7 +9,7 @@ from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
 from networks.diffusion_policy import DiffusionPolicy
-from networks.epona.flux_dit import FluxDiT, FluxParams
+from networks.epona.flux_dit import FluxDiT
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
@@ -60,7 +60,8 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-        flux_params = FluxParams(
+
+        self.state_predictor = FluxDiT(
             in_channels=4,
             out_channels=4,
             vec_in_dim=action_dim,
@@ -74,7 +75,6 @@ class Network(nn.Module):
             theta=10000,
             qkv_bias=True,
         )
-        self.state_predictor = FluxDiT(flux_params)
 
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
