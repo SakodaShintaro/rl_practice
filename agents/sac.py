@@ -222,9 +222,19 @@ class Network(nn.Module):
         # Sample from interpolation path for state
         x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
 
+        # Convert 4D tensors to token sequence format for FluxDiT
+        B, C, H, W = x_t_state.shape
+        x_t_tokens = x_t_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        state_tokens = state_curr.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+
         # Predict velocity for state
-        pred_state_dict = self.state_predictor.forward(x_t_state, t_state, state_curr, action_curr)
-        pred_state = pred_state_dict["output"]
+        pred_state_dict = self.state_predictor.forward(
+            x_t_tokens, t_state, state_tokens, action_curr
+        )
+        pred_state_tokens = pred_state_dict["output"]  # (B, H*W, C)
+
+        # Convert back to 4D format
+        pred_state = pred_state_tokens.permute(0, 2, 1).view(B, C, H, W)
 
         # Conditional vector field for state
         u_t_state = target_state_next - x_0_state
@@ -255,8 +265,18 @@ class Network(nn.Module):
         curr_time = torch.zeros((bs), device=state_curr.device)
 
         for _ in range(self.predictor_step_num):
-            tmp_dict = self.state_predictor.forward(target, curr_time, state_curr, action_curr)
-            v = tmp_dict["output"]
+            # Convert 4D tensors to token sequence format for FluxDiT
+            B, C, H, W = target.shape
+            target_tokens = target.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+            state_tokens = state_curr.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+
+            tmp_dict = self.state_predictor.forward(
+                target_tokens, curr_time, state_tokens, action_curr
+            )
+            v_tokens = tmp_dict["output"]  # (B, H*W, C)
+
+            # Convert back to 4D format
+            v = v_tokens.permute(0, 2, 1).view(B, C, H, W)
             target = target + dt * v
             curr_time += dt
 

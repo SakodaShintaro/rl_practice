@@ -74,15 +74,15 @@ class FluxDiT(nn.Module):
         cond: Tensor,
         y: Tensor,
     ) -> Tensor:
-        B, C, H, W = noise.shape
-        # 位置エンコーディングを生成
-        pos_id = torch.arange(H * W, device=noise.device)
-        noise_ids = pos_id.unsqueeze(0).expand(B, -1).unsqueeze(-1).float()
-        cond_ids = noise_ids
+        B, noise_seq_len, C = noise.shape
+        _, cond_seq_len, _ = cond.shape
 
-        # 3次元に変換
-        noise = noise.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
-        cond = cond.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        # 位置エンコーディングを生成
+        noise_pos_id = torch.arange(noise_seq_len, device=noise.device)
+        noise_ids = noise_pos_id.unsqueeze(0).expand(B, -1).unsqueeze(-1).float()
+
+        cond_pos_id = torch.arange(cond_seq_len, device=cond.device)
+        cond_ids = cond_pos_id.unsqueeze(0).expand(B, -1).unsqueeze(-1).float()
 
         # running on sequences img
         noise = self.noise_in(noise)
@@ -101,8 +101,7 @@ class FluxDiT(nn.Module):
             noise = block(noise, vec=vec, pe=pe)
         noise = noise[:, cond.shape[1] :, ...]
 
-        output = self.final_layer(noise, vec)  # (B, H*W, out_channels)
-        output = output.permute(0, 2, 1).view(B, self.out_channels, H, W)
+        output = self.final_layer(noise, vec)  # (B, noise_seq_len, out_channels)
 
         # dummy
         activation = torch.zeros((B, 1))
