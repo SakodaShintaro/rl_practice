@@ -158,8 +158,10 @@ def main(args, exp_name: str, seed: int) -> None:
         # initialize episode
         obs, _ = env.reset()
         obs_for_render = obs.copy().transpose(1, 2, 0)
-        prediction = np.zeros_like(obs_for_render)
-        obs_l1_loss = None
+        pred_image = np.zeros_like(obs_for_render)
+        pred_reward = 0.0
+        pred_image_loss = None
+        pred_reward_loss = None
         bgr_image_list = [concat_images(env.render(), [obs_for_render])]
         agent.initialize_for_episode()
         action, agent_info = agent.select_action(global_step, obs, 0.0)
@@ -181,8 +183,10 @@ def main(args, exp_name: str, seed: int) -> None:
                 "reward": reward,
                 **agent_info,
             }
-            if obs_l1_loss is not None:
-                data_dict["losses/obs_l1_loss"] = obs_l1_loss
+            if pred_image_loss is not None:
+                data_dict["losses/pred_image_loss"] = pred_image_loss
+            if pred_reward_loss is not None:
+                data_dict["losses/pred_reward_loss"] = pred_reward_loss
             wandb.log(data_dict)
 
             # render
@@ -197,14 +201,16 @@ def main(args, exp_name: str, seed: int) -> None:
             else:
                 curr_reconstruction = np.zeros_like(obs_for_render)
             bgr_image = concat_images(
-                env.render(), [obs_for_render, curr_reconstruction, prediction]
+                env.render(), [obs_for_render, curr_reconstruction, pred_image]
             )
             bgr_image_list.append(bgr_image)
             if args.render:
                 cv2.imshow("CarRacing", bgr_image)
                 cv2.waitKey(1)
-            prediction = agent_info.get("next_image", np.zeros_like(obs_for_render))
-            obs_l1_loss = np.mean(np.abs(prediction - obs_for_render))
+            pred_image = agent_info.get("next_image", np.zeros_like(obs_for_render))
+            pred_image_loss = np.mean(np.abs(pred_image - obs_for_render))
+            pred_reward = agent_info.get("next_reward", 0.0)
+            pred_reward_loss = np.abs(pred_reward - reward)
 
             if termination or truncation:
                 break

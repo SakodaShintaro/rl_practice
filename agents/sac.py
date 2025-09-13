@@ -10,6 +10,7 @@ from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
 from networks.diffusion_policy import DiffusionPolicy
 from networks.epona.flux_dit import FluxDiT
+from networks.epona.layers import LinearEmbedder
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
@@ -45,6 +46,9 @@ class Network(nn.Module):
                 f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', and 'simple' are supported."
             )
 
+        vae_hidden_dim = 4
+        self.reward_encoder = LinearEmbedder(vae_hidden_dim)
+
         self.actor = DiffusionPolicy(
             state_dim=self.encoder.output_dim,
             action_dim=action_dim,
@@ -61,10 +65,10 @@ class Network(nn.Module):
             sparsity=args.sparsity,
         )
         self.state_predictor = FluxDiT(
-            in_channels=4,
-            out_channels=4,
+            in_channels=vae_hidden_dim,
+            out_channels=vae_hidden_dim,
             vec_in_dim=action_dim,
-            context_in_dim=4,
+            context_in_dim=vae_hidden_dim,
             hidden_size=args.predictor_hidden_dim,
             mlp_ratio=4.0,
             num_heads=8,
@@ -212,51 +216,50 @@ class Network(nn.Module):
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
             target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C', H', W')
+            B, C, H, W = target_state_next.shape
+            target_state_next = target_state_next.flatten(2).permute(0, 2, 1)  # (B, H'*W', C')
+
+        reward_next = data.rewards[:, -1]  # (B, 1)
+        target_reward_next = self.reward_encoder.encode(reward_next)  # (B, C')
+        x1 = torch.cat([target_state_next, target_reward_next], dim=1)  # (B, H'*W'+1, C')
 
         # Flow Matching for state prediction
-        x_0_state = torch.randn_like(target_state_next)
-        shape_t = (x_0_state.shape[0],) + (1,) * (len(x_0_state.shape) - 1)
-        t_state = torch.rand(shape_t, device=target_state_next.device)
+        x0 = torch.randn_like(x1)
+        shape_t = (x0.shape[0],) + (1,) * (len(x0.shape) - 1)
+        t = torch.rand(shape_t, device=x1.device)
 
         # Sample from interpolation path for state
-        x_t_state = (1.0 - t_state) * x_0_state + t_state * target_state_next
+        xt = (1.0 - t) * x0 + t * x1
 
-        # Convert 4D tensors to token sequence format for FluxDiT
-        B, C, H, W = x_t_state.shape
-        x_t_tokens = x_t_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        # Convert tensors
         state_curr = state_curr.view(B, -1, C)
 
         # Predict velocity for state
-        pred_state_dict = self.state_predictor.forward(x_t_tokens, t_state, state_curr, action_curr)
-        pred_state_tokens = pred_state_dict["output"]  # (B, H*W, C)
+        pred_dict = self.state_predictor.forward(xt, t, state_curr, action_curr)
+        pred_vt = pred_dict["output"]  # (B, H*W, C)
 
-        # Convert back to 4D format
-        pred_state = pred_state_tokens.permute(0, 2, 1).view(B, C, H, W)
+        # Flow Matching loss
+        vt = x1 - x0
+        pred_loss = F.mse_loss(pred_vt, vt)
 
-        # Conditional vector field for state
-        u_t_state = target_state_next - x_0_state
+        activations_dict = {"state_predictor": pred_dict["activation"]}
 
-        # Flow Matching loss for state
-        state_loss = F.mse_loss(pred_state, u_t_state)
+        info_dict = {"seq_loss": pred_loss.item()}
 
-        activations_dict = {"state_predictor": pred_state_dict["activation"]}
-
-        info_dict = {"seq_loss": state_loss.item()}
-
-        return state_loss, activations_dict, info_dict
+        return pred_loss, activations_dict, info_dict
 
     @torch.inference_mode()
-    def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
+    def predict_next_state(self, state_curr, action_curr) -> tuple[np.ndarray, float]:
         device = state_curr.device
         B = state_curr.size(0)
         C = 4
         H = 12
         W = 12
         state_curr = state_curr.view(B, -1, C)
-        hidden_image_shape = (B, C, H, W)
+        noise_shape = (B, (H * W) + 1, C)
         normal = torch.distributions.Normal(
-            torch.zeros(hidden_image_shape, device=device),
-            torch.ones(hidden_image_shape, device=device),
+            torch.zeros(noise_shape, device=device),
+            torch.ones(noise_shape, device=device),
         )
         next_hidden_state = normal.sample().to(device)
         next_hidden_state = torch.clamp(next_hidden_state, -3.0, 3.0)
@@ -265,24 +268,24 @@ class Network(nn.Module):
         curr_time = torch.zeros((B), device=device)
 
         for _ in range(self.predictor_step_num):
-            # Convert 4D tensors to token sequence format for FluxDiT
-            target_tokens = next_hidden_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
-
             tmp_dict = self.state_predictor.forward(
-                target_tokens, curr_time, state_curr, action_curr
+                next_hidden_state, curr_time, state_curr, action_curr
             )
-            v_tokens = tmp_dict["output"]  # (B, H*W, C)
-
-            # Convert back to 4D format
-            v = v_tokens.permute(0, 2, 1).view(B, C, H, W)
-            next_hidden_state = next_hidden_state + dt * v
+            vt = tmp_dict["output"]  # (B, H*W + 1, C)
+            next_hidden_state = next_hidden_state + dt * vt
             curr_time += dt
 
-        next_image = self.encoder.decode(next_hidden_state)
+        image_part = next_hidden_state[:, :-1, :]  # (B, H*W, C)
+        image_part = image_part.permute(0, 2, 1).view(B, C, H, W)  # (B, C, H, W)
+        next_image = self.encoder.decode(image_part)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
         next_image = next_image.transpose(1, 2, 0)
-        return next_image
+
+        reward_part = next_hidden_state[:, -1, :]  # (B, 1, C)
+        next_reward = self.reward_encoder.decode(reward_part)  # (B, 1)
+
+        return next_image, next_reward.item()
 
 
 class SacAgent:
@@ -399,8 +402,9 @@ class SacAgent:
         self.action_buffer.pop(0)
 
         # predict next state
-        next_image = self.network.predict_next_state(output_enc, action_tensor.unsqueeze(0))
+        next_image, next_reward = self.network.predict_next_state(output_enc, action_tensor.unsqueeze(0))
         info_dict["next_image"] = next_image
+        info_dict["next_reward"] = next_reward
 
         self.prev_action = action
         return action, info_dict
