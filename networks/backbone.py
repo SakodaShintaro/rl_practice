@@ -43,7 +43,7 @@ class SingleFrameEncoder(nn.Module):
         self.output_dim = 576
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
     ) -> torch.Tensor:
@@ -98,7 +98,9 @@ class STTEncoder(nn.Module):
             tempo_block_type=tempo_block_type,
         ).to(self.device)
 
-        self.output_dim = self.vae_dim * self.image_tokens_num
+        self.output_dim = self.vae_dim * (
+            self.image_tokens_num + action_tokens_num + reward_tokens_num
+        )
 
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
@@ -142,9 +144,7 @@ class STTEncoder(nn.Module):
         # Use last timestep's image tokens for final representation
         last_frame_emb = stt_output[:, -1, :, :]  # [B, S+action_dim+1, C']
 
-        last_frame_emb = last_frame_emb[:, : self.image_tokens_num]  # [B, S, C']
-
-        output = last_frame_emb.flatten(start_dim=1)  # [B, S*C']
+        output = last_frame_emb.flatten(start_dim=1)  # [B, (S+action_dim+1)*C']
 
         return output
 
