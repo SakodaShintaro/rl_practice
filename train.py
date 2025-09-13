@@ -71,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_weight_projection", action="store_true")
     parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
     parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--detach_predictor", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--detach_predictor", type=int, default=0, choices=[0, 1])
 
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")

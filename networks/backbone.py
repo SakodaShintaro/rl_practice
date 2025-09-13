@@ -86,10 +86,13 @@ class STTEncoder(nn.Module):
         self.image_tokens_num = 144  # 12 * 12 patches
         action_tokens_num = action_dim
         reward_tokens_num = 1
+        register_tokens_num = 1
 
         self.stt = SpatialTemporalTransformer(
             n_layer=1,
-            space_len=(self.image_tokens_num + action_tokens_num + reward_tokens_num),
+            space_len=(
+                self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
+            ),
             tempo_len=self.seq_len,
             hidden_dim=self.vae_dim,
             n_head=1,
@@ -99,7 +102,7 @@ class STTEncoder(nn.Module):
         ).to(self.device)
 
         self.output_dim = self.vae_dim * (
-            self.image_tokens_num + action_tokens_num + reward_tokens_num
+            self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
         )
 
     def forward(
@@ -135,8 +138,13 @@ class STTEncoder(nn.Module):
         # [B, T, 1] -> [B, T, 1, C']
         reward_embed = get_fourier_embeds_from_coordinates(self.vae_dim, rewards)
 
-        # [B, T, S+action_dim+1, C']
-        all_embed = torch.cat([image_embed, action_embed, reward_embed], dim=2)
+        # [B, T, 1, C']
+        register_token = torch.zeros(
+            (B, T, 1, self.vae_dim), device=images.device, dtype=images.dtype
+        )
+
+        # [B, T, S+action_dim+1+1, C']
+        all_embed = torch.cat([image_embed, action_embed, reward_embed, register_token], dim=2)
 
         # Apply STT to all frames
         stt_output = self.stt(all_embed)  # [B, T, S+action_dim+1, C']
