@@ -224,12 +224,10 @@ class Network(nn.Module):
         # Convert 4D tensors to token sequence format for FluxDiT
         B, C, H, W = x_t_state.shape
         x_t_tokens = x_t_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
-        state_tokens = state_curr.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+        state_curr = state_curr.view(B, -1, C)
 
         # Predict velocity for state
-        pred_state_dict = self.state_predictor.forward(
-            x_t_tokens, t_state, state_tokens, action_curr
-        )
+        pred_state_dict = self.state_predictor.forward(x_t_tokens, t_state, state_curr, action_curr)
         pred_state_tokens = pred_state_dict["output"]  # (B, H*W, C)
 
         # Convert back to 4D format
@@ -249,26 +247,29 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        bs = state_curr.size(0)
-        state_curr = state_curr.view(bs, 4, 12, 12)
+        device = state_curr.device
+        B = state_curr.size(0)
+        C = 4
+        H = 12
+        W = 12
+        state_curr = state_curr.view(B, -1, C)
+        hidden_image_shape = (B, C, H, W)
         normal = torch.distributions.Normal(
-            torch.zeros(state_curr.shape, device=state_curr.device),
-            torch.ones(state_curr.shape, device=state_curr.device),
+            torch.zeros(hidden_image_shape, device=device),
+            torch.ones(hidden_image_shape, device=device),
         )
-        next_hidden_state = normal.sample().to(state_curr.device)
+        next_hidden_state = normal.sample().to(device)
         next_hidden_state = torch.clamp(next_hidden_state, -3.0, 3.0)
         dt = 1.0 / self.predictor_step_num
 
-        curr_time = torch.zeros((bs), device=state_curr.device)
+        curr_time = torch.zeros((B), device=device)
 
         for _ in range(self.predictor_step_num):
             # Convert 4D tensors to token sequence format for FluxDiT
-            B, C, H, W = next_hidden_state.shape
             target_tokens = next_hidden_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
-            state_tokens = state_curr.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
 
             tmp_dict = self.state_predictor.forward(
-                target_tokens, curr_time, state_tokens, action_curr
+                target_tokens, curr_time, state_curr, action_curr
             )
             v_tokens = tmp_dict["output"]  # (B, H*W, C)
 
