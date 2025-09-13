@@ -277,7 +277,7 @@ class LinearEmbedder(nn.Module):
         self.use_bias = bias
         self.encoder = nn.Linear(1, embed_dim, bias=bias)
 
-    def embed(self, x):
+    def encode(self, x):
         x = x.unsqueeze(-1)
         embedded = self.encoder(x)
         return embedded
