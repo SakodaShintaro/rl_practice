@@ -151,6 +151,9 @@ def main(args, exp_name: str, seed: int) -> None:
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
+    parameter_count = sum(p.numel() for p in agent.network.parameters())
+    print(f"Parameter count: {parameter_count:,}")
+
     for episode_id in range(10000):
         # initialize episode
         obs, _ = env.reset()
