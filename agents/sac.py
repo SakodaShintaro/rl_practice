@@ -60,7 +60,6 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-
         self.state_predictor = FluxDiT(
             in_channels=4,
             out_channels=4,
@@ -249,25 +248,23 @@ class Network(nn.Module):
         return state_loss, activations_dict, info_dict
 
     @torch.inference_mode()
-    def sample_next_state(
-        self, state_curr: torch.Tensor, action_curr: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
         bs = state_curr.size(0)
         state_curr = state_curr.view(bs, 4, 12, 12)
         normal = torch.distributions.Normal(
             torch.zeros(state_curr.shape, device=state_curr.device),
             torch.ones(state_curr.shape, device=state_curr.device),
         )
-        target = normal.sample().to(state_curr.device)
-        target = torch.clamp(target, -3.0, 3.0)
+        next_hidden_state = normal.sample().to(state_curr.device)
+        next_hidden_state = torch.clamp(next_hidden_state, -3.0, 3.0)
         dt = 1.0 / self.predictor_step_num
 
         curr_time = torch.zeros((bs), device=state_curr.device)
 
         for _ in range(self.predictor_step_num):
             # Convert 4D tensors to token sequence format for FluxDiT
-            B, C, H, W = target.shape
-            target_tokens = target.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
+            B, C, H, W = next_hidden_state.shape
+            target_tokens = next_hidden_state.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
             state_tokens = state_curr.view(B, C, H * W).permute(0, 2, 1)  # (B, H*W, C)
 
             tmp_dict = self.state_predictor.forward(
@@ -277,15 +274,9 @@ class Network(nn.Module):
 
             # Convert back to 4D format
             v = v_tokens.permute(0, 2, 1).view(B, C, H, W)
-            target = target + dt * v
+            next_hidden_state = next_hidden_state + dt * v
             curr_time += dt
 
-        dummy_log_p = torch.zeros((bs, 1), device=state_curr.device)
-        return target, dummy_log_p
-
-    @torch.inference_mode()
-    def predict_next_state(self, state_curr, action_curr) -> np.ndarray:
-        next_hidden_state, _ = self.sample_next_state(state_curr, action_curr)
         next_image = self.encoder.decode(next_hidden_state)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
