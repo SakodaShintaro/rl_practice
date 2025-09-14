@@ -70,7 +70,7 @@ class SingleFrameEncoder(nn.Module):
 class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
-    def __init__(self, seq_len: int, device: str, tempo_block_type: str, action_dim: int):
+    def __init__(self, seq_len: int, device: str, n_layer: int, tempo_block_type: str, action_dim: int):
         super().__init__()
 
         self.seq_len = seq_len
@@ -89,7 +89,7 @@ class STTEncoder(nn.Module):
         register_tokens_num = 1
 
         self.stt = SpatialTemporalTransformer(
-            n_layer=1,
+            n_layer=n_layer,
             space_len=(
                 self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
             ),

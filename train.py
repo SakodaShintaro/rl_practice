@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
         default="stt",
         choices=["single_frame", "smolvlm", "mmmamba", "stt", "simple"],
     )
+    parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
