@@ -26,3 +26,14 @@ huggingface-cli login
 ```bash
 pip3 install -U torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
+
+## 利用可能なMiniGrid-Memory
+
+```bash
+  - MiniGrid-MemoryS7-v0
+  - MiniGrid-MemoryS9-v0
+  - MiniGrid-MemoryS11-v0
+  - MiniGrid-MemoryS13-v0
+  - MiniGrid-MemoryS13Random-v0
+  - MiniGrid-MemoryS17Random-v0
+```
