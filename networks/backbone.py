@@ -70,7 +70,9 @@ class SingleFrameEncoder(nn.Module):
 class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
-    def __init__(self, seq_len: int, device: str, n_layer: int, tempo_block_type: str, action_dim: int):
+    def __init__(
+        self, seq_len: int, device: str, n_layer: int, tempo_block_type: str, action_dim: int
+    ):
         super().__init__()
 
         self.seq_len = seq_len
@@ -119,7 +121,7 @@ class STTEncoder(nn.Module):
         """
         # Encode all frames with AE but preserve spatial structure
         # images: (B, T, C, H, W) -> encode all frames
-        B, T, C, H, W = images.shape
+        B, T = images.shape[:2]
 
         # Reshape to process all frames: (B*T, C, H, W)
         all_frames = images.reshape(-1, *images.shape[2:])
