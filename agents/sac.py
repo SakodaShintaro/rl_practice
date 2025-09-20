@@ -7,7 +7,12 @@ from torch import optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from networks.backbone import SimpleTransformerEncoder, SingleFrameEncoder, STTEncoder
+from networks.backbone import (
+    RecurrentEncoder,
+    SimpleTransformerEncoder,
+    SingleFrameEncoder,
+    STTEncoder,
+)
 from networks.diffusion_policy import DiffusionPolicy
 from networks.epona.flux_dit import FluxDiT
 from networks.epona.layers import LinearEmbedder
@@ -42,9 +47,11 @@ class Network(nn.Module):
             )
         elif args.encoder == "simple":
             self.encoder = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
+        elif args.encoder == "recurrent":
+            self.encoder = RecurrentEncoder(sequence_length=self.seq_len)
         else:
             raise ValueError(
-                f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', and 'simple' are supported."
+                f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', 'simple', and 'recurrent' are supported."
             )
 
         vae_hidden_dim = 4

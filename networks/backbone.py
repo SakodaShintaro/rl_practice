@@ -1,6 +1,8 @@
+import numpy as np
 import torch
 from diffusers.models import AutoencoderTiny
 from torch import nn
+from torch.nn import functional as F
 
 from .spatial_temporal_transformer import (
     Config,
@@ -65,6 +67,94 @@ class SingleFrameEncoder(nn.Module):
     def decode(self, x):
         x = x.view(x.size(0), 4, 12, 12)
         return self.ae.decode(x).sample
+
+
+class RecurrentEncoder(nn.Module):
+    """
+    統合されたRecurrent Encoder (CNN + LSTM/GRU)
+    recurrent-ppo-truncated-bpttのActorCriticModelのエンコーダー部分を統合
+    https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt
+    """
+
+    def __init__(self, sequence_length: int) -> None:
+        """
+        Args:
+            sequence_length: 系列長
+        """
+        super().__init__()
+        input_channels = 3
+        hidden_size = 256
+        layer_type = "lstm"
+
+        # CNN部分（既存のCNNEncoderと同じ）
+        self.conv1 = nn.Conv2d(input_channels, 32, 8, 4)
+        self.conv2 = nn.Conv2d(32, 64, 4, 2, 0)
+        self.conv3 = nn.Conv2d(64, 64, 3, 1, 0)
+
+        # 重み初期化
+        nn.init.orthogonal_(self.conv1.weight, np.sqrt(2))
+        nn.init.orthogonal_(self.conv2.weight, np.sqrt(2))
+        nn.init.orthogonal_(self.conv3.weight, np.sqrt(2))
+
+        # CNN出力サイズは固定（84x84画像想定: 64 * 7 * 7 = 3136）
+        # Conv1: 84->20 (8x4 stride), Conv2: 20->9 (4x2), Conv3: 9->7 (3x1)
+        conv_output_size = 64 * 7 * 7  # 3136
+        self.lin_hidden_in = nn.Linear(conv_output_size, hidden_size)
+        nn.init.orthogonal_(self.lin_hidden_in.weight, np.sqrt(2))
+
+        # RNN層（GRU/LSTM）
+        if layer_type == "gru":
+            self.recurrent_layer = nn.GRU(hidden_size, hidden_size, batch_first=True)
+        elif layer_type == "lstm":
+            self.recurrent_layer = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        else:
+            raise ValueError(f"Unsupported layer_type: {layer_type}. Use 'gru' or 'lstm'.")
+
+        # RNN重み初期化
+        for name, param in self.recurrent_layer.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, np.sqrt(2))
+
+        # 出力次元
+        self.output_dim = hidden_size
+
+    def forward(
+        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Args:
+            images: Tensor of shape (B, T, 3, H, W)
+            actions: Tensor of shape (B, T, action_dim)
+            rewards: Tensor of shape (B, T, 1)
+
+        Returns:
+            encoded features: (B, output_dim)
+        """
+        B, T = images.shape[:2]
+
+        # 系列全体を処理してRNNの利点を活用
+        # 各フレームをCNNで処理
+        all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
+
+        # CNN forward pass
+        h = F.relu(self.conv1(all_frames))
+        h = F.relu(self.conv2(h))
+        h = F.relu(self.conv3(h))
+
+        # Flatten and linear projection
+        h = h.flatten(start_dim=1)  # (B*T, conv_output_size)
+        h = F.relu(self.lin_hidden_in(h))  # (B*T, hidden_size)
+
+        # RNN forward pass - 系列を処理
+        h = h.reshape(B, T, self.hidden_size)  # (B, T, hidden_size)
+        h, _ = self.recurrent_layer(h)  # (B, T, hidden_size)
+
+        # 最後のタイムステップの出力を使用
+        output = h[:, -1, :]  # (B, hidden_size)
+
+        return output
 
 
 class STTEncoder(nn.Module):
