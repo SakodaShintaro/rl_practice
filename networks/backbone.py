@@ -86,6 +86,11 @@ class RecurrentEncoder(nn.Module):
         hidden_size = 256
         layer_type = "lstm"
 
+        # AutoencoderTinyを他のencoderとの互換性のために追加
+        self.ae = AutoencoderTiny.from_pretrained(
+            "madebyollin/taesd", cache_dir="./cache", device_map="cpu"
+        )
+
         # CNN部分（既存のCNNEncoderと同じ）
         self.conv1 = nn.Conv2d(input_channels, 32, 8, 4)
         self.conv2 = nn.Conv2d(32, 64, 4, 2, 0)
@@ -96,9 +101,9 @@ class RecurrentEncoder(nn.Module):
         nn.init.orthogonal_(self.conv2.weight, np.sqrt(2))
         nn.init.orthogonal_(self.conv3.weight, np.sqrt(2))
 
-        # CNN出力サイズは固定（84x84画像想定: 64 * 7 * 7 = 3136）
-        # Conv1: 84->20 (8x4 stride), Conv2: 20->9 (4x2), Conv3: 9->7 (3x1)
-        conv_output_size = 64 * 7 * 7  # 3136
+        # CNN出力サイズ（96x96画像想定: 64 * 8 * 8 = 4096）
+        # Conv1: 96->23 (8x4 stride), Conv2: 23->10 (4x2), Conv3: 10->8 (3x1)
+        conv_output_size = 64 * 8 * 8  # 4096
         self.lin_hidden_in = nn.Linear(conv_output_size, hidden_size)
         nn.init.orthogonal_(self.lin_hidden_in.weight, np.sqrt(2))
 
@@ -148,13 +153,18 @@ class RecurrentEncoder(nn.Module):
         h = F.relu(self.lin_hidden_in(h))  # (B*T, hidden_size)
 
         # RNN forward pass - 系列を処理
-        h = h.reshape(B, T, self.hidden_size)  # (B, T, hidden_size)
+        h = h.reshape(B, T, self.output_dim)  # (B, T, hidden_size)
         h, _ = self.recurrent_layer(h)  # (B, T, hidden_size)
 
         # 最後のタイムステップの出力を使用
         output = h[:, -1, :]  # (B, hidden_size)
 
         return output
+
+    def decode(self, x):
+        # RecurrentEncoderは画像再構成機能がないため、ダミーを返す
+        # 互換性のためのメソッド
+        return torch.zeros(x.size(0), 3, 96, 96, device=x.device)
 
 
 class STTEncoder(nn.Module):
