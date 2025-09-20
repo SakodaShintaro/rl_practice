@@ -2,14 +2,18 @@ import torch
 from torch import nn
 from torch.distributions import Beta
 
-from .backbone import SingleFrameEncoder
+from .backbone import RecurrentEncoder, SingleFrameEncoder
 
 
 class PpoBetaPolicyAndValue(nn.Module):
-    def __init__(self, action_dim: int, seq_len: int) -> None:
+    def __init__(self, action_dim: int, seq_len: int, encoder_type: str) -> None:
         super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.encoder = SingleFrameEncoder(seq_len, device)
+
+        if encoder_type == "recurrent":
+            self.encoder = RecurrentEncoder(seq_len)
+        else:
+            self.encoder = SingleFrameEncoder(seq_len, device)
         seq_hidden_dim = self.encoder.output_dim
         rep_dim = 256
         hidden_dim = 100

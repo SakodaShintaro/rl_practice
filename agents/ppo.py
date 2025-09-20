@@ -60,7 +60,7 @@ class PpoAgent:
         self.training_step = 0
         self.device = torch.device("cuda")
         self.network = {
-            "default": PpoBetaPolicyAndValue(self.action_dim, self.seq_len).to(self.device),
+            "default": PpoBetaPolicyAndValue(self.action_dim, self.seq_len, args.encoder).to(self.device),
             "paligemma": PpoPaligemmaPolicyAndValue(self.action_dim).to(self.device),
         }[args.model_name]
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
@@ -240,7 +240,7 @@ class PpoAgent:
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
                 curr_action = a[indices][:, :-1]
-                dummy_action = torch.zeros((curr_action.shape[0], 1, 3), device=self.device)
+                dummy_action = torch.zeros((curr_action.shape[0], 1, self.action_dim), device=self.device)
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
 
                 net_out_dict = self.network(r[indices], s[indices], curr_action, a[index])
