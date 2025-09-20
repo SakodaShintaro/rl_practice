@@ -403,7 +403,9 @@ class SacAgent:
         self.action_buffer.pop(0)
 
         # predict next state
-        next_image, next_reward = self.network.predict_next_state(output_enc, action_tensor.unsqueeze(0))
+        next_image, next_reward = self.network.predict_next_state(
+            output_enc, action_tensor.unsqueeze(0)
+        )
         info_dict["next_image"] = next_image
         info_dict["next_reward"] = next_reward
 
