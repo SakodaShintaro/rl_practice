@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch import nn, optim
 
 from networks.ppo_beta_policy_and_value import PpoBetaPolicyAndValue
-from networks.ppo_paligemma_policy_value import PpoPaligemmaPolicyAndValue
 
 
 class SequentialBatchSampler:
@@ -59,10 +58,9 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.network = {
-            "default": PpoBetaPolicyAndValue(self.action_dim, self.seq_len, args.encoder).to(self.device),
-            "paligemma": PpoPaligemmaPolicyAndValue(self.action_dim).to(self.device),
-        }[args.model_name]
+        self.network = PpoBetaPolicyAndValue(self.action_dim, self.seq_len, args.encoder).to(
+            self.device
+        )
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
         self.buffer = np.empty(
