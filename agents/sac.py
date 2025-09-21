@@ -13,9 +13,9 @@ from networks.backbone import (
     SingleFrameEncoder,
     STTEncoder,
 )
-from networks.diffusion_policy import DiffusionPolicy
 from networks.epona.flux_dit import FluxDiT
 from networks.epona.layers import LinearEmbedder
+from networks.policy_head import DiffusionPolicy
 from networks.sac_tanh_policy_and_q import SacQ
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
