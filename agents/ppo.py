@@ -7,7 +7,7 @@ from torch.distributions import Beta
 from networks.backbone import RecurrentEncoder, SingleFrameEncoder
 
 
-class PpoBetaPolicyAndValue(nn.Module):
+class Network(nn.Module):
     def __init__(self, action_dim: int, seq_len: int, encoder_type: str) -> None:
         super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -113,9 +113,7 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.network = PpoBetaPolicyAndValue(self.action_dim, self.seq_len, args.encoder).to(
-            self.device
-        )
+        self.network = Network(self.action_dim, self.seq_len, args.encoder).to(self.device)
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
         self.buffer = np.empty(
@@ -293,7 +291,9 @@ class PpoAgent:
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
                 curr_action = a[indices][:, :-1]
-                dummy_action = torch.zeros((curr_action.shape[0], 1, self.action_dim), device=self.device)
+                dummy_action = torch.zeros(
+                    (curr_action.shape[0], 1, self.action_dim), device=self.device
+                )
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
 
                 net_out_dict = self.network(r[indices], s[indices], curr_action, a[index])
