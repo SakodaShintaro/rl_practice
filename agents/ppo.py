@@ -11,21 +11,25 @@ class Network(nn.Module):
     def __init__(self, action_dim: int, seq_len: int, encoder_type: str) -> None:
         super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.action_dim = action_dim
 
         if encoder_type == "recurrent":
             self.encoder = RecurrentEncoder(seq_len)
         else:
             self.encoder = SingleFrameEncoder(seq_len, device)
         seq_hidden_dim = self.encoder.output_dim
-        rep_dim = 256
-        hidden_dim = 100
-        self.linear = nn.Linear(seq_hidden_dim, rep_dim)
-        self.norm = nn.RMSNorm(rep_dim, elementwise_affine=False)
-        self.value_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
-        self.value_head = nn.Linear(hidden_dim, 1)
-        self.policy_enc = nn.Sequential(nn.Linear(rep_dim, hidden_dim), nn.ReLU())
-        self.alpha_head = nn.Linear(hidden_dim, action_dim)
-        self.beta_head = nn.Linear(hidden_dim, action_dim)
+        self.linear = nn.Linear(seq_hidden_dim, seq_hidden_dim)
+        self.value_enc = nn.Sequential(nn.Linear(seq_hidden_dim, seq_hidden_dim), nn.ReLU())
+        self.value_head = nn.Linear(seq_hidden_dim, 1)
+        self.policy_enc = nn.Sequential(nn.Linear(seq_hidden_dim, seq_hidden_dim), nn.ReLU())
+        self.policy_type = "Categorical"
+        if self.policy_type == "Beta":
+            self.alpha_head = nn.Linear(seq_hidden_dim, action_dim)
+            self.beta_head = nn.Linear(seq_hidden_dim, action_dim)
+        elif self.policy_type == "Categorical":
+            self.logits_head = nn.Linear(seq_hidden_dim, action_dim)
+        else:
+            raise ValueError("Invalid policy type")
 
     def forward(
         self,
@@ -37,19 +41,29 @@ class Network(nn.Module):
         # (B, T, C, H, W), (B, T, action_dim), (B, T)
         x = self.encoder(s_seq, a_seq, r_seq)
         x = self.linear(x)  # (batch_size, rep_dim)
-        x = self.norm(x)
 
         value_x = self.value_enc(x)
         value = self.value_head(value_x)
 
         policy_x = self.policy_enc(x)
-        alpha = self.alpha_head(policy_x).exp() + 1
-        beta = self.beta_head(policy_x).exp() + 1
 
-        dist = Beta(alpha, beta)
-        if action is None:
-            action = dist.sample()
-        a_logp = dist.log_prob(action).sum(dim=1, keepdim=True)
+        if self.policy_type == "Beta":
+            alpha = self.alpha_head(policy_x).exp() + 1
+            beta = self.beta_head(policy_x).exp() + 1
+
+            dist = Beta(alpha, beta)
+            if action is None:
+                action = dist.sample()
+            a_logp = dist.log_prob(action).sum(dim=1, keepdim=True)
+        elif self.policy_type == "Categorical":
+            logits = self.logits_head(policy_x)
+            dist = torch.distributions.Categorical(logits=logits)
+            if action is None:
+                action = dist.sample()
+                a_logp = dist.log_prob(action).unsqueeze(1)
+                action = F.one_hot(action, num_classes=self.action_dim).float()
+            else:
+                a_logp = dist.log_prob(action.argmax(dim=1)).unsqueeze(1)
 
         return {
             "action": action,
