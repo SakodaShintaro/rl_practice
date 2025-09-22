@@ -30,6 +30,19 @@ class Network(nn.Module):
             self.logits_head = nn.Linear(seq_hidden_dim, action_dim)
         else:
             raise ValueError("Invalid policy type")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module: nn.Module) -> None:
+        """Initialize weights with orthogonal initialization.
+
+        Arguments:
+            module {nn.Module} -- Module to initialize
+        """
+        for name, param in module.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, np.sqrt(2))
 
     def forward(
         self,
