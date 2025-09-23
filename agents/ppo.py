@@ -298,9 +298,21 @@ class PpoAgent:
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)
         a = (a - bias) / scale
 
-        target_v = r[:-1] + (1 - done[:-1]) * self.gamma * v[1:]
-        adv = target_v - v[:-1]
-        # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # noqa: ERA001
+        # target_v = r[:-1] + (1 - done[:-1]) * self.gamma * v[1:]
+        # adv = target_v - v[:-1]
+        target_v = torch.zeros_like(v[:-1])
+        adv = torch.zeros_like(v[:-1])
+        last_value = v[-1]
+        last_advantage = 0
+        for i in range(len(v) - 2, -1, -1):
+            if done[i]:
+                last_value = 0
+                last_advantage = 0
+            target_v[i] = r[i] + self.gamma * last_value
+            delta = target_v[i] - v[i]
+            last_advantage = delta + self.gamma * 0.95 * last_advantage
+            adv[i] = last_advantage
+            last_value = v[i]
 
         ave_action_loss_list = []
         ave_value_loss_list = []
