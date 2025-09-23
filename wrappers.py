@@ -9,7 +9,18 @@ REPEAT = 8
 def make_env(env_id: str, partial_obs: bool) -> gym.Env:
     env = gym.make(env_id, render_mode="rgb_array")
 
-    if env_id.startswith("MiniGrid"):
+    if env_id == "MiniGrid-MemoryS9-v0":
+        env = gym.make(env_id, agent_view_size=3, tile_size=28, render_mode="rgb_array")
+        env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=28)
+        env = minigrid.wrappers.ImgObsWrapper(env)
+        env = ReduceActionSpaceWrapper(env, n_actions=3)
+        env = DiscreteToContinuousWrapper(env)
+        env = ResizeObs(env, shape=(3, 96, 96))
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        return env
+
+    elif env_id == "MiniGrid-MemoryS11-v0":
         if partial_obs:
             env = minigrid.wrappers.RGBImgPartialObsWrapper(env)
         else:
@@ -21,7 +32,7 @@ def make_env(env_id: str, partial_obs: bool) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         return env
 
-    elif env_id.startswith("CarRacing"):
+    elif env_id == "CarRacing-v3":
         env = env.env  # Unwrap the original TimeLimit wrapper
         env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
         env = CarRacingRewardFixWrapper(env)
@@ -54,6 +65,24 @@ class DiscreteToContinuousWrapper(gym.Wrapper):
         return self.env.step(discrete_action)
 
 
+class ReduceActionSpaceWrapper(gym.Wrapper):
+    """
+    Reduce discrete action space to only relevant actions.
+    For MiniGrid Memory environments, reduce to 3 actions: turn left, turn right, move forward.
+    """
+
+    def __init__(self, env, n_actions=3):
+        super().__init__(env)
+        self.n_actions = n_actions
+        self.action_space = gym.spaces.Discrete(n_actions)
+
+    def step(self, action):
+        # Convert action if it's an array
+        if isinstance(action, np.ndarray):
+            action = action[0] if len(action) > 0 else action
+        return self.env.step(action)
+
+
 class ActionRepeatWrapper(gym.Wrapper):
     """
     Repeat the same action for multiple steps
@@ -65,7 +94,7 @@ class ActionRepeatWrapper(gym.Wrapper):
 
     def step(self, action):
         total_reward = 0
-        for i in range(self.repeat):
+        for _ in range(self.repeat):
             obs, reward, terminated, truncated, info = self.env.step(action)
             total_reward += reward
             done = terminated or truncated

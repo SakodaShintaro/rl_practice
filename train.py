@@ -29,7 +29,12 @@ def parse_args() -> argparse.Namespace:
         "--env_id",
         type=str,
         default="MiniGrid-MemoryS11-v0",
-        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0", "MiniGrid-MemoryS11-v0"],
+        choices=[
+            "CarRacing-v3",
+            "MiniGrid-Empty-5x5-v0",
+            "MiniGrid-MemoryS9-v0",
+            "MiniGrid-MemoryS11-v0",
+        ],
     )
     parser.add_argument("--partial_obs", type=int, default=1, choices=[0, 1])
     parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo"])
