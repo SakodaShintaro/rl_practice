@@ -89,7 +89,7 @@ class Network(nn.Module):
 
 
 class SequentialBatchSampler:
-    def __init__(self, buffer_capacity, batch_size, k_frames, drop_last=False):
+    def __init__(self, buffer_capacity, batch_size, k_frames, drop_last):
         self.buffer_capacity = buffer_capacity
         self.batch_size = batch_size
         self.k_frames = k_frames
