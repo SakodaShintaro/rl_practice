@@ -288,6 +288,7 @@ if __name__ == "__main__":
     if args.debug:
         args.off_wandb = True
         args.learning_starts = 10
+        args.buffer_capacity = 50
         args.render = 0
         args.step_limit = 100
 
