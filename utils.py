@@ -2,26 +2,27 @@ import cv2
 import numpy as np
 
 
-def concat_images(main: np.ndarray, sub_image_list: list[np.ndarray]) -> np.ndarray:
+def concat_images(image_list: list[np.ndarray]) -> np.ndarray:
     """
-    main画像の右にsub_image_listを並べて配置し、余白をpadで埋める。
-
-    [main00][main01]...[main0w][sub_image_list]
-    ...
-    [mainh0][mainh2]...[mainhw][pad.]
-
+    image_listを並べて連結する。
     Args:
-        main (np.ndarray,  (400, 600, 3)): The main image.
-        sub_image_list (list[np.ndarray]): The list of sub-images to concatenate.
+        image_list (list[np.ndarray]): The list of images to concatenate.
     Returns:
         np.ndarray: The concatenated image.
     """
-    concat = cv2.vconcat(sub_image_list)
-    rem = main.shape[0] - concat.shape[0]
-    concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    concat *= 255
-    concat = np.clip(concat, 0, 255).astype(np.uint8)
-    concat = cv2.hconcat([main, concat])
+    max_height = max(img.shape[0] for img in image_list)
+    padded_images = []
+    for img in image_list:
+        if img.dtype == np.float32:
+            img *= 255.0
+            img = np.clip(img, 0, 255).astype(np.uint8)
+        if img.shape[0] < max_height:
+            padding = np.zeros((max_height - img.shape[0], img.shape[1], 3), dtype=img.dtype)
+            padded_img = np.vstack((img, padding))
+        else:
+            padded_img = img
+        padded_images.append(padded_img)
+    concat = cv2.hconcat(padded_images)
     bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
     return bgr_array
 
@@ -69,7 +70,7 @@ def create_full_image_with_reward(
     環境画像、観測画像、再構築画像、予測画像、報酬可視化を全て結合した画像を作成（RGB形式で返す）
     """
     # まず既存の画像を連結
-    first_concat = concat_images(env_render, [obs_for_render, reconstruction, pred_image])
+    first_concat = concat_images([env_render, obs_for_render, reconstruction, pred_image])
 
     # 報酬可視化を作成してメイン画像の高さに合わせる
     reward_vis = create_reward_visualization(pred_reward, actual_reward)
