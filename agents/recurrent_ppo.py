@@ -401,7 +401,7 @@ class RecurrentPpoAgent:
         self.epoch = 0
 
     def initialize_for_episode(self) -> None:
-        pass
+        self._train(obs=None)
 
     @torch.no_grad()
     def select_action(self, global_step, obs, reward) -> tuple[np.ndarray, dict]:
@@ -469,8 +469,11 @@ class RecurrentPpoAgent:
         self.buffer_index = 0
 
         # Calculate advantages
-        last_obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
-        _, last_value, _ = self.network(last_obs_tensor, self.recurrent_cell)
+        if obs is None:
+            last_value = torch.zeros((1, 1), dtype=torch.float32).to(self.device)
+        else:
+            last_obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
+            _, last_value, _ = self.network(last_obs_tensor, self.recurrent_cell)
         self.buffer.calc_advantages(last_value, gamma=0.99, td_lambda=0.95)
 
         self.buffer.prepare_batch_dict()
