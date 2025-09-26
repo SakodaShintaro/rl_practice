@@ -164,7 +164,8 @@ def main(args, exp_name: str, seed: int) -> None:
     parameter_count = sum(p.numel() for p in agent.network.parameters())
     print(f"Parameter count: {parameter_count:,}")
 
-    for episode_id in range(10000):
+    episode_id = 0
+    while True:
         # initialize episode
         obs, _ = env.reset()
         obs_for_render = obs.copy().transpose(1, 2, 0)
