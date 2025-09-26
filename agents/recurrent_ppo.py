@@ -1,10 +1,5 @@
-import argparse
-import time
-from collections import deque
-from pathlib import Path
-
+# Derived from https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt
 import numpy as np
-import pandas as pd
 import torch
 from gymnasium import spaces
 from torch import nn, optim
@@ -25,13 +20,6 @@ class Buffer:
         action_space_shape: tuple,
         device: torch.device,
     ) -> None:
-        """
-        Arguments:
-            config {dict} -- Configuration and hyperparameters of the environment, trainer and model.
-            observation_space {spaces.Box} -- The observation space of the agent
-            action_space_shape {tuple} -- Shape of the action space
-            device {torch.device} -- The device that will be used for training
-        """
         # Setup members
         self.device = device
         self.worker_steps = worker_steps
@@ -460,12 +448,13 @@ class RecurrentPpoAgent:
         info_dict = {}
 
         # store
-        done = termination or truncation
-        self.buffer.rewards[self.buffer_index] = reward
-        self.buffer.dones[self.buffer_index] = done
+        if self.buffer_index < self.worker_steps:
+            done = termination or truncation
+            self.buffer.rewards[self.buffer_index] = reward
+            self.buffer.dones[self.buffer_index] = done
 
         # train
-        train_info = self._train()
+        train_info = self._train(obs)
         info_dict.update(train_info)
 
         # act
@@ -474,23 +463,13 @@ class RecurrentPpoAgent:
 
         return action, info_dict
 
-    def _train(self) -> dict:
-        """Trains several PPO epochs over one batch of data while dividing the batch into mini batches.
-
-        Arguments:
-            learning_rate {float} -- The current learning rate
-            clip_range {float} -- The current clip range
-            beta {float} -- The current entropy bonus coefficient
-
-        Returns:
-            {dict} -- Training statistics of one training epoch"""
-
+    def _train(self, obs) -> dict:
         if self.buffer_index < self.worker_steps:
             return {}
         self.buffer_index = 0
 
         # Calculate advantages
-        last_obs_tensor = torch.tensor(self.obs, dtype=torch.float32).unsqueeze(0).to(self.device)
+        last_obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
         _, last_value, _ = self.network(last_obs_tensor, self.recurrent_cell)
         self.buffer.calc_advantages(last_value, gamma=0.99, td_lambda=0.95)
 
