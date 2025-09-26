@@ -16,6 +16,7 @@ import torch
 import wandb
 from agents.avg import AvgAgent
 from agents.ppo import PpoAgent
+from agents.recurrent_ppo import RecurrentPpoAgent
 from agents.sac import SacAgent
 from utils import create_full_image_with_reward
 from wrappers import make_env
@@ -37,7 +38,9 @@ def parse_args() -> argparse.Namespace:
         ],
     )
     parser.add_argument("--partial_obs", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo"])
+    parser.add_argument(
+        "--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo", "recurrent_ppo"]
+    )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--target_score", type=float, default=800.0)
@@ -135,7 +138,6 @@ def main(args, exp_name: str, seed: int) -> None:
     # env setup
     env = make_env(args.env_id, args.partial_obs)
     env.action_space.seed(seed)
-    assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     target_score = args.target_score if args.target_score is not None else env.spec.reward_threshold
 
@@ -154,6 +156,8 @@ def main(args, exp_name: str, seed: int) -> None:
         agent = AvgAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "ppo":
         agent = PpoAgent(args, env.observation_space, env.action_space)
+    elif args.agent_type == "recurrent_ppo":
+        agent = RecurrentPpoAgent(args, env.observation_space, env.action_space)
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
