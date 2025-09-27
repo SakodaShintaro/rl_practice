@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import gymnasium as gym
 import imageio
 import numpy as np
 import pandas as pd
