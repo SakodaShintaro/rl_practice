@@ -238,7 +238,7 @@ def main(args, exp_name: str, seed: int) -> None:
 
         score = env_info["episode"]["r"]
         score_list.append(score)
-        score_list = score_list[-20:]
+        score_list = score_list[-100:]
         recent_average_score = np.mean(score_list)
 
         data_dict = {
