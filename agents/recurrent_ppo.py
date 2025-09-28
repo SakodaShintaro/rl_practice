@@ -235,7 +235,7 @@ class ActorCriticModel(nn.Module):
         self.layer_type = layer_type
 
         # Observation encoder
-        self.encoder_type = "ae"
+        self.encoder_type = "simple_cnn"
         if self.encoder_type == "simple_cnn":
             # Visual encoder made of 3 convolutional layers
             self.conv1 = nn.Conv2d(observation_space.shape[0], 32, 8, 4)
