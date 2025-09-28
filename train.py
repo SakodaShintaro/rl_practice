@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--target_score", type=float, default=800.0)
+    parser.add_argument("--target_score", type=float, default=0.95)
     parser.add_argument("--off_wandb", action="store_true")
     parser.add_argument(
         "--encoder",
