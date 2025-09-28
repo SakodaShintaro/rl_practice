@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--env_id",
         type=str,
-        default="MiniGrid-MemoryS11-v0",
+        default="MiniGrid-MemoryS9-v0",
         choices=[
             "CarRacing-v3",
             "MiniGrid-Empty-5x5-v0",
@@ -38,7 +38,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--partial_obs", type=int, default=1, choices=[0, 1])
     parser.add_argument(
-        "--agent_type", type=str, default="sac", choices=["sac", "avg", "ppo", "recurrent_ppo"]
+        "--agent_type",
+        type=str,
+        default="recurrent_ppo",
+        choices=["sac", "avg", "ppo", "recurrent_ppo"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -85,8 +88,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.8, type=float)
 
-    # for PPO
-    parser.add_argument("--buffer_capacity", type=int, default=2000)
+    # for PPO/Recurrent PPO
+    parser.add_argument("--buffer_capacity", type=int, default=4096)
     parser.add_argument(
         "--model_name", type=str, default="default", choices=["default", "paligemma"]
     )

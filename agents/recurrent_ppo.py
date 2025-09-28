@@ -364,10 +364,10 @@ class RecurrentPpoAgent:
         self.observation_space = observation_space
         self.action_space_shape = (action_space.n,)
 
-        self.worker_steps = 4096
+        self.worker_steps = args.buffer_capacity
         self.layer_type = "gru"
         hidden_size = 256
-        sequence_length = 8
+        sequence_length = args.seq_len
 
         # Init buffer
         self.buffer = Buffer(
@@ -490,17 +490,10 @@ class RecurrentPpoAgent:
     def _train_mini_batch(self, samples: dict) -> list:
         """Uses one mini batch to optimize the model.
 
-        Arguments:
-            mini_batch {dict} -- The to be used mini batch data to optimize the model
-            learning_rate {float} -- Current learning rate
-            clip_range {float} -- Current clip range
-            beta {float} -- Current entropy bonus coefficient
-
         Returns:
             {list} -- list of training statistics (e.g. loss)
         """
-        learning_rate = 2.0e-4
-        beta = 0.01
+        beta = 0.02
         clip_range = 0.2
 
         # Retrieve sampled recurrent cell states to feed the model
@@ -555,8 +548,6 @@ class RecurrentPpoAgent:
         loss = -(policy_loss - 0.25 * vf_loss + beta * entropy_bonus)
 
         # Compute gradients
-        for pg in self.optimizer.param_groups:
-            pg["lr"] = learning_rate
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=0.5)
