@@ -1,5 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
+import csv
 import os
 import random
 import time
@@ -9,7 +10,6 @@ from pathlib import Path
 import cv2
 import imageio
 import numpy as np
-import pandas as pd
 import torch
 
 import wandb
@@ -132,7 +132,9 @@ def main(args, exp_name: str, seed: int) -> None:
         result_dir = None
         video_dir = None
     image_save_interval = 500
-    log_episode = []
+    log_episode_path = result_dir / "log_episode.tsv" if result_dir is not None else None
+    log_episode_file = None
+    log_episode_writer = None
 
     # env setup
     env = make_env(args.env_id, args.partial_obs)
@@ -250,9 +252,15 @@ def main(args, exp_name: str, seed: int) -> None:
         wandb.log(data_dict)
 
         if result_dir is not None:
-            log_episode.append(data_dict)
-            log_episode_df = pd.DataFrame(log_episode)
-            log_episode_df.to_csv(result_dir / "log_episode.tsv", sep="\t", index=False)
+            if log_episode_writer is None:
+                log_episode_file = open(log_episode_path, "w", newline="")
+                fieldnames = list(data_dict.keys())
+                log_episode_writer = csv.DictWriter(
+                    log_episode_file, fieldnames=fieldnames, delimiter="\t"
+                )
+                log_episode_writer.writeheader()
+            log_episode_writer.writerow(data_dict)
+            log_episode_file.flush()
 
         is_solved = recent_average_score > target_score
 
@@ -289,6 +297,8 @@ def main(args, exp_name: str, seed: int) -> None:
             break
 
     env.close()
+    if log_episode_file is not None:
+        log_episode_file.close()
     wandb.finish()
 
 
