@@ -365,7 +365,7 @@ class RecurrentPpoAgent:
         self.action_space_shape = (action_space.n,)
 
         self.worker_steps = 4096
-        self.layer_type = "lstm"
+        self.layer_type = "gru"
         hidden_size = 256
         sequence_length = 8
 
@@ -500,7 +500,7 @@ class RecurrentPpoAgent:
             {list} -- list of training statistics (e.g. loss)
         """
         learning_rate = 2.0e-4
-        beta = 0.001
+        beta = 0.01
         clip_range = 0.2
 
         # Retrieve sampled recurrent cell states to feed the model
