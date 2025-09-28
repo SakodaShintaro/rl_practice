@@ -10,7 +10,7 @@ def make_env(env_id: str, partial_obs: bool) -> gym.Env:
     env = gym.make(env_id, render_mode="rgb_array")
 
     if env_id == "MiniGrid-MemoryS9-v0":
-        env = gym.make(env_id, agent_view_size=3, tile_size=28, render_mode="rgb_array")
+        env = gym.make(env_id, agent_view_size=3, render_mode="rgb_array")
         env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=28)
         env = minigrid.wrappers.ImgObsWrapper(env)
         env = ReduceActionSpaceWrapper(env, n_actions=3)
