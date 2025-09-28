@@ -235,7 +235,7 @@ class ActorCriticModel(nn.Module):
         self.layer_type = layer_type
 
         # Observation encoder
-        self.encoder_type = "simple_cnn"
+        self.encoder_type = "ae"
         if self.encoder_type == "simple_cnn":
             # Visual encoder made of 3 convolutional layers
             self.conv1 = nn.Conv2d(observation_space.shape[0], 32, 8, 4)
@@ -299,7 +299,8 @@ class ActorCriticModel(nn.Module):
             h = F.relu(self.conv2(h))
             h = F.relu(self.conv3(h))
         elif self.encoder_type == "ae":
-            h = self.ae.encode(h).latents
+            with torch.no_grad():
+                h = self.ae.encode(h).latents
 
         h = h.flatten(start_dim=1)
         h = F.relu(self.lin_hidden_in(h))
