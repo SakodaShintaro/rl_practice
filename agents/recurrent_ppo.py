@@ -1,6 +1,7 @@
 # Derived from https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt
 import numpy as np
 import torch
+from diffusers.models import AutoencoderTiny
 from gymnasium import spaces
 from torch import nn, optim
 from torch.distributions import Categorical
@@ -234,12 +235,18 @@ class ActorCriticModel(nn.Module):
         self.layer_type = layer_type
 
         # Observation encoder
-        # Visual encoder made of 3 convolutional layers
-        self.conv1 = nn.Conv2d(observation_space.shape[0], 32, 8, 4)
-        self.conv2 = nn.Conv2d(32, 64, 4, 2, 0)
-        self.conv3 = nn.Conv2d(64, 64, 3, 1, 0)
+        self.encoder_type = "simple_cnn"
+        if self.encoder_type == "simple_cnn":
+            # Visual encoder made of 3 convolutional layers
+            self.conv1 = nn.Conv2d(observation_space.shape[0], 32, 8, 4)
+            self.conv2 = nn.Conv2d(32, 64, 4, 2, 0)
+            self.conv3 = nn.Conv2d(64, 64, 3, 1, 0)
+        elif self.encoder_type == "ae":
+            self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
+
         # Compute output size of convolutional layers
         in_features_next_layer = self.get_conv_output(observation_space.shape)
+        print(f"{in_features_next_layer=}")
 
         self.lin_hidden_in = nn.Linear(in_features_next_layer, self.hidden_size)
 
@@ -248,7 +255,6 @@ class ActorCriticModel(nn.Module):
             self.recurrent_layer = nn.GRU(self.hidden_size, self.hidden_size, batch_first=True)
         elif self.layer_type == "lstm":
             self.recurrent_layer = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True)
-        # Init recurrent layer
 
         # Hidden layer
         self.lin_hidden_out = nn.Linear(self.hidden_size, self.hidden_size)
@@ -288,13 +294,14 @@ class ActorCriticModel(nn.Module):
         h = obs
         # Forward observation encoder
         B = h.shape[0]
-        # Propagate input through the visual encoder
-        h = F.relu(self.conv1(h))
-        h = F.relu(self.conv2(h))
-        h = F.relu(self.conv3(h))
-        # Flatten the output of the convolutional layers
-        h = h.reshape((B, -1))
+        if self.encoder_type == "simple_cnn":
+            h = F.relu(self.conv1(h))
+            h = F.relu(self.conv2(h))
+            h = F.relu(self.conv3(h))
+        elif self.encoder_type == "ae":
+            h = self.ae.encode(h).latents
 
+        h = h.flatten(start_dim=1)
         h = F.relu(self.lin_hidden_in(h))
 
         # Forward recurrent layer (GRU or LSTM) first, then hidden layer
@@ -333,9 +340,13 @@ class ActorCriticModel(nn.Module):
                 nn.init.orthogonal_(param, np.sqrt(2))
 
     def get_conv_output(self, shape: tuple) -> int:
-        o = self.conv1(torch.zeros(1, *shape))
-        o = self.conv2(o)
-        o = self.conv3(o)
+        o = torch.zeros(1, *shape)
+        if self.encoder_type == "simple_cnn":
+            o = self.conv1(o)
+            o = self.conv2(o)
+            o = self.conv3(o)
+        elif self.encoder_type == "ae":
+            o = self.ae.encode(o).latents
         return int(np.prod(o.size()))
 
     def init_recurrent_cell_states(self, num_sequences: int, device: torch.device) -> tuple:
