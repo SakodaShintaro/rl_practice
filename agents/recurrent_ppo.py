@@ -163,11 +163,12 @@ class Buffer:
             {dict} -- Mini batch data for training
         """
         # Determine the number of sequences per mini batch
-        num_sequences_per_batch = self.num_sequences // self.n_mini_batches
-        num_sequences_per_batch = (
-            [num_sequences_per_batch] * self.n_mini_batches
-        )  # Arrange a list that determines the sequence count for each mini batch
-        remainder = self.num_sequences % self.n_mini_batches
+        n_mini_batches = min(self.n_mini_batches, self.num_sequences)
+        num_sequences_per_batch = self.num_sequences // n_mini_batches
+        num_sequences_per_batch = [
+            num_sequences_per_batch
+        ] * n_mini_batches  # Arrange a list that determines the sequence count for each mini batch
+        remainder = self.num_sequences % n_mini_batches
         for i in range(remainder):
             num_sequences_per_batch[i] += (
                 1  # Add the remainder if the sequence count and the number of mini batches do not share a common divider
