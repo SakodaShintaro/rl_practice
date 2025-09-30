@@ -243,7 +243,8 @@ def main(args, exp_name: str, seed: int) -> None:
 
         score = env_info["episode"]["r"]
         score_list.append(score)
-        score_list = score_list[-100:]
+        EVAL_RANGE = 100
+        score_list = score_list[-EVAL_RANGE:]
         recent_average_score = np.mean(score_list)
 
         data_dict = {
@@ -265,7 +266,7 @@ def main(args, exp_name: str, seed: int) -> None:
             log_episode_writer.writerow(data_dict)
             log_episode_file.flush()
 
-        is_solved = recent_average_score > target_score
+        is_solved = recent_average_score > target_score and episode_id >= EVAL_RANGE
 
         if episode_id % 5 == 0 or is_solved:
             print(
