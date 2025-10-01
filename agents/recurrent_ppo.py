@@ -404,7 +404,7 @@ class RecurrentPpoAgent:
             self.action_space_shape,
         ).to(self.device)
         self.network.train()
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=2.0e-4)
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=args.learning_rate)
 
         # Setup initial recurrent cell states (LSTM: tuple(tensor, tensor) or GRU: tensor)
         hxs, cxs = self.network.init_recurrent_cell_states(1, self.device)
