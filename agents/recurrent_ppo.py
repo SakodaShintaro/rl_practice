@@ -336,6 +336,8 @@ class ActorCriticModel(nn.Module):
 
     def _init_weights(self, module: nn.Module) -> None:
         for name, param in module.named_parameters():
+            if "ae." in name:
+                continue
             if "bias" in name:
                 nn.init.constant_(param, 0)
             elif "weight" in name:
