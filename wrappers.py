@@ -11,11 +11,10 @@ def make_env(env_id: str, partial_obs: bool) -> gym.Env:
 
     if env_id == "MiniGrid-MemoryS9-v0":
         env = gym.make(env_id, agent_view_size=3, render_mode="rgb_array")
-        env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=28)
+        env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=32)
         env = minigrid.wrappers.ImgObsWrapper(env)
         env = ReduceActionSpaceWrapper(env, n_actions=3)
         # env = DiscreteToContinuousWrapper(env)
-        # env = ResizeObs(env, shape=(3, 96, 96))
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         return env
