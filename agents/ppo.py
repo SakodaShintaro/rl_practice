@@ -127,9 +127,9 @@ class SequentialBatchSampler:
 
 
 class PpoAgent:
-    max_grad_norm = 0.5
-    clip_param_policy = 0.1
-    clip_param_value = 1.0
+    max_grad_norm = 5.0
+    clip_param_policy = 0.2
+    clip_param_value = 0.2
     ppo_epoch = 4
     gamma = 0.99
 
