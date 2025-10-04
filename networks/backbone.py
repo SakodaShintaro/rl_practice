@@ -108,6 +108,9 @@ class RecurrentEncoder(nn.Module):
         # 出力次元
         self.output_dim = hidden_size
 
+    def init_state(self) -> torch.Tensor:
+        return torch.zeros(1, 1, self.output_dim)
+
     def forward(
         self,
         images: torch.Tensor,

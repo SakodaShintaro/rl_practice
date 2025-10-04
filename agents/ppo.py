@@ -8,13 +8,15 @@ from networks.backbone import RecurrentEncoder, SingleFrameEncoder
 
 
 class Network(nn.Module):
-    def __init__(self, action_dim: int, seq_len: int, encoder_type: str) -> None:
+    def __init__(
+        self, action_dim: int, seq_len: int, encoder_type: str, image_h: int, image_w: int
+    ) -> None:
         super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.action_dim = action_dim
 
         if encoder_type == "recurrent":
-            self.encoder = RecurrentEncoder(seq_len)
+            self.encoder = RecurrentEncoder(image_h, image_w)
         else:
             self.encoder = SingleFrameEncoder(seq_len, device)
         seq_hidden_dim = self.encoder.output_dim
@@ -44,16 +46,20 @@ class Network(nn.Module):
             elif "weight" in name:
                 nn.init.orthogonal_(param, np.sqrt(2))
 
+    def init_state(self) -> torch.Tensor:
+        return self.encoder.init_state()
+
     def forward(
         self,
-        r_seq: torch.Tensor,
-        s_seq: torch.Tensor,
-        a_seq: torch.Tensor,
-        action: torch.Tensor | None = None,
+        r_seq: torch.Tensor,  # (B, T, 1)
+        s_seq: torch.Tensor,  # (B, T, C, H, W)
+        a_seq: torch.Tensor,  # (B, T, action_dim)
+        rnn_state: torch.Tensor,  # (B, 1, hidden_size)
+        action: torch.Tensor | None = None,  # (B, action_dim) or None
     ) -> tuple:
-        # (B, T, C, H, W), (B, T, action_dim), (B, T)
-        x = self.encoder(s_seq, a_seq, r_seq)
-        x = self.linear(x)  # (batch_size, rep_dim)
+        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, T, hidden_dim)
+        x = x[:, -1, :]  # (B, hidden_dim)
+        x = self.linear(x)  # (B, hidden_dim)
 
         value_x = self.value_enc(x)
         value = self.value_head(value_x)
@@ -85,6 +91,7 @@ class Network(nn.Module):
             "x": x,
             "value_x": value_x,
             "policy_x": policy_x,
+            "rnn_state": rnn_state,
         }
 
 
@@ -140,7 +147,14 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.network = Network(self.action_dim, self.seq_len, args.encoder).to(self.device)
+        self.network = Network(
+            self.action_dim,
+            self.seq_len,
+            args.encoder,
+            observation_space.shape[1],
+            observation_space.shape[2],
+        ).to(self.device)
+        self.rnn_state = self.network.init_state().to(self.device)
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
         self.buffer = np.empty(
@@ -153,6 +167,7 @@ class PpoAgent:
                     ("r", np.float32),
                     ("v", np.float32),
                     ("done", np.int32),
+                    ("rnn_state", np.float32, (1, self.network.encoder.output_dim)),
                 ]
             ),
         )
@@ -171,6 +186,7 @@ class PpoAgent:
         self.episode_actions = []
         self.episode_values = []
         self.episode_logps = []
+        self.episode_rnn_states = []
 
     def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
         episode_reward = getattr(self, "episode_reward", 0.0)
@@ -194,6 +210,7 @@ class PpoAgent:
         self.episode_actions.append(action)
         self.episode_values.append(value)
         self.episode_logps.append(a_logp)
+        self.episode_rnn_states.append(self.rnn_state.cpu().numpy())
 
         return action, action_info
 
@@ -208,6 +225,7 @@ class PpoAgent:
             prev_action = self.episode_actions[-1]
             prev_value = self.episode_values[-1]
             prev_logp = self.episode_logps[-1]
+            prev_rnn_state = self.episode_rnn_states[-1]
 
             self.buffer[self.counter] = (
                 prev_obs,
@@ -216,6 +234,7 @@ class PpoAgent:
                 normed_reward,
                 prev_value,
                 False,
+                prev_rnn_state,
             )
             self.counter += 1
             if self.counter == self.buffer_capacity:
@@ -266,10 +285,11 @@ class PpoAgent:
         assert curr_s.shape[1] == self.seq_len
         assert curr_a.shape[1] == self.seq_len
 
-        result_dict = self.network(curr_r, curr_s, curr_a)
+        result_dict = self.network(curr_r, curr_s, curr_a, self.rnn_state)
         action = result_dict["action"]
         a_logp = result_dict["a_logp"]
         value = result_dict["value"]
+        self.rnn_state = result_dict["rnn_state"]
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
         if len(self.a_list) == self.seq_len:
@@ -293,6 +313,11 @@ class PpoAgent:
         v = torch.tensor(self.buffer["v"]).to(self.device).view(-1, 1)
         old_a_logp = torch.tensor(self.buffer["a_logp"]).to(self.device).view(-1, 1)
         done = torch.tensor(self.buffer["done"]).to(self.device).view(-1, 1)
+        rnn_state = (
+            torch.tensor(self.buffer["rnn_state"])
+            .to(self.device)
+            .view(-1, 1, self.network.encoder.output_dim)
+        )
 
         bias = torch.tensor(self.action_bias, device=self.device).view(1, -1)
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)
@@ -334,8 +359,11 @@ class PpoAgent:
                     (curr_action.shape[0], 1, self.action_dim), device=self.device
                 )
                 curr_action = torch.cat((curr_action, dummy_action), dim=1)
+                curr_rnn_state = rnn_state[indices[:, 0]].permute(1, 0, 2).contiguous()
 
-                net_out_dict = self.network(r[indices], s[indices], curr_action, a[index])
+                net_out_dict = self.network(
+                    r[indices], s[indices], curr_action, curr_rnn_state, a[index]
+                )
                 a_logp = net_out_dict["a_logp"]
                 value = net_out_dict["value"]
                 ratio = torch.exp(a_logp - old_a_logp[index])
