@@ -123,7 +123,7 @@ class RecurrentEncoder(nn.Module):
             images: Tensor of shape (B, T, 3, H, W)
             actions: Tensor of shape (B, T, action_dim)
             rewards: Tensor of shape (B, T, 1)
-            rnn_state: Tensor of shape (B, 1, hidden_size)
+            rnn_state: Tensor of shape (1, B, hidden_size)
 
         Returns:
             encoded features: (B, T, output_dim)
