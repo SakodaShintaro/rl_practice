@@ -277,14 +277,12 @@ class ActorCriticModel(nn.Module):
         self,
         obs: torch.Tensor,
         recurrent_cell: torch.Tensor,
-        sequence_length: int = 1,
     ):
         """Forward pass of the model
 
         Arguments:
-            obs {torch.Tensor} -- Batch of observations  (B, 3, H, W)
-            recurrent_cell {torch.Tensor} -- Memory cell of the recurrent layer
-            sequence_length {int} -- Length of the fed sequences. Defaults to 1.
+            obs {torch.Tensor} -- Batch of observations  (B, T, 3, H, W)
+            recurrent_cell {torch.Tensor} -- Memory cell of the recurrent layer (GRU: (1, B, hidden_size))
 
         Returns:
             {Categorical} -- Policy: Categorical distribution
@@ -294,7 +292,8 @@ class ActorCriticModel(nn.Module):
         # Set observation as input to the model
         h = obs
         # Forward observation encoder
-        B = h.shape[0]
+        B, T, C, H, W = h.shape
+        h = h.reshape(B * T, C, H, W)
         if self.encoder_type == "simple_cnn":
             h = F.relu(self.conv1(h))
             h = F.relu(self.conv2(h))
@@ -308,19 +307,16 @@ class ActorCriticModel(nn.Module):
 
         # Forward recurrent layer (GRU or LSTM) first, then hidden layer
         # Reshape the to be fed data to batch_size, sequence_length, data
-        B, D = h.shape
-        h = h.reshape((B // sequence_length, sequence_length, D))
+        h = h.reshape((B, T, -1))
 
         # Forward recurrent layer
         h, recurrent_cell = self.recurrent_layer(h, recurrent_cell)
 
         # Reshape to the original tensor size
-        B, T, D = h.shape
-        h = h.reshape(B * T, D)
+        h = h.reshape(B * T, -1)
 
         # Feed hidden layer after recurrent layer
         h = F.relu(self.lin_hidden_out(h))
-        memory_out = recurrent_cell
 
         # Decouple policy from value
         # Feed hidden layer (policy)
@@ -332,7 +328,7 @@ class ActorCriticModel(nn.Module):
         # Head: Policy
         pi = Categorical(logits=self.policy(h_policy))
 
-        return pi, value, memory_out
+        return pi, value, recurrent_cell
 
     def _init_weights(self, module: nn.Module) -> None:
         for name, param in module.named_parameters():
@@ -434,9 +430,8 @@ class RecurrentPpoAgent:
             self.buffer.cxs[t] = current_cell[1].squeeze(0).squeeze(0).detach().cpu()
 
         # Forward the model to retrieve the policy, the states' value and the recurrent cell states
-        policy, value, self.recurrent_cell = self.network(
-            obs_tensor.unsqueeze(0).to(self.device), current_cell
-        )
+        obs_tensor = obs_tensor.unsqueeze(0).unsqueeze(0).to(self.device)  # (1, 1, C, H, W)
+        policy, value, self.recurrent_cell = self.network(obs_tensor, current_cell)
         self.buffer.values[t] = value.squeeze(0).detach().cpu()
 
         # Sample actions from each individual policy branch
@@ -491,7 +486,9 @@ class RecurrentPpoAgent:
         if obs is None:
             last_value = torch.zeros((1, 1), dtype=torch.float32).to(self.device)
         else:
-            last_obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
+            last_obs_tensor = (
+                torch.tensor(obs, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
+            )  # (1, 1, C, H, W)
             _, last_value, _ = self.network(last_obs_tensor, self.recurrent_cell)
         self.buffer.calc_advantages(last_value, gamma=0.99, td_lambda=0.95)
 
@@ -522,9 +519,13 @@ class RecurrentPpoAgent:
             recurrent_cell = (samples["hxs"].unsqueeze(0), samples["cxs"].unsqueeze(0))
 
         # Forward model
-        policy, value, _ = self.network(
-            samples["obs"], recurrent_cell, self.buffer.actual_sequence_length
+        _, B, _ = recurrent_cell.shape
+        obs = (
+            samples["obs"]
+            .to(self.device)
+            .reshape(B, self.buffer.actual_sequence_length, *self.observation_space.shape)
         )
+        policy, value, _ = self.network(obs, recurrent_cell)
 
         # Policy Loss
         # Retrieve and process log_probs from each policy branch
