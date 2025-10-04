@@ -15,7 +15,6 @@ class Buffer:
         self,
         worker_steps: int,
         hidden_size: int,
-        layer_type: str,
         sequence_length: int,
         observation_space: spaces.Box,
         action_space_shape: tuple,
@@ -26,7 +25,6 @@ class Buffer:
         self.worker_steps = worker_steps
         self.n_mini_batches = 8
         self.batch_size = self.worker_steps
-        self.layer_type = layer_type
         self.sequence_length = sequence_length
         self.true_sequence_length = 0
 
@@ -36,7 +34,6 @@ class Buffer:
         self.dones = np.zeros(self.worker_steps, dtype=bool)
         self.obs = torch.zeros((self.worker_steps,) + observation_space.shape)
         self.hxs = torch.zeros((self.worker_steps, hidden_size))
-        self.cxs = torch.zeros((self.worker_steps, hidden_size))
         self.log_probs = torch.zeros((self.worker_steps, len(action_space_shape)))
         self.values = torch.zeros(self.worker_steps)
         self.advantages = torch.zeros(self.worker_steps)
@@ -52,8 +49,6 @@ class Buffer:
         }
 
         samples["hxs"] = self.hxs
-        if self.layer_type == "lstm":
-            samples["cxs"] = self.cxs
 
         # Determine indices at which episodes terminate
         episode_done_indices = list(np.where(self.dones)[0])
@@ -74,7 +69,7 @@ class Buffer:
                 self._pad_sequence(sequence, max_sequence_length) for sequence in sequences
             ]
             stacked = torch.stack(sequences, dim=0)
-            if key in ("hxs", "cxs"):
+            if key in ("hxs"):
                 stacked = stacked[:, 0]
             samples[key] = stacked
 
@@ -88,7 +83,7 @@ class Buffer:
 
         self.samples_flat = {}
         for key, value in samples.items():
-            if key in ("hxs", "cxs"):
+            if key in ("hxs"):
                 self.samples_flat[key] = value
             elif key in ("values", "log_probs", "advantages"):
                 self.samples_flat[key] = value
@@ -193,7 +188,7 @@ class Buffer:
             ]
             mini_batch = {}
             for key, value in self.samples_flat.items():
-                if key == "hxs" or key == "cxs":
+                if key == "hxs":
                     # Select recurrent cell states of sequence starts
                     mini_batch[key] = value[sequence_indices[start:end]].to(self.device)
                 elif key == "log_probs" or "advantages" in key or key == "values":
@@ -230,10 +225,9 @@ class Buffer:
 
 
 class ActorCriticModel(nn.Module):
-    def __init__(self, hidden_size, layer_type, observation_space, action_space_shape):
+    def __init__(self, hidden_size, observation_space, action_space_shape):
         super().__init__()
         self.hidden_size = hidden_size
-        self.layer_type = layer_type
 
         # Observation encoder
         self.encoder_type = "simple_cnn"
@@ -246,16 +240,13 @@ class ActorCriticModel(nn.Module):
             self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
 
         # Compute output size of convolutional layers
-        in_features_next_layer = self.get_conv_output(observation_space.shape)
+        in_features_next_layer = self._get_conv_output(observation_space.shape)
         print(f"{in_features_next_layer=}")
 
         self.lin_hidden_in = nn.Linear(in_features_next_layer, self.hidden_size)
 
-        # Recurrent layer (GRU or LSTM)
-        if self.layer_type == "gru":
-            self.recurrent_layer = nn.GRU(self.hidden_size, self.hidden_size, batch_first=True)
-        elif self.layer_type == "lstm":
-            self.recurrent_layer = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True)
+        # Recurrent layer (GRU)
+        self.recurrent_layer = nn.GRU(self.hidden_size, self.hidden_size, batch_first=True)
 
         # Hidden layer
         self.lin_hidden_out = nn.Linear(self.hidden_size, self.hidden_size)
@@ -305,7 +296,7 @@ class ActorCriticModel(nn.Module):
         h = h.flatten(start_dim=1)
         h = F.relu(self.lin_hidden_in(h))
 
-        # Forward recurrent layer (GRU or LSTM) first, then hidden layer
+        # Forward recurrent layer (GRU) first, then hidden layer
         # Reshape the to be fed data to batch_size, sequence_length, data
         h = h.reshape((B, T, -1))
 
@@ -339,7 +330,7 @@ class ActorCriticModel(nn.Module):
             elif "weight" in name:
                 nn.init.orthogonal_(param, np.sqrt(2))
 
-    def get_conv_output(self, shape: tuple) -> int:
+    def _get_conv_output(self, shape: tuple) -> int:
         o = torch.zeros(1, *shape)
         if self.encoder_type == "simple_cnn":
             o = self.conv1(o)
@@ -349,22 +340,13 @@ class ActorCriticModel(nn.Module):
             o = self.ae.encode(o).latents
         return int(np.prod(o.size()))
 
-    def init_recurrent_cell_states(self, num_sequences: int, device: torch.device) -> tuple:
+    def init_recurrent_cell_states(self, device: torch.device) -> tuple:
         hxs = torch.zeros(
-            (num_sequences),
-            self.hidden_size,
+            (1, 1, self.hidden_size),
             dtype=torch.float32,
             device=device,
-        ).unsqueeze(0)
-        cxs = None
-        if self.layer_type == "lstm":
-            cxs = torch.zeros(
-                (num_sequences),
-                self.hidden_size,
-                dtype=torch.float32,
-                device=device,
-            ).unsqueeze(0)
-        return hxs, cxs
+        )
+        return hxs
 
 
 class RecurrentPpoAgent:
@@ -376,7 +358,6 @@ class RecurrentPpoAgent:
         self.action_space_shape = action_space.shape
 
         self.worker_steps = args.buffer_capacity
-        self.layer_type = "gru"
         hidden_size = 256
         sequence_length = args.seq_len
 
@@ -384,7 +365,6 @@ class RecurrentPpoAgent:
         self.buffer = Buffer(
             self.worker_steps,
             hidden_size,
-            self.layer_type,
             sequence_length,
             self.observation_space,
             self.action_space_shape,
@@ -395,19 +375,14 @@ class RecurrentPpoAgent:
         # Init model
         self.network = ActorCriticModel(
             hidden_size,
-            self.layer_type,
             self.observation_space,
             self.action_space_shape,
         ).to(self.device)
         self.network.train()
         self.optimizer = optim.AdamW(self.network.parameters(), lr=args.learning_rate)
 
-        # Setup initial recurrent cell states (LSTM: tuple(tensor, tensor) or GRU: tensor)
-        hxs, cxs = self.network.init_recurrent_cell_states(1, self.device)
-        if self.layer_type == "gru":
-            self.recurrent_cell = hxs
-        elif self.layer_type == "lstm":
-            self.recurrent_cell = (hxs, cxs)
+        # Setup initial recurrent cell states
+        self.recurrent_cell = self.network.init_recurrent_cell_states(self.device)
 
         self.epoch = 0
 
@@ -423,11 +398,7 @@ class RecurrentPpoAgent:
         self.buffer.obs[t] = obs_tensor.cpu()
 
         current_cell = self.recurrent_cell
-        if self.layer_type == "gru":
-            self.buffer.hxs[t] = current_cell.squeeze(0).squeeze(0).detach().cpu()
-        elif self.layer_type == "lstm":
-            self.buffer.hxs[t] = current_cell[0].squeeze(0).squeeze(0).detach().cpu()
-            self.buffer.cxs[t] = current_cell[1].squeeze(0).squeeze(0).detach().cpu()
+        self.buffer.hxs[t] = current_cell.squeeze(0).squeeze(0).detach().cpu()
 
         # Forward the model to retrieve the policy, the states' value and the recurrent cell states
         obs_tensor = obs_tensor.unsqueeze(0).unsqueeze(0).to(self.device)  # (1, 1, C, H, W)
@@ -513,10 +484,7 @@ class RecurrentPpoAgent:
         clip_range = 0.2
 
         # Retrieve sampled recurrent cell states to feed the model
-        if self.layer_type == "gru":
-            recurrent_cell = samples["hxs"].unsqueeze(0)
-        elif self.layer_type == "lstm":
-            recurrent_cell = (samples["hxs"].unsqueeze(0), samples["cxs"].unsqueeze(0))
+        recurrent_cell = samples["hxs"].unsqueeze(0)
 
         # Forward model
         _, B, _ = recurrent_cell.shape
