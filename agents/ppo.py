@@ -2,97 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.distributions import Beta
 
-from networks.backbone import RecurrentEncoder, SingleFrameEncoder
-
-
-class Network(nn.Module):
-    def __init__(
-        self, action_dim: int, seq_len: int, encoder_type: str, image_h: int, image_w: int
-    ) -> None:
-        super().__init__()
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.action_dim = action_dim
-
-        if encoder_type == "recurrent":
-            self.encoder = RecurrentEncoder(image_h, image_w)
-        else:
-            self.encoder = SingleFrameEncoder(seq_len, device)
-        seq_hidden_dim = self.encoder.output_dim
-        self.linear = nn.Linear(seq_hidden_dim, seq_hidden_dim)
-        self.value_enc = nn.Sequential(nn.Linear(seq_hidden_dim, seq_hidden_dim), nn.ReLU())
-        self.value_head = nn.Linear(seq_hidden_dim, 1)
-        self.policy_enc = nn.Sequential(nn.Linear(seq_hidden_dim, seq_hidden_dim), nn.ReLU())
-        self.policy_type = "Categorical"
-        if self.policy_type == "Beta":
-            self.alpha_head = nn.Linear(seq_hidden_dim, action_dim)
-            self.beta_head = nn.Linear(seq_hidden_dim, action_dim)
-        elif self.policy_type == "Categorical":
-            self.logits_head = nn.Linear(seq_hidden_dim, action_dim)
-        else:
-            raise ValueError("Invalid policy type")
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module: nn.Module) -> None:
-        """Initialize weights with orthogonal initialization.
-
-        Arguments:
-            module {nn.Module} -- Module to initialize
-        """
-        for name, param in module.named_parameters():
-            if "bias" in name:
-                nn.init.constant_(param, 0)
-            elif "weight" in name:
-                nn.init.orthogonal_(param, np.sqrt(2))
-
-    def init_state(self) -> torch.Tensor:
-        return self.encoder.init_state()
-
-    def forward(
-        self,
-        r_seq: torch.Tensor,  # (B, T, 1)
-        s_seq: torch.Tensor,  # (B, T, C, H, W)
-        a_seq: torch.Tensor,  # (B, T, action_dim)
-        rnn_state: torch.Tensor,  # (B, 1, hidden_size)
-        action: torch.Tensor | None = None,  # (B, action_dim) or None
-    ) -> tuple:
-        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, T, hidden_dim)
-        x = x[:, -1, :]  # (B, hidden_dim)
-        x = self.linear(x)  # (B, hidden_dim)
-
-        value_x = self.value_enc(x)
-        value = self.value_head(value_x)
-
-        policy_x = self.policy_enc(x)
-
-        if self.policy_type == "Beta":
-            alpha = self.alpha_head(policy_x).exp() + 1
-            beta = self.beta_head(policy_x).exp() + 1
-
-            dist = Beta(alpha, beta)
-            if action is None:
-                action = dist.sample()
-            a_logp = dist.log_prob(action).sum(dim=1, keepdim=True)
-        elif self.policy_type == "Categorical":
-            logits = self.logits_head(policy_x)
-            dist = torch.distributions.Categorical(logits=logits)
-            if action is None:
-                action = dist.sample()
-                a_logp = dist.log_prob(action).unsqueeze(1)
-                action = F.one_hot(action, num_classes=self.action_dim).float()
-            else:
-                a_logp = dist.log_prob(action.argmax(dim=1)).unsqueeze(1)
-
-        return {
-            "action": action,
-            "a_logp": a_logp,
-            "value": value,
-            "x": x,
-            "value_x": value_x,
-            "policy_x": policy_x,
-            "rnn_state": rnn_state,
-        }
+from networks.actor_critic_with_state_value import Network2
 
 
 class SequentialBatchSampler:
@@ -149,7 +60,7 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.network = Network(
+        self.network = Network2(
             self.action_dim,
             self.seq_len,
             args.encoder,
