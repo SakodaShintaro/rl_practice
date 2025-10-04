@@ -377,7 +377,7 @@ class RecurrentPpoAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.observation_space = observation_space
-        self.action_space_shape = (action_space.n,)
+        self.action_space_shape = action_space.shape
 
         self.worker_steps = args.buffer_capacity
         self.layer_type = "gru"
@@ -457,7 +457,11 @@ class RecurrentPpoAgent:
             "normed_reward": reward,
         }
 
-        return action, action_info
+        # Convert discrete action to continuous format for the environment
+        continuous_action = np.zeros(self.action_space_shape, dtype=np.float32)
+        discrete_action = action.cpu().numpy()
+        continuous_action[discrete_action] = 1.0
+        return continuous_action, action_info
 
     def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
         info_dict = {}
