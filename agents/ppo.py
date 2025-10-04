@@ -130,7 +130,7 @@ class PpoAgent:
     max_grad_norm = 0.5
     clip_param_policy = 0.1
     clip_param_value = 1.0
-    ppo_epoch = 10
+    ppo_epoch = 4
     gamma = 0.99
 
     def __init__(self, args, observation_space, action_space) -> None:
@@ -216,6 +216,7 @@ class PpoAgent:
         assert curr_r.shape[1] == self.seq_len
         assert curr_s.shape[1] == self.seq_len
         assert curr_a.shape[1] == self.seq_len
+        curr_rnn_state = self.rnn_state
 
         result_dict = self.network(curr_r, curr_s, curr_a, self.rnn_state)
         action = result_dict["action"]
@@ -250,7 +251,7 @@ class PpoAgent:
         self.episode_actions.append(action)
         self.episode_values.append(value)
         self.episode_logps.append(a_logp)
-        self.episode_rnn_states.append(self.rnn_state.cpu().numpy())
+        self.episode_rnn_states.append(curr_rnn_state.cpu().numpy())
 
         return action, action_info
 
