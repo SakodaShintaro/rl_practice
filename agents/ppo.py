@@ -168,6 +168,7 @@ class PpoAgent:
 
     def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
         self.episode_reward += reward
+        done = termination or truncation
 
         info_dict = {}
 
@@ -184,7 +185,7 @@ class PpoAgent:
                 prev_logp,
                 reward,
                 prev_value,
-                False,
+                done,
                 prev_rnn_state,
             )
             self.counter += 1
@@ -193,7 +194,7 @@ class PpoAgent:
                 info_dict.update(train_result)
                 self.counter = 0
 
-        if termination or truncation:
+        if done:
             # エピソード終了時の統計情報を追加
             if len(self.episode_values) > 0:
                 info_dict["first_value"] = self.episode_values[0]
