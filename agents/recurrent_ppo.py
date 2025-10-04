@@ -206,11 +206,11 @@ class Buffer:
             yield mini_batch
 
     @torch.no_grad()
-    def calc_advantages(self, last_value: torch.tensor, gamma: float, td_lambda: float) -> None:
+    def calc_advantages(self, last_value: torch.Tensor, gamma: float, td_lambda: float) -> None:
         """Generalized advantage estimation (GAE)
 
         Arguments:
-            last_value {torch.tensor} -- Value of the last agent's state
+            last_value {torch.Tensor} -- Value of the last agent's state
             gamma {float} -- Discount factor
             td_lambda {float} -- GAE regularization parameter
         """
@@ -275,20 +275,20 @@ class ActorCriticModel(nn.Module):
 
     def forward(
         self,
-        obs: torch.tensor,
-        recurrent_cell: torch.tensor,
+        obs: torch.Tensor,
+        recurrent_cell: torch.Tensor,
         sequence_length: int = 1,
     ):
         """Forward pass of the model
 
         Arguments:
-            obs {torch.tensor} -- Batch of observations  (B, 3, H, W)
-            recurrent_cell {torch.tensor} -- Memory cell of the recurrent layer
+            obs {torch.Tensor} -- Batch of observations  (B, 3, H, W)
+            recurrent_cell {torch.Tensor} -- Memory cell of the recurrent layer
             sequence_length {int} -- Length of the fed sequences. Defaults to 1.
 
         Returns:
             {Categorical} -- Policy: Categorical distribution
-            {torch.tensor} -- Value Function: Value
+            {torch.Tensor} -- Value Function: Value
             {tuple} -- Recurrent cell
         """
         # Set observation as input to the model
