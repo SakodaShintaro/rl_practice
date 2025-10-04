@@ -256,7 +256,7 @@ class RecurrentPpoAgent:
         self.optimizer = optim.AdamW(self.network.parameters(), lr=args.learning_rate)
 
         # Setup initial recurrent cell states
-        self.recurrent_cell = self.network.init_recurrent_cell_states(self.device)
+        self.recurrent_cell = self.network.init_state().to(self.device)
 
         self.epoch = 0
 

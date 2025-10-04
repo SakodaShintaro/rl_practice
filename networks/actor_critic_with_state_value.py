@@ -48,6 +48,28 @@ class Network1(nn.Module):
         # Apply weight initialization to all modules
         self.apply(self._init_weights)
 
+    def _get_conv_output(self, shape: tuple) -> int:
+        o = torch.zeros(1, *shape)
+        if self.encoder_type == "simple_cnn":
+            o = self.conv1(o)
+            o = self.conv2(o)
+            o = self.conv3(o)
+        elif self.encoder_type == "ae":
+            o = self.ae.encode(o).latents
+        return int(np.prod(o.size()))
+
+    def _init_weights(self, module: nn.Module) -> None:
+        for name, param in module.named_parameters():
+            if "ae." in name:
+                continue
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, np.sqrt(2))
+
+    def init_state(self) -> tuple:
+        return torch.zeros((1, 1, self.hidden_size))
+
     def forward(
         self,
         obs: torch.Tensor,
@@ -104,33 +126,6 @@ class Network1(nn.Module):
         pi = Categorical(logits=self.policy(h_policy))
 
         return pi, value, recurrent_cell
-
-    def _init_weights(self, module: nn.Module) -> None:
-        for name, param in module.named_parameters():
-            if "ae." in name:
-                continue
-            if "bias" in name:
-                nn.init.constant_(param, 0)
-            elif "weight" in name:
-                nn.init.orthogonal_(param, np.sqrt(2))
-
-    def _get_conv_output(self, shape: tuple) -> int:
-        o = torch.zeros(1, *shape)
-        if self.encoder_type == "simple_cnn":
-            o = self.conv1(o)
-            o = self.conv2(o)
-            o = self.conv3(o)
-        elif self.encoder_type == "ae":
-            o = self.ae.encode(o).latents
-        return int(np.prod(o.size()))
-
-    def init_recurrent_cell_states(self, device: torch.device) -> tuple:
-        hxs = torch.zeros(
-            (1, 1, self.hidden_size),
-            dtype=torch.float32,
-            device=device,
-        )
-        return hxs
 
 
 class Network2(nn.Module):
