@@ -1,4 +1,3 @@
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -137,19 +136,13 @@ class PpoAgent:
     def __init__(self, args, observation_space, action_space) -> None:
         # action properties
         self.action_space = action_space
-        if type(action_space) == gym.spaces.Box:
-            self.action_dim = np.prod(action_space.shape)
-            self.action_low = action_space.low
-            self.action_high = action_space.high
-            self.action_scale = action_space.high - action_space.low
-            self.action_bias = (action_space.high + action_space.low) / 2.0 - 0.5 * self.action_scale
-        elif type(action_space) == gym.spaces.Discrete:
-            self.action_dim = action_space.n
-            self.action_low = 0
-            self.action_high = action_space.n - 1
-            self.action_scale = 1.0
-            self.action_bias = 0.0
+        self.action_dim = np.prod(action_space.shape)
+        self.action_low = action_space.low
+        self.action_high = action_space.high
+        self.action_scale = action_space.high - action_space.low
+        self.action_bias = (action_space.high + action_space.low) / 2.0 - 0.5 * self.action_scale
         print(f"Action space: {action_space}, dim: {self.action_dim}")
+        print(f"  scale: {self.action_scale}, bias: {self.action_bias}")
 
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
