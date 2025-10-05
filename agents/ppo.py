@@ -269,6 +269,7 @@ class PpoAgent:
                     r[indices], s[indices], curr_action, curr_rnn_state, a[index]
                 )
                 a_logp = net_out_dict["a_logp"]
+                entropy = net_out_dict["entropy"]
                 value = net_out_dict["value"]
                 ratio = torch.exp(a_logp - old_a_logp[index])
 
@@ -282,11 +283,11 @@ class PpoAgent:
                 value_clipped = torch.clamp(
                     value, v[index] - self.clip_param_value, v[index] + self.clip_param_value
                 )
-                value_loss_unclipped = F.smooth_l1_loss(value, target_v[index])
-                value_loss_clipped = F.smooth_l1_loss(value_clipped, target_v[index])
+                value_loss_unclipped = F.mse_loss(value, target_v[index])
+                value_loss_clipped = F.mse_loss(value_clipped, target_v[index])
                 value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-                loss = action_loss + 0.25 * value_loss
+                loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
                 sum_action_loss += action_loss.item() * len(index)
                 sum_value_loss += value_loss.item() * len(index)
 

@@ -172,7 +172,7 @@ class Network2(nn.Module):
         r_seq: torch.Tensor,  # (B, T, 1)
         s_seq: torch.Tensor,  # (B, T, C, H, W)
         a_seq: torch.Tensor,  # (B, T, action_dim)
-        rnn_state: torch.Tensor,  # (B, 1, hidden_size)
+        rnn_state: torch.Tensor,  # (1, B, hidden_size)
         action: torch.Tensor | None = None,  # (B, action_dim) or None
     ) -> tuple:
         x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, T, hidden_dim)
@@ -203,11 +203,12 @@ class Network2(nn.Module):
                 a_logp = dist.log_prob(action.argmax(dim=1)).unsqueeze(1)
 
         return {
-            "action": action,
-            "a_logp": a_logp,
-            "value": value,
-            "x": x,
-            "value_x": value_x,
-            "policy_x": policy_x,
-            "rnn_state": rnn_state,
+            "action": action,  # (B, action_dim)
+            "a_logp": a_logp,  # (B, 1)
+            "entropy": dist.entropy().unsqueeze(1),  # (B, 1)
+            "value": value,  # (B, 1)
+            "x": x,  # (B, hidden_dim)
+            "value_x": value_x,  # (B, hidden_dim)
+            "policy_x": policy_x,  # (B, hidden_dim)
+            "rnn_state": rnn_state,  # (1, B, hidden_size)
         }
