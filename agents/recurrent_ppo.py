@@ -276,22 +276,18 @@ class RecurrentPpoAgent:
 
         # Forward the model to retrieve the policy, the states' value and the recurrent cell states
         obs_tensor = obs_tensor.unsqueeze(0).unsqueeze(0).to(self.device)  # (1, 1, C, H, W)
-        policy, value, self.recurrent_cell = self.network(obs_tensor, current_cell)
+        output_dict = self.network(obs_tensor, current_cell)
+        action = output_dict["action"]
+        log_prob = output_dict["a_logp"]
+        value = output_dict["value"]
+        self.recurrent_cell = output_dict["recurrent_cell"]
+
+        self.buffer.actions[t] = action.squeeze(0).cpu().long()
+        self.buffer.log_probs[t] = log_prob.squeeze(0).cpu()
         self.buffer.values[t] = value.squeeze(0).detach().cpu()
 
-        # Sample actions from each individual policy branch
-        actions = []
-        log_probs = []
-        action = policy.sample()
-        actions.append(action)
-        log_probs.append(policy.log_prob(action))
-        action_tensor = torch.stack(actions, dim=1).detach()
-        log_prob_tensor = torch.stack(log_probs, dim=1).detach()
-        self.buffer.actions[t] = action_tensor.squeeze(0).cpu().long()
-        self.buffer.log_probs[t] = log_prob_tensor.squeeze(0).cpu()
-
         action_info = {
-            "a_logp": log_prob_tensor.cpu().numpy(),
+            "a_logp": log_prob.cpu().numpy(),
             "value": value.cpu().numpy(),
             "reward": reward,
             "normed_reward": reward,
@@ -334,7 +330,8 @@ class RecurrentPpoAgent:
             last_obs_tensor = (
                 torch.tensor(obs, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
             )  # (1, 1, C, H, W)
-            _, last_value, _ = self.network(last_obs_tensor, self.recurrent_cell)
+            output_dict = self.network(last_obs_tensor, self.recurrent_cell)
+            last_value = output_dict["value"]
         self.buffer.calc_advantages(last_value, gamma=0.99, td_lambda=0.95)
 
         self.buffer.prepare_batch_dict()
@@ -367,17 +364,11 @@ class RecurrentPpoAgent:
             .to(self.device)
             .reshape(B, self.buffer.actual_sequence_length, *self.observation_space.shape)
         )
-        policy, value, _ = self.network(obs, recurrent_cell)
-
-        # Policy Loss
-        # Retrieve and process log_probs from each policy branch
-        log_probs = policy.log_prob(samples["actions"][:, 0]).unsqueeze(1)
-        entropies = policy.entropy().unsqueeze(1)
-
-        # Remove paddings
-        value = value[samples["loss_mask"]]
-        log_probs = log_probs[samples["loss_mask"]]
-        entropies = entropies[samples["loss_mask"]]
+        output_dict = self.network(obs, recurrent_cell, samples["actions"][:, 0].view(B, -1))
+        mask = samples["loss_mask"]
+        value = output_dict["value"].flatten()[mask].unsqueeze(1)
+        log_probs = output_dict["a_logp"].flatten()[mask].unsqueeze(1)
+        entropies = output_dict["entropy"].flatten()[mask].unsqueeze(1)
 
         # Compute policy surrogates to establish the policy loss
         normalized_advantage = (samples["advantages"] - samples["advantages"].mean()) / (

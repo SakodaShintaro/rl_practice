@@ -73,8 +73,9 @@ class Network1(nn.Module):
     def forward(
         self,
         obs: torch.Tensor,  # (B, T, 3, H, W)
-        recurrent_cell: torch.Tensor,  #  (1, B, hidden_size)
-    ):
+        recurrent_cell: torch.Tensor,  # (1, B, hidden_size)
+        action: torch.Tensor | None = None,  # (B, T) (long) or None
+    ) -> dict:
         # Set observation as input to the model
         h = obs
         # Forward observation encoder
@@ -98,9 +99,6 @@ class Network1(nn.Module):
         # Forward recurrent layer
         h, recurrent_cell = self.recurrent_layer(h, recurrent_cell)
 
-        # Reshape to the original tensor size
-        h = h.reshape(B * T, -1)
-
         # Feed hidden layer after recurrent layer
         h = F.relu(self.lin_hidden_out(h))
 
@@ -110,11 +108,21 @@ class Network1(nn.Module):
         # Feed hidden layer (value function)
         h_value = F.relu(self.lin_value(h))
         # Head: Value function
-        value = self.value(h_value).reshape(-1)
+        value = self.value(h_value)
         # Head: Policy
         pi = Categorical(logits=self.policy(h_policy))
 
-        return pi, value, recurrent_cell
+        if action is None:
+            action = pi.sample()
+        a_logp = pi.log_prob(action)
+
+        return {
+            "action": action,  # (B, T)
+            "a_logp": a_logp,  # (B, T)
+            "entropy": pi.entropy(),  # (B, T)
+            "value": value,  # (B, T)
+            "recurrent_cell": recurrent_cell,  # (1, B, hidden_size)
+        }
 
 
 class Network2(nn.Module):
