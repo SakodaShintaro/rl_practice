@@ -72,20 +72,9 @@ class Network1(nn.Module):
 
     def forward(
         self,
-        obs: torch.Tensor,
-        recurrent_cell: torch.Tensor,
+        obs: torch.Tensor,  # (B, T, 3, H, W)
+        recurrent_cell: torch.Tensor,  #  (1, B, hidden_size)
     ):
-        """Forward pass of the model
-
-        Arguments:
-            obs {torch.Tensor} -- Batch of observations  (B, T, 3, H, W)
-            recurrent_cell {torch.Tensor} -- Memory cell of the recurrent layer (GRU: (1, B, hidden_size))
-
-        Returns:
-            {Categorical} -- Policy: Categorical distribution
-            {torch.Tensor} -- Value Function: Value
-            {tuple} -- Recurrent cell
-        """
         # Set observation as input to the model
         h = obs
         # Forward observation encoder
