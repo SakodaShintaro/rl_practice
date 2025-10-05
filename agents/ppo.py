@@ -94,7 +94,6 @@ class PpoAgent:
         self.a_list = []
 
     def initialize_for_episode(self) -> None:
-        self.episode_reward = 0.0
         self.episode_states = []
         self.episode_actions = []
         self.episode_values = []
@@ -167,7 +166,6 @@ class PpoAgent:
         return action, action_info
 
     def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
-        self.episode_reward += reward
         done = termination or truncation
 
         info_dict = {}
@@ -198,7 +196,6 @@ class PpoAgent:
             # エピソード終了時の統計情報を追加
             if len(self.episode_values) > 0:
                 info_dict["first_value"] = self.episode_values[0]
-                info_dict["weighted_reward"] = getattr(self, "episode_reward", 0.0)
 
         # make decision
         action, action_info = self.select_action(global_step, obs, reward)
