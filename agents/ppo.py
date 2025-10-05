@@ -244,6 +244,7 @@ class PpoAgent:
             last_advantage = delta + self.gamma * 0.95 * last_advantage
             adv[i] = last_advantage
             last_value = v[i]
+        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         ave_action_loss_list = []
         ave_value_loss_list = []
@@ -301,10 +302,8 @@ class PpoAgent:
             ave_action_loss_list.append(ave_action_loss)
             ave_value_loss_list.append(ave_value_loss)
         result_dict = {}
-        ratio_list = []
         result_dict["ppo/average_action_loss"] = np.mean(ave_action_loss_list)
         result_dict["ppo/average_value_loss"] = np.mean(ave_value_loss_list)
-        result_dict["ppo/average_ratio"] = np.mean(ratio_list)
         result_dict["ppo/average_target_v"] = target_v.mean().item()
         result_dict["ppo/average_adv"] = adv.mean().item()
         return result_dict
