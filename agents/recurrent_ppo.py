@@ -371,8 +371,11 @@ class RecurrentPpoAgent:
 
         # Policy Loss
         # Retrieve and process log_probs from each policy branch
-        log_probs = policy.log_prob(samples["actions"][:, 0])
-        entropies = policy.entropy()
+        log_probs, entropies = [], []
+        log_probs.append(policy.log_prob(samples["actions"][:, 0]))
+        entropies.append(policy.entropy())
+        log_probs = torch.stack(log_probs, dim=1)
+        entropies = torch.stack(entropies, dim=1).sum(1).reshape(-1)
 
         # Remove paddings
         value = value[samples["loss_mask"]]
