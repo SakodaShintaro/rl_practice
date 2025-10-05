@@ -60,13 +60,7 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.network = Network2(
-            self.action_dim,
-            self.seq_len,
-            args.encoder,
-            observation_space.shape[1],
-            observation_space.shape[2],
-        ).to(self.device)
+        self.network = Network2(observation_space.shape, action_space.shape).to(self.device)
         self.rnn_state = self.network.init_state().to(self.device)
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")

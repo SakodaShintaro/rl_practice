@@ -126,28 +126,21 @@ class Network1(nn.Module):
 
 
 class Network2(nn.Module):
-    def __init__(
-        self, action_dim: int, seq_len: int, encoder_type: str, image_h: int, image_w: int
-    ) -> None:
+    def __init__(self, observation_space_shape: list[int], action_space_shape: list[int]) -> None:
         super().__init__()
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.action_dim = action_dim
-
-        if encoder_type == "recurrent":
-            self.encoder = RecurrentEncoder(image_h, image_w)
-        else:
-            self.encoder = SingleFrameEncoder(seq_len, device)
-        seq_hidden_dim = self.encoder.output_dim
-        self.linear = nn.Linear(seq_hidden_dim, seq_hidden_dim)
-        self.value_enc = nn.Sequential(nn.Linear(seq_hidden_dim, seq_hidden_dim), nn.ReLU())
-        self.value_head = nn.Linear(seq_hidden_dim, 1)
-        self.policy_enc = nn.Sequential(nn.Linear(seq_hidden_dim, seq_hidden_dim), nn.ReLU())
+        self.action_dim = action_space_shape[0]
+        self.encoder = RecurrentEncoder(observation_space_shape[1], observation_space_shape[2])
+        hidden_dim = self.encoder.output_dim
+        self.linear = nn.Linear(hidden_dim, hidden_dim)
+        self.value_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.value_head = nn.Linear(hidden_dim, 1)
+        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
         self.policy_type = "Categorical"
         if self.policy_type == "Beta":
-            self.alpha_head = nn.Linear(seq_hidden_dim, action_dim)
-            self.beta_head = nn.Linear(seq_hidden_dim, action_dim)
+            self.alpha_head = nn.Linear(hidden_dim, self.action_dim)
+            self.beta_head = nn.Linear(hidden_dim, self.action_dim)
         elif self.policy_type == "Categorical":
-            self.logits_head = nn.Linear(seq_hidden_dim, action_dim)
+            self.logits_head = nn.Linear(hidden_dim, self.action_dim)
         else:
             raise ValueError("Invalid policy type")
         self.apply(self._init_weights)
