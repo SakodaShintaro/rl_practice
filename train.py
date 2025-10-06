@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning_rate", type=float, default=2e-4)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--step_limit", type=int, default=10_000_000)
+    parser.add_argument("--step_limit", type=int, default=1_000_000)
     parser.add_argument("--seq_len", type=int, default=32)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
