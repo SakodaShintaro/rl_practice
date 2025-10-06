@@ -135,7 +135,8 @@ class RecurrentEncoder(nn.Module):
 
         # CNN forward pass
         if self.encoder_type == "ae":
-            h = self.ae.encode(all_frames).latents
+            with torch.no_grad():
+                h = self.ae.encode(all_frames).latents
         elif self.encoder_type == "simple_cnn":
             h = F.relu(self.conv1(all_frames))
             h = F.relu(self.conv2(h))

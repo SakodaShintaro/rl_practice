@@ -33,6 +33,8 @@ class Network(nn.Module):
             module {nn.Module} -- Module to initialize
         """
         for name, param in module.named_parameters():
+            if "ae." in name:
+                continue
             if "bias" in name:
                 nn.init.constant_(param, 0)
             elif "weight" in name:
