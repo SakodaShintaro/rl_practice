@@ -71,7 +71,7 @@ class SingleFrameEncoder(nn.Module):
 
 class RecurrentEncoder(nn.Module):
     """
-    統合されたRecurrent Encoder (CNN + LSTM/GRU)
+    CNN + GRU
     recurrent-ppo-truncated-bpttのActorCriticModelのエンコーダー部分を統合
     https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt
     """
