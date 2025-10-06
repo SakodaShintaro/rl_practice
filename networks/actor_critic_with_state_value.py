@@ -155,7 +155,7 @@ class Network2(nn.Module):
             if "bias" in name:
                 nn.init.constant_(param, 0)
             elif "weight" in name:
-                nn.init.orthogonal_(param, np.sqrt(2))
+                nn.init.orthogonal_(param)
 
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
