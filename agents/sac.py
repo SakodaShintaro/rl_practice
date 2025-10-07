@@ -17,7 +17,7 @@ from networks.epona.flux_dit import FluxDiT
 from networks.epona.layers import LinearEmbedder
 from networks.policy_head import DiffusionPolicy
 from networks.sparse_utils import apply_masks_during_training
-from networks.value_head import SacQ
+from networks.value_head import ActionValueHead
 from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
 
@@ -64,7 +64,7 @@ class Network(nn.Module):
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
-        self.critic = SacQ(
+        self.critic = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,

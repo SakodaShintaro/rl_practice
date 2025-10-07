@@ -13,7 +13,7 @@ def weights_init_(m):
         nn.init.constant_(m.bias, 0)
 
 
-class SacQ(nn.Module):
+class ActionValueHead(nn.Module):
     def __init__(
         self,
         in_channels: int,
