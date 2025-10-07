@@ -4,17 +4,25 @@ from torch.distributions import Beta, Categorical
 from torch.nn import functional as F
 
 from networks.backbone import RecurrentEncoder
+from networks.value_head import StateValueHead
 
 
 class Network(nn.Module):
-    def __init__(self, observation_space_shape: list[int], action_space_shape: list[int]) -> None:
+    def __init__(
+        self, observation_space_shape: list[int], action_space_shape: list[int], num_bins: int
+    ) -> None:
         super().__init__()
         self.action_dim = action_space_shape[0]
         self.encoder = RecurrentEncoder(observation_space_shape[1], observation_space_shape[2])
         hidden_dim = self.encoder.output_dim
         self.linear = nn.Linear(hidden_dim, hidden_dim)
-        self.value_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
-        self.value_head = nn.Linear(hidden_dim, 1)
+        self.value_head = StateValueHead(
+            in_channels=hidden_dim,
+            hidden_dim=hidden_dim,
+            block_num=1,
+            num_bins=num_bins,
+            sparsity=0.0,
+        )
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
         self.policy_type = "Categorical"
         if self.policy_type == "Beta":
@@ -55,8 +63,7 @@ class Network(nn.Module):
         x = x[:, -1, :]  # (B, hidden_dim)
         x = self.linear(x)  # (B, hidden_dim)
 
-        value_x = self.value_enc(x)
-        value = self.value_head(value_x)
+        value_dict = self.value_head(x)
 
         policy_x = self.policy_enc(x)
 
@@ -82,9 +89,7 @@ class Network(nn.Module):
             "action": action,  # (B, action_dim)
             "a_logp": a_logp,  # (B, 1)
             "entropy": dist.entropy().unsqueeze(1),  # (B, 1)
-            "value": value,  # (B, 1)
+            "value": value_dict["output"],  # (B, 1)
             "x": x,  # (B, hidden_dim)
-            "value_x": value_x,  # (B, hidden_dim)
-            "policy_x": policy_x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (1, B, hidden_size)
         }

@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from hl_gauss_pytorch import HLGaussLoss
 from torch import nn, optim
 
 from networks.actor_critic_with_state_value import Network
@@ -60,7 +61,10 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.training_step = 0
         self.device = torch.device("cuda")
-        self.network = Network(observation_space.shape, action_space.shape).to(self.device)
+        self.num_bins = args.num_bins
+        self.network = Network(observation_space.shape, action_space.shape, self.num_bins).to(
+            self.device
+        )
         self.rnn_state = self.network.init_state().to(self.device)
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
@@ -86,6 +90,15 @@ class PpoAgent:
         self.r_list = []
         self.s_list = []
         self.a_list = []
+
+        if self.num_bins > 1:
+            value_range = 1
+            self.hl_gauss_loss = HLGaussLoss(
+                min_value=-value_range,
+                max_value=+value_range,
+                num_bins=self.num_bins,
+                clamp_to_range=True,
+            ).to(self.device)
 
     def initialize_for_episode(self) -> None:
         self.episode_states = []
@@ -131,6 +144,9 @@ class PpoAgent:
         self.a_list = self.a_list[-self.seq_len :]
         if len(self.a_list) == self.seq_len:
             self.a_list = self.a_list[1:]
+
+        if self.num_bins > 1:
+            value = self.hl_gauss_loss(value)
 
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
@@ -272,12 +288,15 @@ class PpoAgent:
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
 
-                value_clipped = torch.clamp(
-                    value, v[index] - self.clip_param_value, v[index] + self.clip_param_value
-                )
-                value_loss_unclipped = F.mse_loss(value, target_v[index])
-                value_loss_clipped = F.mse_loss(value_clipped, target_v[index])
-                value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
+                if self.num_bins > 1:
+                    value_loss = self.hl_gauss_loss(value, target_v[index].squeeze(1))
+                else:
+                    value_clipped = torch.clamp(
+                        value, v[index] - self.clip_param_value, v[index] + self.clip_param_value
+                    )
+                    value_loss_unclipped = F.mse_loss(value, target_v[index])
+                    value_loss_clipped = F.mse_loss(value_clipped, target_v[index])
+                    value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
                 loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
                 sum_action_loss += action_loss.item() * len(index)
