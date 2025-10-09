@@ -5,6 +5,7 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn, optim
 
 from networks.actor_critic_with_state_value import Network
+from replay_buffer import ReplayBuffer
 
 
 class SequentialBatchSampler:
@@ -68,21 +69,14 @@ class PpoAgent:
         self.rnn_state = self.network.init_state().to(self.device)
         num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
         print(f"Number of trainable parameters: {num_params:,}")
-        self.buffer = np.empty(
-            self.buffer_capacity,
-            dtype=np.dtype(
-                [
-                    ("s", np.float32, (3, 96, 96)),
-                    ("a", np.float32, (self.action_dim,)),
-                    ("a_logp", np.float32),
-                    ("r", np.float32),
-                    ("v", np.float32),
-                    ("done", np.int32),
-                    ("rnn_state", np.float32, (1, self.network.encoder.output_dim)),
-                ]
-            ),
+        self.rb = ReplayBuffer(
+            size=self.buffer_capacity,
+            seq_len=self.seq_len + 1,
+            obs_shape=observation_space.shape,
+            rnn_state_shape=(1, self.network.encoder.output_dim),
+            action_shape=action_space.shape,
+            device=self.device,
         )
-        self.counter = 0
 
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
@@ -182,26 +176,25 @@ class PpoAgent:
         info_dict = {}
 
         # store data to buffer
-        self.buffer[self.counter] = (
+        self.rb.add(
             obs,
-            self.prev_action,
-            self.prev_logp,
             reward,
-            self.prev_value,
             terminated or truncated,
             self.rnn_state.cpu().numpy(),
+            self.prev_action,
+            self.prev_logp,
+            self.prev_value,
         )
-        self.counter += 1
 
         # make decision
         action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
         info_dict.update(action_info)
 
         # train
-        if self.counter == self.buffer_capacity:
+        if self.rb.is_full():
             train_result = self._update(action_info["value"])
             info_dict.update(train_result)
-            self.counter = 0
+            self.rb.reset()
 
         return action, info_dict
 
@@ -212,14 +205,14 @@ class PpoAgent:
     def _update(self, last_value: float) -> None:
         self.training_step += 1
 
-        s = torch.tensor(self.buffer["s"]).to(self.device)
-        a = torch.tensor(self.buffer["a"]).to(self.device)
-        r = torch.tensor(self.buffer["r"]).to(self.device).view(-1, 1)
-        v = torch.tensor(self.buffer["v"]).to(self.device).view(-1, 1)
-        old_a_logp = torch.tensor(self.buffer["a_logp"]).to(self.device).view(-1, 1)
-        done = torch.tensor(self.buffer["done"]).to(self.device).view(-1, 1)
-        rnn_state = (
-            torch.tensor(self.buffer["rnn_state"])
+        s = torch.tensor(self.rb.observations).to(self.device)
+        a = torch.tensor(self.rb.actions).to(self.device)
+        r = torch.tensor(self.rb.rewards).to(self.device).view(-1, 1)
+        v = torch.tensor(self.rb.values).to(self.device).view(-1, 1)
+        old_a_logp = torch.tensor(self.rb.log_probs).to(self.device).view(-1, 1)
+        done = torch.tensor(self.rb.dones).to(self.device).view(-1, 1)
+        rnn_states = (
+            torch.tensor(self.rb.rnn_states)
             .to(self.device)
             .view(-1, 1, self.network.encoder.output_dim)
         )
@@ -263,7 +256,7 @@ class PpoAgent:
                     r[indices_input],
                     s[indices_input],
                     a[indices_input],
-                    rnn_state[indices[:, 0]].permute(1, 0, 2).contiguous(),
+                    rnn_states[indices[:, 0]].permute(1, 0, 2).contiguous(),
                     a[index_next],
                 )
                 a_logp = net_out_dict["a_logp"]
