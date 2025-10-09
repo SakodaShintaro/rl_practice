@@ -101,11 +101,11 @@ class PpoAgent:
             ).to(self.device)
 
     def initialize_for_episode(self) -> None:
-        self.episode_states = []
-        self.episode_actions = []
-        self.episode_values = []
-        self.episode_logps = []
-        self.episode_rnn_states = []
+        self.prev_obs = None
+        self.prev_action = None
+        self.prev_value = None
+        self.prev_logp = None
+        self.prev_rnn_state = None
 
     @torch.inference_mode()
     def select_action(
@@ -169,11 +169,11 @@ class PpoAgent:
                 action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
                 action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
 
-        self.episode_states.append(obs)
-        self.episode_actions.append(action)
-        self.episode_values.append(value)
-        self.episode_logps.append(a_logp)
-        self.episode_rnn_states.append(curr_rnn_state.cpu().numpy())
+        self.prev_obs = obs
+        self.prev_action = action
+        self.prev_value = value
+        self.prev_logp = a_logp
+        self.prev_rnn_state = curr_rnn_state.cpu().numpy()
 
         return action, action_info
 
@@ -184,32 +184,20 @@ class PpoAgent:
 
         info_dict = {}
 
-        if len(self.episode_states) > 0:
-            prev_obs = self.episode_states[-1]
-            prev_action = self.episode_actions[-1]
-            prev_value = self.episode_values[-1]
-            prev_logp = self.episode_logps[-1]
-            prev_rnn_state = self.episode_rnn_states[-1]
-
-            self.buffer[self.counter] = (
-                prev_obs,
-                prev_action,
-                prev_logp,
-                reward,
-                prev_value,
-                done,
-                prev_rnn_state,
-            )
-            self.counter += 1
-            if self.counter == self.buffer_capacity:
-                train_result = self._update()
-                info_dict.update(train_result)
-                self.counter = 0
-
-        if done:
-            # エピソード終了時の統計情報を追加
-            if len(self.episode_values) > 0:
-                info_dict["first_value"] = self.episode_values[0]
+        self.buffer[self.counter] = (
+            self.prev_obs,
+            self.prev_action,
+            self.prev_logp,
+            reward,
+            self.prev_value,
+            done,
+            self.prev_rnn_state,
+        )
+        self.counter += 1
+        if self.counter == self.buffer_capacity:
+            train_result = self._update()
+            info_dict.update(train_result)
+            self.counter = 0
 
         # make decision
         action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
