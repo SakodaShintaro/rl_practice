@@ -11,4 +11,5 @@ python3 train.py baseline \
   --seq_len 8 \
   --num_bins 1 \
   --learning_rate 1e-4 \
+  --step_limit 40_000 \
   --eval_range 20 \
