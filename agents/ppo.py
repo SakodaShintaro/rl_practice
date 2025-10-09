@@ -89,7 +89,15 @@ class PpoAgent:
 
         self.r_list = []
         self.s_list = []
-        self.a_list = []
+        self.a_list = [
+            torch.zeros(
+                (
+                    1,
+                    self.action_dim,
+                ),
+                device=self.device,
+            )
+        ]
 
         if self.num_bins > 1:
             value_range = 1
@@ -120,9 +128,7 @@ class PpoAgent:
 
         curr_r = torch.cat(self.r_list, dim=0).unsqueeze(0).unsqueeze(-1)
         curr_s = torch.cat(self.s_list, dim=0).unsqueeze(0)
-        dummy_action = torch.zeros(1, self.action_dim, device=self.device)
-        a_with_dummy = self.a_list + [dummy_action]
-        curr_a = torch.cat(a_with_dummy, dim=0).unsqueeze(0)
+        curr_a = torch.cat(self.a_list, dim=0).unsqueeze(0)
 
         if curr_r.shape[1] < self.seq_len:
             padding_size = self.seq_len - curr_r.shape[1]
@@ -144,8 +150,6 @@ class PpoAgent:
         self.rnn_state = result_dict["rnn_state"]
         self.a_list.append(action)
         self.a_list = self.a_list[-self.seq_len :]
-        if len(self.a_list) == self.seq_len:
-            self.a_list = self.a_list[1:]
 
         if self.num_bins > 1:
             value = self.hl_gauss_loss(value)
@@ -258,15 +262,10 @@ class PpoAgent:
             ):
                 indices = np.array(indices, dtype=np.int64)
                 index = indices[:, -1]
-                curr_action = a[indices][:, :-1]
-                dummy_action = torch.zeros(
-                    (curr_action.shape[0], 1, self.action_dim), device=self.device
-                )
-                curr_action = torch.cat((curr_action, dummy_action), dim=1)
                 curr_rnn_state = rnn_state[indices[:, 0]].permute(1, 0, 2).contiguous()
 
                 net_out_dict = self.network(
-                    r[indices], s[indices], curr_action, curr_rnn_state, a[index]
+                    r[indices], s[indices], a[indices], curr_rnn_state, a[index]
                 )
                 a_logp = net_out_dict["a_logp"]
                 entropy = net_out_dict["entropy"]
