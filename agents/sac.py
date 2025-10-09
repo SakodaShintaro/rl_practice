@@ -41,11 +41,12 @@ class SacAgent:
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 
         self.rb = ReplayBuffer(
-            args.buffer_size,
-            self.seq_len + 1,
-            observation_space.shape,
-            action_space.shape,
-            self.device,
+            size=args.buffer_size,
+            seq_len=self.seq_len + 1,
+            obs_shape=observation_space.shape,
+            rnn_state_shape=(),  # Not used in SAC
+            action_shape=action_space.shape,
+            device=self.device,
         )
 
         # Initialize gradient norm targets
@@ -141,7 +142,7 @@ class SacAgent:
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        self.rb.add(obs, self.prev_action, train_reward, False)
+        self.rb.add(obs, train_reward, False, 0.0, self.prev_action, 0.0, 0.0)
 
         if global_step < self.learning_starts:
             return info_dict
