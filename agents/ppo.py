@@ -260,38 +260,43 @@ class PpoAgent:
                 k_frames=self.seq_len,
                 drop_last=False,
             ):
-                indices = np.array(indices, dtype=np.int64)
-                index = indices[:, -1]
-                curr_rnn_state = rnn_state[indices[:, 0]].permute(1, 0, 2).contiguous()
+                indices = np.array(indices, dtype=np.int64)  # [B, T]
+                index_curr = indices[:, -1]  # [B]
 
                 net_out_dict = self.network(
-                    r[indices], s[indices], a[indices], curr_rnn_state, a[index]
+                    r[indices],
+                    s[indices],
+                    a[indices],
+                    rnn_state[indices[:, 0]].permute(1, 0, 2).contiguous(),
+                    a[index_curr],
                 )
                 a_logp = net_out_dict["a_logp"]
                 entropy = net_out_dict["entropy"]
                 value = net_out_dict["value"]
-                ratio = torch.exp(a_logp - old_a_logp[index])
+                ratio = torch.exp(a_logp - old_a_logp[index_curr])
 
-                surr1 = ratio * adv[index]
+                surr1 = ratio * adv[index_curr]
                 surr2 = (
                     torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
-                    * adv[index]
+                    * adv[index_curr]
                 )
                 action_loss = -torch.min(surr1, surr2).mean()
 
                 if self.num_bins > 1:
-                    value_loss = self.hl_gauss_loss(value, target_v[index].squeeze(1))
+                    value_loss = self.hl_gauss_loss(value, target_v[index_curr].squeeze(1))
                 else:
                     value_clipped = torch.clamp(
-                        value, v[index] - self.clip_param_value, v[index] + self.clip_param_value
+                        value,
+                        v[index_curr] - self.clip_param_value,
+                        v[index_curr] + self.clip_param_value,
                     )
-                    value_loss_unclipped = F.mse_loss(value, target_v[index])
-                    value_loss_clipped = F.mse_loss(value_clipped, target_v[index])
+                    value_loss_unclipped = F.mse_loss(value, target_v[index_curr])
+                    value_loss_clipped = F.mse_loss(value_clipped, target_v[index_curr])
                     value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
                 loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
-                sum_action_loss += action_loss.item() * len(index)
-                sum_value_loss += value_loss.item() * len(index)
+                sum_action_loss += action_loss.item() * len(index_curr)
+                sum_value_loss += value_loss.item() * len(index_curr)
 
                 self.optimizer.zero_grad()
                 loss.backward()
