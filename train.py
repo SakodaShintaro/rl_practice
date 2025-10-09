@@ -175,7 +175,7 @@ def main(args, exp_name: str, seed: int) -> None:
         )
         bgr_image_list = [cv2.cvtColor(initial_rgb_image, cv2.COLOR_RGB2BGR)]
         agent.initialize_for_episode()
-        action, agent_info = agent.select_action(global_step, obs, 0.0)
+        action, agent_info = agent.select_action(global_step, obs, 0.0, False, False)
 
         while True:
             global_step += 1
@@ -306,6 +306,7 @@ if __name__ == "__main__":
         args.buffer_capacity = 50
         args.render = 0
         args.step_limit = 100
+        args.seq_len = 8
 
     if args.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
