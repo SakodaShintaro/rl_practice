@@ -86,7 +86,9 @@ class SacAgent:
         self.reward_buffer = [torch.tensor(0.0, device=self.device) for _ in range(self.seq_len)]
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
+    def select_action(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         # Update observation buffer for sequence tracking
@@ -222,15 +224,17 @@ class SacAgent:
 
         return info_dict
 
-    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
+    def step(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         # train
-        train_info = self.train(global_step, obs, reward, termination, truncation)
+        train_info = self.train(global_step, obs, reward, terminated, truncated)
         info_dict.update(train_info)
 
         # make decision
-        action, action_info = self.select_action(global_step, obs, reward)
+        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
         info_dict.update(action_info)
 
         return action, info_dict

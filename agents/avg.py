@@ -156,7 +156,9 @@ class AvgAgent:
         self.reward_history = [torch.tensor(0.0, device=self.device) for _ in range(self.seq_len)]
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
+    def select_action(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
         obs_tensor = torch.Tensor(obs).to(self.device)
 
         # Update observation history
@@ -193,7 +195,9 @@ class AvgAgent:
         self._prev_action_np = action
         return action, {"selected_log_pi": log_prob[0].item()}
 
-    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
+    def step(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
         action_norm = np.linalg.norm(self._prev_action_np)
@@ -224,8 +228,17 @@ class AvgAgent:
             [[False] * (self.seq_len + 1)], device=self.device, dtype=torch.float32
         )
 
+        log_probs = torch.tensor([[0.0] * (self.seq_len + 1)], device=self.device)
+        values = torch.tensor([[0.0] * (self.seq_len + 1)], device=self.device)
+
         data = ReplayBufferData(
-            observations=observations, actions=actions, rewards=rewards, dones=dones
+            observations=observations,
+            rewards=rewards,
+            dones=dones,
+            rnn_state=None,
+            actions=actions,
+            log_probs=log_probs,
+            values=values,
         )
 
         # Encode current state
@@ -261,7 +274,7 @@ class AvgAgent:
 
         if self.use_eligibility_trace:
             delta = critic_info["delta"]
-            self.optimizer.step(delta, reset=(termination or truncation))
+            self.optimizer.step(delta, reset=terminated or truncated)
         else:
             self.optimizer.step()
 
@@ -279,7 +292,7 @@ class AvgAgent:
                 info_dict[f"{key}/{feature_name}"] = value
 
         # make decision
-        action, action_info = self.select_action(global_step, obs, reward)
+        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
         info_dict.update(action_info)
 
         return action, info_dict

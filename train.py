@@ -181,8 +181,8 @@ def main(args, exp_name: str, seed: int) -> None:
             global_step += 1
 
             # step
-            obs, reward, termination, truncation, env_info = env.step(action)
-            action, agent_info = agent.step(global_step, obs, reward, termination, truncation)
+            obs, reward, terminated, truncated, env_info = env.step(action)
+            action, agent_info = agent.step(global_step, obs, reward, terminated, truncated)
 
             # log
             elapsed_time_sec = time.time() - start_time
@@ -225,7 +225,7 @@ def main(args, exp_name: str, seed: int) -> None:
                 cv2.imshow("CarRacing", bgr_image)
                 cv2.waitKey(1)
 
-            if termination or truncation:
+            if terminated or truncated:
                 break
 
             if global_step >= step_limit:

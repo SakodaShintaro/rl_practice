@@ -108,7 +108,9 @@ class PpoAgent:
         self.episode_rnn_states = []
 
     @torch.inference_mode()
-    def select_action(self, global_step, obs, reward: float) -> tuple[np.ndarray, dict]:
+    def select_action(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
         reward = torch.from_numpy(np.array(reward)).to(self.device).unsqueeze(0)
         obs_t = torch.from_numpy(obs).to(self.device).unsqueeze(0)
         self.r_list.append(reward)
@@ -175,8 +177,10 @@ class PpoAgent:
 
         return action, action_info
 
-    def step(self, global_step, obs, reward, termination, truncation) -> tuple[np.ndarray, dict]:
-        done = termination or truncation
+    def step(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
+        done = terminated or truncated
 
         info_dict = {}
 
@@ -208,7 +212,7 @@ class PpoAgent:
                 info_dict["first_value"] = self.episode_values[0]
 
         # make decision
-        action, action_info = self.select_action(global_step, obs, reward)
+        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
         info_dict.update(action_info)
 
         return action, info_dict
