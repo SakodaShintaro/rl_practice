@@ -32,9 +32,6 @@ class SacAgent:
 
         # Sequence observation management
         self.seq_len = args.seq_len
-        self.observation_buffer = []
-        self.action_buffer = []
-        self.reward_buffer = []
 
         self.network = Network(action_dim=self.action_dim, args=args).to(self.device)
         lr = args.learning_rate
@@ -72,18 +69,10 @@ class SacAgent:
             "critic": StatisticalMetricsComputer(),
             "state_predictor": StatisticalMetricsComputer(),
         }
-        self.prev_action = None
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
     def initialize_for_episode(self) -> None:
-        self.prev_action = None
-        self.observation_buffer = [
-            torch.zeros(self.observation_space.shape, device=self.device)
-            for _ in range(self.seq_len)
-        ]
-        self.action_buffer = [
-            torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
-        ]
-        self.reward_buffer = [torch.tensor(0.0, device=self.device) for _ in range(self.seq_len)]
+        pass
 
     @torch.inference_mode()
     def select_action(
@@ -91,26 +80,18 @@ class SacAgent:
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        # Update observation buffer for sequence tracking
-        obs_tensor = torch.Tensor(obs).to(self.device)
-        self.observation_buffer.append(obs_tensor)
-        self.observation_buffer.pop(0)
+        action_norm = np.linalg.norm(self.prev_action)
+        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
+        info_dict["action_norm"] = action_norm
+        info_dict["train_reward"] = train_reward
 
-        # Update reward buffer
-        reward_tensor = torch.tensor(reward, device=self.device)
-        self.reward_buffer.append(reward_tensor)
-        self.reward_buffer.pop(0)
+        self.rb.add(obs, train_reward, False, 0.0, self.prev_action, 0.0, 0.0)
 
-        # (1, T, C, H, W)
-        obs_sequence = torch.stack(self.observation_buffer, dim=0).unsqueeze(0)
+        latest_data = self.rb.get_latest(self.seq_len)
 
-        # (1, T, action_dim)
-        action_sequence = torch.stack(self.action_buffer, dim=0).unsqueeze(0)
-
-        # (1, T)
-        reward_sequence = torch.stack(self.reward_buffer, dim=0).unsqueeze(0)
-
-        output_enc = self.network.encoder.forward(obs_sequence, action_sequence, reward_sequence)
+        output_enc = self.network.encoder.forward(
+            latest_data.observations, latest_data.actions, latest_data.rewards
+        )
 
         if global_step < self.learning_starts:
             action = self.action_space.sample()
@@ -121,12 +102,8 @@ class SacAgent:
             action = np.clip(action, self.action_low, self.action_high)
             info_dict["selected_log_pi"] = selected_log_pi[0].item()
 
-        # Update action buffer with action tensor
-        action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.action_buffer.append(action_tensor)
-        self.action_buffer.pop(0)
-
         # predict next state
+        action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
         next_image, next_reward = self.network.predict_next_state(
             output_enc, action_tensor.unsqueeze(0)
         )
@@ -138,13 +115,6 @@ class SacAgent:
 
     def train(self, global_step, obs, reward, termination, truncation) -> dict:
         info_dict = {}
-
-        action_norm = np.linalg.norm(self.prev_action)
-        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
-        info_dict["action_norm"] = action_norm
-        info_dict["train_reward"] = train_reward
-
-        self.rb.add(obs, train_reward, False, 0.0, self.prev_action, 0.0, 0.0)
 
         if global_step < self.learning_starts:
             return info_dict
