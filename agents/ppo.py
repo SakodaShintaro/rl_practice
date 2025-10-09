@@ -109,11 +109,9 @@ class PpoAgent:
             ).to(self.device)
 
     def initialize_for_episode(self) -> None:
-        self.prev_obs = None
         self.prev_action = None
         self.prev_value = None
         self.prev_logp = None
-        self.prev_rnn_state = None
 
     @torch.inference_mode()
     def select_action(
@@ -141,7 +139,6 @@ class PpoAgent:
         assert curr_r.shape[1] == self.seq_len
         assert curr_s.shape[1] == self.seq_len
         assert curr_a.shape[1] == self.seq_len
-        curr_rnn_state = self.rnn_state
 
         result_dict = self.network(curr_r, curr_s, curr_a, self.rnn_state)
         action = result_dict["action"]
@@ -173,39 +170,38 @@ class PpoAgent:
                 action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
                 action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
 
-        self.prev_obs = obs
         self.prev_action = action
         self.prev_value = value
         self.prev_logp = a_logp
-        self.prev_rnn_state = curr_rnn_state.cpu().numpy()
 
         return action, action_info
 
     def step(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
-        done = terminated or truncated
-
         info_dict = {}
 
+        # store data to buffer
         self.buffer[self.counter] = (
-            self.prev_obs,
+            obs,
             self.prev_action,
             self.prev_logp,
             reward,
             self.prev_value,
-            done,
-            self.prev_rnn_state,
+            terminated or truncated,
+            self.rnn_state.cpu().numpy(),
         )
         self.counter += 1
-        if self.counter == self.buffer_capacity:
-            train_result = self._update()
-            info_dict.update(train_result)
-            self.counter = 0
 
         # make decision
         action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
         info_dict.update(action_info)
+
+        # train
+        if self.counter == self.buffer_capacity:
+            train_result = self._update(action_info["value"])
+            info_dict.update(train_result)
+            self.counter = 0
 
         return action, info_dict
 
@@ -213,7 +209,7 @@ class PpoAgent:
     # Internal methods #
     ####################
 
-    def _update(self) -> None:
+    def _update(self, last_value: float) -> None:
         self.training_step += 1
 
         s = torch.tensor(self.buffer["s"]).to(self.device)
@@ -232,21 +228,19 @@ class PpoAgent:
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)
         a = (a - bias) / scale
 
-        # target_v = r[:-1] + (1 - done[:-1]) * self.gamma * v[1:]
-        # adv = target_v - v[:-1]
+        # preprocessing
         target_v = torch.zeros_like(v[:-1])
         adv = torch.zeros_like(v[:-1])
-        last_value = v[-1]
         last_advantage = 0
         for i in range(len(v) - 2, -1, -1):
-            if done[i]:
+            if done[i + 1]:
                 last_value = 0
                 last_advantage = 0
-            target_v[i] = r[i] + self.gamma * last_value
-            delta = target_v[i] - v[i]
+            target_v[i] = r[i + 1] + self.gamma * last_value
+            delta = target_v[i] - v[i + 1]
             last_advantage = delta + self.gamma * 0.95 * last_advantage
             adv[i] = last_advantage
-            last_value = v[i]
+            last_value = v[i + 1]
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         ave_action_loss_list = []
@@ -257,23 +251,25 @@ class PpoAgent:
             for indices in SequentialBatchSampler(
                 self.buffer_capacity - 1,
                 self.batch_size,
-                k_frames=self.seq_len,
+                k_frames=self.seq_len + 1,
                 drop_last=False,
             ):
                 indices = np.array(indices, dtype=np.int64)  # [B, T]
-                index_curr = indices[:, -1]  # [B]
+                indices_input = indices[:, :-1]  # [B, self.seq_len]
+                index_curr = indices[:, -2]  # [B]
+                index_next = indices[:, -1]  # [B]
 
                 net_out_dict = self.network(
-                    r[indices],
-                    s[indices],
-                    a[indices],
+                    r[indices_input],
+                    s[indices_input],
+                    a[indices_input],
                     rnn_state[indices[:, 0]].permute(1, 0, 2).contiguous(),
-                    a[index_curr],
+                    a[index_next],
                 )
                 a_logp = net_out_dict["a_logp"]
                 entropy = net_out_dict["entropy"]
                 value = net_out_dict["value"]
-                ratio = torch.exp(a_logp - old_a_logp[index_curr])
+                ratio = torch.exp(a_logp - old_a_logp[index_next])
 
                 surr1 = ratio * adv[index_curr]
                 surr2 = (
@@ -287,8 +283,8 @@ class PpoAgent:
                 else:
                     value_clipped = torch.clamp(
                         value,
-                        v[index_curr] - self.clip_param_value,
-                        v[index_curr] + self.clip_param_value,
+                        v[index_next] - self.clip_param_value,
+                        v[index_next] + self.clip_param_value,
                     )
                     value_loss_unclipped = F.mse_loss(value, target_v[index_curr])
                     value_loss_clipped = F.mse_loss(value_clipped, target_v[index_curr])
