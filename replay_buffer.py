@@ -41,6 +41,8 @@ class ReplayBuffer:
         self.action_shape = action_shape
         self.device = device
 
+        assert self.seq_len <= self.size, "Replay buffer size must be >= sequence length."
+
         self.observations = np.zeros((size, *obs_shape), dtype=np.float32)
         self.rewards = np.zeros((size, 1), dtype=np.float32)
         self.dones = np.zeros((size, 1), dtype=np.float32)
@@ -114,4 +116,39 @@ class ReplayBuffer:
             torch.tensor(actions).to(self.device),
             torch.tensor(log_probs).to(self.device),
             torch.tensor(values).to(self.device),
+        )
+
+    def get_latest(self, seq_len: int) -> ReplayBufferData:
+        observations = []
+        rewards = []
+        dones = []
+        rnn_states = []
+        actions = []
+        log_probs = []
+        values = []
+        for i in range(seq_len):
+            idx = (self.idx - seq_len + i) % self.size
+            observations.append(self.observations[idx])
+            rewards.append(self.rewards[idx])
+            dones.append(self.dones[idx])
+            rnn_states.append(self.rnn_states[idx])
+            actions.append(self.actions[idx])
+            log_probs.append(self.log_probs[idx])
+            values.append(self.values[idx])
+
+        observations = np.stack(observations)
+        rewards = np.stack(rewards)
+        dones = np.stack(dones)
+        rnn_states = np.stack(rnn_states)
+        actions = np.stack(actions)
+        log_probs = np.stack(log_probs)
+        values = np.stack(values)
+        return ReplayBufferData(
+            torch.tensor(observations).unsqueeze(0).to(self.device),
+            torch.tensor(rewards).unsqueeze(0).to(self.device),
+            torch.tensor(dones).unsqueeze(0).to(self.device),
+            torch.tensor(rnn_states).unsqueeze(0).to(self.device),
+            torch.tensor(actions).unsqueeze(0).to(self.device),
+            torch.tensor(log_probs).unsqueeze(0).to(self.device),
+            torch.tensor(values).unsqueeze(0).to(self.device),
         )
