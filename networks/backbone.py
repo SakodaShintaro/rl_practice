@@ -206,9 +206,17 @@ class STTEncoder(nn.Module):
             tempo_block_type=tempo_block_type,
         ).to(self.device)
 
-        self.output_dim = self.vae_dim * (
-            self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
+        self.use_image_only = True
+
+        token_num = (
+            self.image_tokens_num
+            if self.use_image_only
+            else (
+                self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
+            )
         )
+
+        self.output_dim = self.vae_dim * token_num
 
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
@@ -257,7 +265,10 @@ class STTEncoder(nn.Module):
         # Use last timestep's image tokens for final representation
         last_frame_emb = stt_output[:, -1, :, :]  # [B, S+action_dim+1, C']
 
-        output = last_frame_emb.flatten(start_dim=1)  # [B, (S+action_dim+1)*C']
+        if self.use_image_only:
+            last_frame_emb = last_frame_emb[:, : self.image_tokens_num, :]  # [B, S, C']
+
+        output = last_frame_emb.flatten(start_dim=1)  # [B, token_num * C']
 
         return output
 
