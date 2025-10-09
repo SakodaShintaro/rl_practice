@@ -77,21 +77,17 @@ class PpoAgent:
             action_shape=action_space.shape,
             device=self.device,
         )
+        self.latest_buffer = ReplayBuffer(
+            size=self.seq_len,
+            seq_len=self.seq_len,
+            obs_shape=observation_space.shape,
+            rnn_state_shape=(1, self.network.encoder.output_dim),
+            action_shape=action_space.shape,
+            device=self.device,
+        )
 
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
-
-        self.r_list = []
-        self.s_list = []
-        self.a_list = [
-            torch.zeros(
-                (
-                    1,
-                    self.action_dim,
-                ),
-                device=self.device,
-            )
-        ]
 
         if self.num_bins > 1:
             value_range = 1
@@ -111,36 +107,24 @@ class PpoAgent:
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
-        reward = torch.from_numpy(np.array(reward)).to(self.device).unsqueeze(0)
-        obs_t = torch.from_numpy(obs).to(self.device).unsqueeze(0)
-        self.r_list.append(reward)
-        self.r_list = self.r_list[-self.seq_len :]
-        self.s_list.append(obs_t)
-        self.s_list = self.s_list[-self.seq_len :]
+        self.latest_buffer.add(
+            obs,
+            reward,
+            terminated or truncated,
+            self.rnn_state.cpu().numpy(),
+            self.prev_action,
+            self.prev_logp,
+            self.prev_value,
+        )
+        latest_data = self.latest_buffer.get_latest(1)
 
-        curr_r = torch.cat(self.r_list, dim=0).unsqueeze(0).unsqueeze(-1)
-        curr_s = torch.cat(self.s_list, dim=0).unsqueeze(0)
-        curr_a = torch.cat(self.a_list, dim=0).unsqueeze(0)
-
-        if curr_r.shape[1] < self.seq_len:
-            padding_size = self.seq_len - curr_r.shape[1]
-            pad_r = torch.zeros(1, padding_size, *curr_r.shape[2:], device=self.device)
-            pad_s = torch.zeros(1, padding_size, *curr_s.shape[2:], device=self.device)
-            pad_a = torch.zeros(1, padding_size, *curr_a.shape[2:], device=self.device)
-            curr_r = torch.cat((pad_r, curr_r), dim=1)
-            curr_s = torch.cat((pad_s, curr_s), dim=1)
-            curr_a = torch.cat((pad_a, curr_a), dim=1)
-        assert curr_r.shape[1] == self.seq_len
-        assert curr_s.shape[1] == self.seq_len
-        assert curr_a.shape[1] == self.seq_len
-
-        result_dict = self.network(curr_r, curr_s, curr_a, self.rnn_state)
+        result_dict = self.network(
+            latest_data.rewards, latest_data.observations, latest_data.actions, self.rnn_state
+        )
         action = result_dict["action"]
         a_logp = result_dict["a_logp"]
         value = result_dict["value"]
         self.rnn_state = result_dict["rnn_state"]
-        self.a_list.append(action)
-        self.a_list = self.a_list[-self.seq_len :]
 
         if self.num_bins > 1:
             value = self.hl_gauss_loss(value)
