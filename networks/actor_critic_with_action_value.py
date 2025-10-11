@@ -47,8 +47,8 @@ class Network(nn.Module):
                 f"Unknown encoder: {args.encoder}. Only 'stt', 'simple', and 'recurrent' are supported."
             )
 
-        vae_hidden_dim = 4
-        self.reward_encoder = LinearEmbedder(vae_hidden_dim)
+        hidden_image_dim = self.encoder.image_processor.output_shape[0]
+        self.reward_encoder = LinearEmbedder(hidden_image_dim)
 
         self.actor = DiffusionPolicy(
             state_dim=self.encoder.output_dim,
@@ -66,10 +66,10 @@ class Network(nn.Module):
             sparsity=args.sparsity,
         )
         self.state_predictor = FluxDiT(
-            in_channels=vae_hidden_dim,
-            out_channels=vae_hidden_dim,
+            in_channels=hidden_image_dim,
+            out_channels=hidden_image_dim,
             vec_in_dim=action_dim,
-            context_in_dim=vae_hidden_dim,
+            context_in_dim=hidden_image_dim,
             hidden_size=args.predictor_hidden_dim,
             mlp_ratio=4.0,
             num_heads=8,
@@ -93,6 +93,9 @@ class Network(nn.Module):
                 clamp_to_range=True,
             )
 
+    def init_state(self) -> torch.Tensor:
+        return self.encoder.init_state()
+
     def compute_critic_loss(self, data, state_curr):
         if self.detach_critic:
             state_curr = state_curr.detach()
@@ -100,7 +103,13 @@ class Network(nn.Module):
             obs_next = data.observations[:, 1:]
             actions_next = data.actions[:, 1:]
             rewards_next = data.rewards[:, 1:]
-            state_next = self.encoder.forward(obs_next, actions_next, rewards_next)
+            rnn_state_next = data.rnn_state[:, 1:]  # (B, T, hidden_size)
+            rnn_state_next = (
+                rnn_state_next[:, 0].permute(1, 0, 2).contiguous()
+            )  # (1, B, hidden_size)
+            state_next, _ = self.encoder.forward(
+                obs_next, actions_next, rewards_next, rnn_state_next
+            )
             next_state_actions, _ = self.actor.get_action(state_next)
             next_critic_output_dict = self.critic(state_next, next_state_actions)
             next_critic_value = next_critic_output_dict["output"]

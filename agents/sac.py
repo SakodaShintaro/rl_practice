@@ -36,6 +36,7 @@ class SacAgent:
         self.network = Network(observation_space.shape, action_dim=self.action_dim, args=args).to(
             self.device
         )
+        self.rnn_state = self.network.init_state().to(self.device)
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 
@@ -43,7 +44,7 @@ class SacAgent:
             size=args.buffer_size,
             seq_len=self.seq_len + 1,
             obs_shape=observation_space.shape,
-            rnn_state_shape=(),  # Not used in SAC
+            rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             device=self.device,
         )
@@ -87,12 +88,14 @@ class SacAgent:
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
-        self.rb.add(obs, train_reward, False, 0.0, self.prev_action, 0.0, 0.0)
+        self.rb.add(
+            obs, train_reward, False, self.rnn_state.cpu().numpy(), self.prev_action, 0.0, 0.0
+        )
 
         latest_data = self.rb.get_latest(self.seq_len)
 
-        output_enc = self.network.encoder.forward(
-            latest_data.observations, latest_data.actions, latest_data.rewards
+        output_enc, self.rnn_state = self.network.encoder.forward(
+            latest_data.observations, latest_data.actions, latest_data.rewards, self.rnn_state
         )
 
         if global_step < self.learning_starts:
@@ -130,7 +133,11 @@ class SacAgent:
         obs_curr = data.observations[:, :-1]  # (B, T, C, H, W)
         actions_curr = data.actions[:, :-1]  # (B, T, action_dim)
         rewards_curr = data.rewards[:, :-1]  # (B, T)
-        state_curr = self.network.encoder.forward(obs_curr, actions_curr, rewards_curr)
+        rnn_state = data.rnn_state[:, :-1]  # (B, T, hidden_size)
+        rnn_state = rnn_state[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
+        state_curr, _ = self.network.encoder.forward(
+            obs_curr, actions_curr, rewards_curr, rnn_state
+        )
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)

@@ -70,7 +70,7 @@ class ImageProcessor(nn.Module):
             x = x.view(x.size(0), *self.output_shape)
             x = self.processor.decode(x).sample
         elif self.processor_type == "simple_cnn":
-            x = torch.zeros(self.observation_space_shape, device=x.device)
+            x = torch.zeros(x.size(0), *self.observation_space_shape, device=x.device)
         return x
 
 
@@ -184,17 +184,20 @@ class STTEncoder(nn.Module):
 
         self.output_dim = self.hidden_image_dim * token_num
 
+    def init_state(self) -> torch.Tensor:
+        return torch.zeros(1, 1, self.output_dim)
+
     def forward(
-        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+        self,
+        images: torch.Tensor,  # (B, T, 3, H, W)
+        actions: torch.Tensor,  #  (B, T, action_dim)
+        rewards: torch.Tensor,  # (B, T, 1)
+        rnn_state: torch.Tensor,  # None. not used but for compatibility
     ) -> torch.Tensor:
         """
-        Args:
-            images: Tensor of shape (B, T, 3, H, W)
-            actions: Tensor of shape (B, T, action_dim)
-            rewards: Tensor of shape (B, T, 1)
-
         Returns:
             encoded features: (B, output_dim)
+            rnn_state: None. not used but for compatibility
         """
         # Encode all frames with AE but preserve spatial structure
         # images: (B, T, C, H, W) -> encode all frames
@@ -234,7 +237,7 @@ class STTEncoder(nn.Module):
 
         output = last_frame_emb.flatten(start_dim=1)  # [B, token_num * C']
 
-        return output
+        return output, rnn_state
 
 
 class SimpleTransformerEncoder(nn.Module):
@@ -274,17 +277,20 @@ class SimpleTransformerEncoder(nn.Module):
         # Final projection
         self.output_proj = nn.Linear(self.output_dim, self.output_dim)
 
+    def init_state(self) -> torch.Tensor:
+        return torch.zeros(1, 1, self.output_dim)
+
     def forward(
-        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
+        self,
+        images: torch.Tensor,  # (B, T, 3, H, W)
+        actions: torch.Tensor,  # (B, T, action_dim)
+        rewards: torch.Tensor,  # (B, T, 1)
+        rnn_state: torch.Tensor,  # None. not used but for compatibility
     ) -> torch.Tensor:
         """
-        Args:
-            images: Tensor of shape (B, T, 3, H, W)
-            actions: Tensor of shape (B, T, action_dim)
-            rewards: Tensor of shape (B, T, 1)
-
         Returns:
             encoded features: (B, output_dim)
+            rnn_state: None. not used but for compatibility
         """
         # Encode images using AE to get states
         B, T = images.shape[:2]
@@ -328,4 +334,4 @@ class SimpleTransformerEncoder(nn.Module):
         # Final projection
         output = self.output_proj(final_repr)  # (B, d_model)
 
-        return output
+        return output, rnn_state
