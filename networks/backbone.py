@@ -120,6 +120,7 @@ class RecurrentEncoder(nn.Module):
         """
         Returns:
             encoded features: (B, output_dim)
+            rnn_state: (1, B, hidden_size)
         """
         B, T = images.shape[:2]
 
