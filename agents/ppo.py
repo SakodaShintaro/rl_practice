@@ -69,7 +69,7 @@ class PpoAgent:
             size=self.buffer_capacity,
             seq_len=self.seq_len + 1,
             obs_shape=observation_space.shape,
-            rnn_state_shape=(1, self.network.encoder.output_dim),
+            rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             device=self.device,
         )
@@ -77,7 +77,7 @@ class PpoAgent:
             size=self.seq_len,
             seq_len=self.seq_len,
             obs_shape=observation_space.shape,
-            rnn_state_shape=(1, self.network.encoder.output_dim),
+            rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             device=self.device,
         )
