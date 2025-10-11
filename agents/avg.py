@@ -12,7 +12,7 @@ from torch import optim
 from agents.sac import Network
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
-from replay_buffer import ReplayBufferData
+from replay_buffer import ReplayBuffer
 
 
 # https://github.com/mohmdelsayed/streaming-drl/blob/main/stream_ac_continuous.py
@@ -111,11 +111,17 @@ class AvgAgent:
         self.network = Network(observation_space.shape, action_dim=self.action_dim, args=args).to(
             self.device
         )
+        self.rnn_state = self.network.init_state().to(self.device)
         self.seq_len = args.seq_len
-        # Store observation, action, and reward history for sequence modeling
-        self.obs_history = []
-        self.action_history = []
-        self.reward_history = []
+
+        self.rb = ReplayBuffer(
+            size=args.buffer_size if hasattr(args, "buffer_size") else 10000,
+            seq_len=self.seq_len + 1,
+            obs_shape=observation_space.shape,
+            rnn_state_shape=self.rnn_state.squeeze(1).shape,
+            action_shape=(self.action_dim,),
+            device=self.device,
+        )
 
         self.gamma = args.gamma
 
@@ -142,112 +148,61 @@ class AvgAgent:
         else:
             self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=1e-5)
 
-        # Initialize state tracking
-        self._prev_action = None
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
     def initialize_for_episode(self) -> None:
         """Initialize for new episode."""
-        self._prev_action = torch.zeros(self.action_dim, device=self.device)
-        self.obs_history = [
-            torch.zeros(self.observation_space.shape, device=self.device)
-            for _ in range(self.seq_len)
-        ]
-        self.action_history = [
-            torch.zeros(self.action_dim, device=self.device) for _ in range(self.seq_len)
-        ]
-        self.reward_history = [torch.tensor(0.0, device=self.device) for _ in range(self.seq_len)]
+        pass
 
     @torch.inference_mode()
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
-        obs_tensor = torch.Tensor(obs).to(self.device)
+        info_dict = {}
 
-        # Update observation history
-        self.obs_history.append(obs_tensor)
-        self.obs_history.pop(0)
+        action_norm = np.linalg.norm(self.prev_action)
+        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
+        info_dict["action_norm"] = action_norm
+        info_dict["train_reward"] = train_reward
 
-        # Update reward history
-        reward_tensor = torch.tensor(reward, device=self.device)
-        self.reward_history.append(reward_tensor)
-        self.reward_history.pop(0)
+        self.rb.add(
+            obs, train_reward, False, self.rnn_state.cpu().numpy(), self.prev_action, 0.0, 0.0
+        )
 
-        # Update action history
-        self.action_history.append(self._prev_action.squeeze(0))
-        self.action_history.pop(0)
+        latest_data = self.rb.get_latest(self.seq_len)
 
-        # Create sequence tensor
-        obs_sequence = torch.stack(self.obs_history, dim=0).unsqueeze(0)  # (1, seq_len, C, H, W)
+        output_enc, self.rnn_state = self.network.encoder.forward(
+            latest_data.observations, latest_data.actions, latest_data.rewards, self.rnn_state
+        )
 
-        # Create action sequence for encoder
-        action_sequence = torch.stack(self.action_history, dim=0).unsqueeze(0)
-
-        # Create reward sequence for encoder
-        reward_sequence = torch.stack(self.reward_history, dim=0).unsqueeze(0)
-
-        obs_encoded = self.network.encoder.forward(obs_sequence, action_sequence, reward_sequence)
-        action, log_prob = self.network.actor.get_action(obs_encoded)
-
-        # Store current state and action for next update
-        self._prev_action = action
-
+        action, selected_log_pi = self.network.actor.get_action(output_enc)
         action = action[0].detach().cpu().numpy()
         action = action * self.action_scale + self.action_bias
         action = np.clip(action, self.action_low, self.action_high)
-        self._prev_action_np = action
-        return action, {"selected_log_pi": log_prob[0].item()}
+        info_dict["selected_log_pi"] = selected_log_pi[0].item()
+
+        self.prev_action = action
+        return action, info_dict
 
     def step(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        action_norm = np.linalg.norm(self._prev_action_np)
-        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
-        info_dict["action_norm"] = action_norm
-        info_dict["train_reward"] = train_reward
-
-        curr_obs = torch.Tensor(obs).unsqueeze(0).to(self.device)
-
-        # Create observations compatible with SAC's expectations
-        # SAC expects obs_curr = [:, :-1] and obs_next = [:, 1:]
-        # So we need seq_len+1 total frames
-
-        # Add batch dimension to obs_history and append current observation
-        obs_with_batch = [obs.unsqueeze(0) for obs in self.obs_history] + [curr_obs]
-        observations = torch.stack(obs_with_batch, dim=1).to(self.device)  # (1, seq_len+1, C, H, W)
-
-        # Create actions using action history and current action
-        action_list = self.action_history + [self._prev_action.squeeze(0)]
-        actions = torch.stack(action_list, dim=0).unsqueeze(0)  # [1, seq_len+1, action_dim]
-
-        # Create rewards using reward history and current reward
-        train_reward_tensor = torch.tensor(train_reward, device=self.device)
-        reward_list = self.reward_history + [train_reward_tensor]
-        rewards = torch.stack(reward_list, dim=0).unsqueeze(0)
-
-        dones = torch.tensor(
-            [[False] * (self.seq_len + 1)], device=self.device, dtype=torch.float32
-        )
-
-        log_probs = torch.tensor([[0.0] * (self.seq_len + 1)], device=self.device)
-        values = torch.tensor([[0.0] * (self.seq_len + 1)], device=self.device)
-
-        data = ReplayBufferData(
-            observations=observations,
-            rewards=rewards,
-            dones=dones,
-            rnn_state=None,
-            actions=actions,
-            log_probs=log_probs,
-            values=values,
-        )
+        # Sample data for training using ReplayBuffer
+        data = self.rb.get_latest(self.seq_len + 1)
 
         # Encode current state
-        curr_obs = data.observations[:, :-1]
-        curr_action = data.actions[:, :-1]
-        curr_reward = data.rewards[:, :-1]
-        curr_state = self.network.encoder.forward(curr_obs, curr_action, curr_reward)
+        obs_curr = data.observations[:, :-1]
+        actions_curr = data.actions[:, :-1]
+        rewards_curr = data.rewards[:, :-1]
+        rnn_state_initial = (
+            data.rnn_state[:, 0].permute(1, 0, 2).contiguous()
+        )  # (1, B, hidden_size)
+
+        curr_state, _ = self.network.encoder.forward(
+            obs_curr, actions_curr, rewards_curr, rnn_state_initial
+        )
 
         # Actor
         actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(curr_state)
