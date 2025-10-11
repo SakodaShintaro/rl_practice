@@ -172,7 +172,7 @@ class PpoAgent:
 
         # train
         if self.rb.is_full():
-            train_result = self._update(action_info["value"])
+            train_result = self._train(action_info["value"])
             info_dict.update(train_result)
             self.rb.reset()
 
@@ -182,7 +182,7 @@ class PpoAgent:
     # Internal methods #
     ####################
 
-    def _update(self, last_value: float) -> None:
+    def _train(self, last_value: float) -> None:
         self.training_step += 1
 
         s = torch.tensor(self.rb.observations).to(self.device)
