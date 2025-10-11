@@ -281,27 +281,27 @@ class STTEncoder(nn.Module):
 class SimpleTransformerEncoder(nn.Module):
     """Sequence encoder using simple Transformer"""
 
-    def __init__(self, seq_len: int, device: str):
+    def __init__(self, observation_space_shape: list[int], seq_len: int):
         super().__init__()
 
-        self.seq_len = seq_len
-        self.device = device
+        max_seq_len = seq_len * 3  # (obs, action, reward) per timestep
 
-        # d_model is determined by AE output: 4 * 12 * 12 = 576
-        self.d_model = 4 * 12 * 12  # 576
+        # d_model is determined by AE output
+        self.out_channels = 4
+        self.hidden_h = observation_space_shape[1] // 8
+        self.hidden_w = observation_space_shape[2] // 8
+        self.output_dim = self.out_channels * self.hidden_h * self.hidden_w
         n_heads = 8  # Fixed number of attention heads
         n_blocks = 2  # Number of CausalTimeBlocks
 
-        self.ae = AutoencoderTiny.from_pretrained(
-            "madebyollin/taesd", cache_dir="./cache", device_map=device
-        )
+        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
 
         # Positional encoding (for max possible sequence length with rewards)
-        self.pos_encoding = nn.Parameter(torch.randn(seq_len * 3, self.d_model))
+        self.pos_encoding = nn.Parameter(torch.randn(max_seq_len, self.output_dim))
 
         # CausalTimeBlocks using existing implementation
         config = Config(
-            hidden_dim=self.d_model,
+            hidden_dim=self.output_dim,
             n_head=n_heads,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
@@ -310,18 +310,12 @@ class SimpleTransformerEncoder(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(n_blocks)])
 
         # Create causal mask for sequence length (considering max possible length with rewards)
-        max_seq_len = seq_len * 3  # Maximum length when rewards are included
         matrix = torch.tril(torch.ones(max_seq_len, max_seq_len))
         self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
 
         # Final projection
-        self.output_proj = nn.Linear(self.d_model, self.d_model)
-
-        # Move all parameters to the specified device
-        self.to(device)
-
-        self.output_dim = self.d_model
+        self.output_proj = nn.Linear(self.output_dim, self.output_dim)
 
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
@@ -346,7 +340,7 @@ class SimpleTransformerEncoder(nn.Module):
 
         # Use fourier embeddings for actions (same as STTEncoder)
         action_emb = get_fourier_embeds_from_coordinates(
-            self.d_model, actions
+            self.output_dim, actions
         )  # (B, T, action_dim, d_model)
 
         # Sum over action dimensions to get (B, T, d_model)
@@ -354,13 +348,13 @@ class SimpleTransformerEncoder(nn.Module):
 
         # Add rewards
         reward_emb = get_fourier_embeds_from_coordinates(
-            self.d_model, rewards
+            self.output_dim, rewards
         )  # (B, T, 1, d_model)
         reward_emb = reward_emb.sum(dim=2)  # (B, T, d_model)
 
         # Interleave states, actions, and rewards: [s_0, a_0, r_0, s_1, a_1, r_1, ...]
         sequence = torch.stack([states, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
-        sequence = sequence.view(B, T * 3, self.d_model)  # (B, T*3, d_model)
+        sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
 
         # Add positional encoding (adjust for actual sequence length)
         actual_seq_len = sequence.size(1)

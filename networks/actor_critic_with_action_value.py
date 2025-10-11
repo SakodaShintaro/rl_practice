@@ -40,7 +40,7 @@ class Network(nn.Module):
                 action_dim=action_dim,
             )
         elif args.encoder == "simple":
-            self.encoder = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
+            self.encoder = SimpleTransformerEncoder(observation_space_shape, self.seq_len)
         elif args.encoder == "recurrent":
             self.encoder = RecurrentEncoder(observation_space_shape)
         else:
