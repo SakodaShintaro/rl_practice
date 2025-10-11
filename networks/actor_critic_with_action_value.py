@@ -33,8 +33,8 @@ class Network(nn.Module):
             self.encoder = SingleFrameEncoder(observation_space_shape)
         elif args.encoder == "stt":
             self.encoder = STTEncoder(
+                observation_space_shape,
                 seq_len=self.seq_len,
-                device=device,
                 n_layer=args.encoder_block_num,
                 tempo_block_type=args.tempo_block_type,
                 action_dim=action_dim,

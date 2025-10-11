@@ -173,21 +173,22 @@ class STTEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
     def __init__(
-        self, seq_len: int, device: str, n_layer: int, tempo_block_type: str, action_dim: int
+        self,
+        observation_space_shape: list[int],
+        seq_len: int,
+        n_layer: int,
+        tempo_block_type: str,
+        action_dim: int,
     ):
         super().__init__()
 
-        self.seq_len = seq_len
+        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
 
-        self.device = device
-
-        self.ae = AutoencoderTiny.from_pretrained(
-            "madebyollin/taesd", cache_dir="./cache", device_map=device
-        )
-
-        # AE encoder outputs [B, 4, 12, 12] -> treat as [B, 144, 4] (144 patches of 4 dims each)
+        # AE encoder outputs [B, 4, H, W] -> treat as [B, H * W, 4] (H * W tokens, 4 channels each)
         self.vae_dim = 4
-        self.image_tokens_num = 144  # 12 * 12 patches
+        self.hidden_h = observation_space_shape[1] // 8
+        self.hidden_w = observation_space_shape[2] // 8
+        self.image_tokens_num = self.hidden_h * self.hidden_w
         action_tokens_num = action_dim
         reward_tokens_num = 1
         register_tokens_num = 1
@@ -197,13 +198,13 @@ class STTEncoder(nn.Module):
             space_len=(
                 self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
             ),
-            tempo_len=self.seq_len,
+            tempo_len=seq_len,
             hidden_dim=self.vae_dim,
             n_head=1,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
             tempo_block_type=tempo_block_type,
-        ).to(self.device)
+        )
 
         self.use_image_only = True
 
@@ -273,7 +274,7 @@ class STTEncoder(nn.Module):
 
     @torch.no_grad()
     def decode(self, x):
-        x = x.view(x.size(0), 4, 12, 12)
+        x = x.view(x.size(0), self.vae_dim, self.hidden_h, self.hidden_w)
         return self.ae.decode(x).sample
 
 
