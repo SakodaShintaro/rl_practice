@@ -27,8 +27,6 @@ class Network(nn.Module):
         self.action_dim = action_dim
         self.predictor_step_num = args.predictor_step_num
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
         if args.encoder == "single_frame":
             self.encoder = SingleFrameEncoder(observation_space_shape)
         elif args.encoder == "stt":
