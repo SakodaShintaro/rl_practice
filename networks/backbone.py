@@ -74,31 +74,6 @@ class ImageProcessor(nn.Module):
         return x
 
 
-class SingleFrameEncoder(nn.Module):
-    def __init__(self, observation_space_shape: list[int]) -> None:
-        super().__init__()
-        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
-        # self.image_processor.apply(init_weights)
-        self.output_dim = np.prod(self.image_processor.output_shape)
-
-    @torch.no_grad()
-    def forward(
-        self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Args:
-            images: Tensor of shape (B, T, 3, H, W)
-            actions: Tensor of shape (B, T, action_dim)
-            rewards: Tensor of shape (B, T, 1)
-
-        Returns:
-            encoded features: (B, output_dim)
-        """
-        x = images[:, -1]  # (B, C, H, W)
-        x = self.image_processor.encode(x).flatten(1)
-        return x
-
-
 class RecurrentEncoder(nn.Module):
     """
     CNN + GRU

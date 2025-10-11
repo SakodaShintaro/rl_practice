@@ -8,7 +8,6 @@ from torch.nn import functional as F
 from networks.backbone import (
     RecurrentEncoder,
     SimpleTransformerEncoder,
-    SingleFrameEncoder,
     STTEncoder,
 )
 from networks.value_head import StateValueHead
@@ -25,9 +24,7 @@ class Network(nn.Module):
         self.action_dim = action_space_shape[0]
 
         args.encoder = "recurrent"
-        if args.encoder == "single_frame":
-            self.encoder = SingleFrameEncoder(observation_space_shape)
-        elif args.encoder == "stt":
+        if args.encoder == "stt":
             self.encoder = STTEncoder(
                 observation_space_shape,
                 seq_len=args.seq_len,
@@ -41,7 +38,7 @@ class Network(nn.Module):
             self.encoder = RecurrentEncoder(observation_space_shape)
         else:
             raise ValueError(
-                f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', 'simple', and 'recurrent' are supported."
+                f"Unknown encoder: {args.encoder}. Only 'stt', 'simple', and 'recurrent' are supported."
             )
 
         hidden_dim = self.encoder.output_dim

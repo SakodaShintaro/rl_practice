@@ -13,7 +13,6 @@ import torch
 from networks.backbone import (
     MMMambaEncoder,
     QwenVLEncoder,
-    SingleFrameEncoder,
     SmolVLMEncoder,
     parse_action_text,
 )
@@ -58,9 +57,7 @@ class VLMAgent:
     def __init__(self, encoder_type, device=None):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        if encoder_type == "single_frame":
-            self.encoder = SingleFrameEncoder(device=self.device)
-        elif encoder_type == "smolvlm":
+        if encoder_type == "smolvlm":
             self.encoder = SmolVLMEncoder(device=self.device)
         elif encoder_type == "qwenvl":
             self.encoder = QwenVLEncoder(device=self.device)

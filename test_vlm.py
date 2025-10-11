@@ -9,7 +9,6 @@ from torchvision import transforms
 from networks.backbone import (
     MMMambaEncoder,
     QwenVLEncoder,
-    SingleFrameEncoder,
     SmolVLMEncoder,
     parse_action_text,
 )
@@ -71,9 +70,7 @@ if __name__ == "__main__":
 
     # VLMエンコーダーの初期化
     print("Initializing Encoder")
-    if args.encoder == "single_frame":
-        encoder = SingleFrameEncoder(device=device)
-    elif args.encoder == "mmmamba":
+    if args.encoder == "mmmamba":
         encoder = MMMambaEncoder(device=device)
     elif args.encoder == "smolvlm":
         encoder = SmolVLMEncoder(device=device)
