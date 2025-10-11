@@ -60,7 +60,6 @@ class PpoAgent:
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
         self.batch_size = args.batch_size
-        self.training_step = 0
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
         self.network = Network(observation_space.shape, action_space.shape, args).to(self.device)
@@ -183,8 +182,6 @@ class PpoAgent:
     ####################
 
     def _train(self, last_value: float) -> None:
-        self.training_step += 1
-
         s = torch.tensor(self.rb.observations).to(self.device)
         a = torch.tensor(self.rb.actions).to(self.device)
         r = torch.tensor(self.rb.rewards).to(self.device).view(-1, 1)
