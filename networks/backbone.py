@@ -76,11 +76,11 @@ class RecurrentEncoder(nn.Module):
     https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt
     """
 
-    def __init__(self, image_h: int, image_w: int) -> None:
+    def __init__(self, observation_space_shape: list[int]) -> None:
         super().__init__()
-        input_channels = 3
-        self.image_h = image_h
-        self.image_w = image_w
+        input_channels = observation_space_shape[0]
+        self.image_h = observation_space_shape[1]
+        self.image_w = observation_space_shape[2]
         hidden_size = 256
 
         # CNN部分
@@ -97,7 +97,7 @@ class RecurrentEncoder(nn.Module):
             raise ValueError("Invalid encoder_type")
 
         # CNN出力サイズ
-        conv_output_size = self._get_conv_output((input_channels, image_h, image_w))
+        conv_output_size = self._get_conv_output(observation_space_shape)
 
         # CNN出力をRNN入力に変換する線形層
         self.lin_hidden_in = nn.Linear(conv_output_size, hidden_size)
@@ -159,8 +159,8 @@ class RecurrentEncoder(nn.Module):
         # 互換性のためのメソッド
         return torch.zeros(x.size(0), 3, self.image_h, self.image_w, device=x.device)
 
-    def _get_conv_output(self, shape: tuple) -> int:
-        o = torch.zeros(1, *shape)
+    def _get_conv_output(self, observation_space_shape: list[int]) -> int:
+        o = torch.zeros(1, *observation_space_shape)
         if self.encoder_type == "simple_cnn":
             o = self.conv1(o)
             o = self.conv2(o)

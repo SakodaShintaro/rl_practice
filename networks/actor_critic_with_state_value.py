@@ -13,7 +13,7 @@ class Network(nn.Module):
     ) -> None:
         super().__init__()
         self.action_dim = action_space_shape[0]
-        self.encoder = RecurrentEncoder(observation_space_shape[1], observation_space_shape[2])
+        self.encoder = RecurrentEncoder(observation_space_shape)
         hidden_dim = self.encoder.output_dim
         self.linear = nn.Linear(hidden_dim, hidden_dim)
         self.value_head = StateValueHead(
