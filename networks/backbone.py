@@ -31,18 +31,17 @@ def init_weights(m):
 
 
 class SingleFrameEncoder(nn.Module):
-    def __init__(self, seq_len: int, device: str) -> None:
+    def __init__(self, observation_space_shape: list[int]) -> None:
         super().__init__()
-        self.seq_len = seq_len
-        self.device = device
-
-        self.ae = AutoencoderTiny.from_pretrained(
-            "madebyollin/taesd", cache_dir="./cache", device_map=device
-        )
+        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
 
         # self.ae.apply(init_weights)
+        self.out_channels = 4
+        self.hidden_h = observation_space_shape[1] // 8
+        self.hidden_w = observation_space_shape[2] // 8
 
-        self.output_dim = 576
+        self.output_dim = self.out_channels * self.hidden_h * self.hidden_w
+        print(f"{self.output_dim=}")
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
     @torch.no_grad()
@@ -65,7 +64,7 @@ class SingleFrameEncoder(nn.Module):
 
     @torch.no_grad()
     def decode(self, x):
-        x = x.view(x.size(0), 4, 12, 12)
+        x = x.view(x.size(0), self.out_channels, self.hidden_h, self.hidden_w)
         return self.ae.decode(x).sample
 
 

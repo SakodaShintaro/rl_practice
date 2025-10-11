@@ -33,7 +33,9 @@ class SacAgent:
         # Sequence observation management
         self.seq_len = args.seq_len
 
-        self.network = Network(action_dim=self.action_dim, args=args).to(self.device)
+        self.network = Network(observation_space.shape, action_dim=self.action_dim, args=args).to(
+            self.device
+        )
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 

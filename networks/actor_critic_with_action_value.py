@@ -17,7 +17,7 @@ from networks.value_head import ActionValueHead
 
 
 class Network(nn.Module):
-    def __init__(self, action_dim: int, args):
+    def __init__(self, observation_space_shape: list[int], action_dim: int, args):
         super(Network, self).__init__()
         self.gamma = 0.99
         self.num_bins = args.num_bins
@@ -30,7 +30,7 @@ class Network(nn.Module):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if args.encoder == "single_frame":
-            self.encoder = SingleFrameEncoder(seq_len=self.seq_len, device=device)
+            self.encoder = SingleFrameEncoder(observation_space_shape)
         elif args.encoder == "stt":
             self.encoder = STTEncoder(
                 seq_len=self.seq_len,
@@ -42,7 +42,7 @@ class Network(nn.Module):
         elif args.encoder == "simple":
             self.encoder = SimpleTransformerEncoder(seq_len=self.seq_len, device=device)
         elif args.encoder == "recurrent":
-            self.encoder = RecurrentEncoder(sequence_length=self.seq_len)
+            self.encoder = RecurrentEncoder(observation_space_shape)
         else:
             raise ValueError(
                 f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', 'simple', and 'recurrent' are supported."
