@@ -1,26 +1,56 @@
+import argparse
+
 import torch
 from torch import nn
 from torch.distributions import Beta, Categorical
 from torch.nn import functional as F
 
-from networks.backbone import RecurrentEncoder
+from networks.backbone import (
+    RecurrentEncoder,
+    SimpleTransformerEncoder,
+    SingleFrameEncoder,
+    STTEncoder,
+)
 from networks.value_head import StateValueHead
 
 
 class Network(nn.Module):
     def __init__(
-        self, observation_space_shape: list[int], action_space_shape: list[int], num_bins: int
+        self,
+        observation_space_shape: list[int],
+        action_space_shape: list[int],
+        args: argparse.Namespace,
     ) -> None:
         super().__init__()
         self.action_dim = action_space_shape[0]
-        self.encoder = RecurrentEncoder(observation_space_shape)
+
+        args.encoder = "recurrent"
+        if args.encoder == "single_frame":
+            self.encoder = SingleFrameEncoder(observation_space_shape)
+        elif args.encoder == "stt":
+            self.encoder = STTEncoder(
+                observation_space_shape,
+                seq_len=args.seq_len,
+                n_layer=args.encoder_block_num,
+                tempo_block_type=args.tempo_block_type,
+                action_dim=self.action_dim,
+            )
+        elif args.encoder == "simple":
+            self.encoder = SimpleTransformerEncoder(observation_space_shape, args.seq_len)
+        elif args.encoder == "recurrent":
+            self.encoder = RecurrentEncoder(observation_space_shape)
+        else:
+            raise ValueError(
+                f"Unknown encoder: {args.encoder}. Only 'single_frame', 'stt', 'simple', and 'recurrent' are supported."
+            )
+
         hidden_dim = self.encoder.output_dim
         self.linear = nn.Linear(hidden_dim, hidden_dim)
         self.value_head = StateValueHead(
             in_channels=hidden_dim,
             hidden_dim=hidden_dim,
             block_num=1,
-            num_bins=num_bins,
+            num_bins=args.num_bins,
             sparsity=0.0,
         )
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
