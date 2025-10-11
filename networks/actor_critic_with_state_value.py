@@ -59,8 +59,7 @@ class Network(nn.Module):
         rnn_state: torch.Tensor,  # (1, B, hidden_size)
         action: torch.Tensor | None = None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, T, hidden_dim)
-        x = x[:, -1, :]  # (B, hidden_dim)
+        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
         x = self.linear(x)  # (B, hidden_dim)
 
         value_dict = self.value_head(x)

@@ -112,20 +112,14 @@ class RecurrentEncoder(nn.Module):
 
     def forward(
         self,
-        images: torch.Tensor,
-        actions: torch.Tensor,
-        rewards: torch.Tensor,
-        rnn_state: torch.Tensor,
+        images: torch.Tensor,  # (B, T, 3, H, W)
+        actions: torch.Tensor,  # (B, T, action_dim)
+        rewards: torch.Tensor,  # (B, T, 1)
+        rnn_state: torch.Tensor,  # (1, B, hidden_size)
     ) -> torch.Tensor:
         """
-        Args:
-            images: Tensor of shape (B, T, 3, H, W)
-            actions: Tensor of shape (B, T, action_dim)
-            rewards: Tensor of shape (B, T, 1)
-            rnn_state: Tensor of shape (1, B, hidden_size)
-
         Returns:
-            encoded features: (B, T, output_dim)
+            encoded features: (B, output_dim)
         """
         B, T = images.shape[:2]
 
@@ -150,6 +144,7 @@ class RecurrentEncoder(nn.Module):
         # RNN forward pass - 系列を処理
         h = h.reshape(B, T, self.output_dim)
         h, rnn_state = self.recurrent_layer(h, rnn_state)  # (B, T, hidden_size)
+        h = h[:, -1]  # (B, hidden_size) - 最後の時刻の出力を使用
 
         return h, rnn_state
 
