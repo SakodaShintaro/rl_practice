@@ -30,18 +30,56 @@ def init_weights(m):
             nn.init.constant_(m.bias, 0)
 
 
+class ImageProcessor(nn.Module):
+    def __init__(self, observation_space_shape: list[int], processor_type: str) -> None:
+        super().__init__()
+        self.observation_space_shape = observation_space_shape
+        self.processor_type = processor_type
+        if processor_type == "ae":
+            self.processor = AutoencoderTiny.from_pretrained(
+                "madebyollin/taesd", cache_dir="./cache"
+            )
+        elif processor_type == "simple_cnn":
+            self.processor = nn.Sequential(
+                nn.Conv2d(observation_space_shape[0], 32, 8, 4),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, 4, 2, 0),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3, 1, 0),
+                nn.ReLU(),
+            )
+        self.output_shape = self._get_conv_output_shape(observation_space_shape)
+
+    def _get_conv_output_shape(self, shape: list[int]) -> list[int]:
+        x = torch.zeros(1, *shape)
+        if self.processor_type == "ae":
+            x = self.processor.encode(x).latents
+        elif self.processor_type == "simple_cnn":
+            x = self.processor(x)
+        return list(x.size())[1:]
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        if self.processor_type == "ae":
+            x = self.processor.encode(x).latents
+        elif self.processor_type == "simple_cnn":
+            x = self.processor(x)
+        return x
+
+    def decode(self, x: torch.Tensor) -> torch.Tensor:
+        if self.processor_type == "ae":
+            x = x.view(x.size(0), *self.output_shape)
+            x = self.processor.decode(x).sample
+        elif self.processor_type == "simple_cnn":
+            x = torch.zeros(self.observation_space_shape, device=x.device)
+        return x
+
+
 class SingleFrameEncoder(nn.Module):
     def __init__(self, observation_space_shape: list[int]) -> None:
         super().__init__()
-        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
-
-        # self.ae.apply(init_weights)
-        self.out_channels = 4
-        self.hidden_h = observation_space_shape[1] // 8
-        self.hidden_w = observation_space_shape[2] // 8
-
-        self.output_dim = self.out_channels * self.hidden_h * self.hidden_w
-        self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
+        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+        # self.image_processor.apply(init_weights)
+        self.output_dim = np.prod(self.image_processor.output_shape)
 
     @torch.no_grad()
     def forward(
@@ -57,14 +95,8 @@ class SingleFrameEncoder(nn.Module):
             encoded features: (B, output_dim)
         """
         x = images[:, -1]  # (B, C, H, W)
-        x = self.ae.encode(x).latents.flatten(1)
-        x = self.norm(x)
+        x = self.image_processor.encode(x).flatten(1)
         return x
-
-    @torch.no_grad()
-    def decode(self, x):
-        x = x.view(x.size(0), self.out_channels, self.hidden_h, self.hidden_w)
-        return self.ae.decode(x).sample
 
 
 class RecurrentEncoder(nn.Module):
@@ -76,26 +108,13 @@ class RecurrentEncoder(nn.Module):
 
     def __init__(self, observation_space_shape: list[int]) -> None:
         super().__init__()
-        input_channels = observation_space_shape[0]
         self.image_h = observation_space_shape[1]
         self.image_w = observation_space_shape[2]
         hidden_size = 256
 
         # CNN部分
-        self.encoder_type = "simple_cnn"
-        if self.encoder_type == "ae":
-            self.ae = AutoencoderTiny.from_pretrained(
-                "madebyollin/taesd", cache_dir="./cache", device_map="cpu"
-            )
-        elif self.encoder_type == "simple_cnn":
-            self.conv1 = nn.Conv2d(input_channels, 32, 8, 4)
-            self.conv2 = nn.Conv2d(32, 64, 4, 2, 0)
-            self.conv3 = nn.Conv2d(64, 64, 3, 1, 0)
-        else:
-            raise ValueError("Invalid encoder_type")
-
-        # CNN出力サイズ
-        conv_output_size = self._get_conv_output(observation_space_shape)
+        self.image_processor = ImageProcessor(observation_space_shape, processor_type="simple_cnn")
+        conv_output_size = np.prod(self.image_processor.output_shape)
 
         # CNN出力をRNN入力に変換する線形層
         self.lin_hidden_in = nn.Linear(conv_output_size, hidden_size)
@@ -127,15 +146,7 @@ class RecurrentEncoder(nn.Module):
         all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
 
         # CNN forward pass
-        if self.encoder_type == "ae":
-            with torch.no_grad():
-                h = self.ae.encode(all_frames).latents
-        elif self.encoder_type == "simple_cnn":
-            h = F.relu(self.conv1(all_frames))
-            h = F.relu(self.conv2(h))
-            h = F.relu(self.conv3(h))
-        else:
-            raise ValueError("Invalid encoder_type")
+        h = self.image_processor.encode(all_frames)
 
         # Flatten and linear projection
         h = h.flatten(start_dim=1)  # (B*T, conv_output_size)
@@ -147,21 +158,6 @@ class RecurrentEncoder(nn.Module):
         h = h[:, -1]  # (B, hidden_size) - 最後の時刻の出力を使用
 
         return h, rnn_state
-
-    def decode(self, x):
-        # RecurrentEncoderは画像再構成機能がないため、ダミーを返す
-        # 互換性のためのメソッド
-        return torch.zeros(x.size(0), 3, self.image_h, self.image_w, device=x.device)
-
-    def _get_conv_output(self, observation_space_shape: list[int]) -> int:
-        o = torch.zeros(1, *observation_space_shape)
-        if self.encoder_type == "simple_cnn":
-            o = self.conv1(o)
-            o = self.conv2(o)
-            o = self.conv3(o)
-        elif self.encoder_type == "ae":
-            o = self.ae.encode(o).latents
-        return int(np.prod(o.size()))
 
 
 class STTEncoder(nn.Module):
@@ -177,12 +173,12 @@ class STTEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
+        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
 
-        # AE encoder outputs [B, 4, H, W] -> treat as [B, H * W, 4] (H * W tokens, 4 channels each)
-        self.vae_dim = 4
-        self.hidden_h = observation_space_shape[1] // 8
-        self.hidden_w = observation_space_shape[2] // 8
+        # image_processor outputs [B, C, H, W] -> treat as [B, H * W, C] (H * W tokens, C channels each)
+        self.hidden_image_dim = self.image_processor.output_shape[0]
+        self.hidden_h = self.image_processor.output_shape[1]
+        self.hidden_w = self.image_processor.output_shape[2]
         self.image_tokens_num = self.hidden_h * self.hidden_w
         action_tokens_num = action_dim
         reward_tokens_num = 1
@@ -194,7 +190,7 @@ class STTEncoder(nn.Module):
                 self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
             ),
             tempo_len=seq_len,
-            hidden_dim=self.vae_dim,
+            hidden_dim=self.hidden_image_dim,
             n_head=1,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
@@ -211,7 +207,7 @@ class STTEncoder(nn.Module):
             )
         )
 
-        self.output_dim = self.vae_dim * token_num
+        self.output_dim = self.hidden_image_dim * token_num
 
     def forward(
         self, images: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor
@@ -234,21 +230,19 @@ class STTEncoder(nn.Module):
 
         with torch.no_grad():
             # Encode all frames at once
-            all_latents = self.ae.encode(all_frames).latents  # [B*T, C', H', W']
-            # Reshape back to sequence: [B, T, C', H', W']
-            all_latents = all_latents.reshape(B, T, 4, 12, 12)
-            # Convert to tokens: [B, T, S(=H'*W'), C']
-            image_embed = all_latents.reshape(B, T, 4, -1).transpose(2, 3)
+            all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
+            all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
+            image_embed = all_latents.flatten(3).transpose(2, 3)  # [B, T, S(=H'*W'), C']
 
         # [B, T, action_dim] -> [B, T, action_dim, C']
-        action_embed = get_fourier_embeds_from_coordinates(self.vae_dim, actions)
+        action_embed = get_fourier_embeds_from_coordinates(self.hidden_image_dim, actions)
 
         # [B, T, 1] -> [B, T, 1, C']
-        reward_embed = get_fourier_embeds_from_coordinates(self.vae_dim, rewards)
+        reward_embed = get_fourier_embeds_from_coordinates(self.hidden_image_dim, rewards)
 
         # [B, T, 1, C']
         register_token = torch.zeros(
-            (B, T, 1, self.vae_dim), device=images.device, dtype=images.dtype
+            (B, T, 1, self.hidden_image_dim), device=images.device, dtype=images.dtype
         )
 
         # [B, T, S+action_dim+1+1, C']
@@ -267,11 +261,6 @@ class STTEncoder(nn.Module):
 
         return output
 
-    @torch.no_grad()
-    def decode(self, x):
-        x = x.view(x.size(0), self.vae_dim, self.hidden_h, self.hidden_w)
-        return self.ae.decode(x).sample
-
 
 class SimpleTransformerEncoder(nn.Module):
     """Sequence encoder using simple Transformer"""
@@ -281,15 +270,13 @@ class SimpleTransformerEncoder(nn.Module):
 
         max_seq_len = seq_len * 3  # (obs, action, reward) per timestep
 
-        # d_model is determined by AE output
-        self.out_channels = 4
-        self.hidden_h = observation_space_shape[1] // 8
-        self.hidden_w = observation_space_shape[2] // 8
+        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+        self.out_channels = self.image_processor.output_shape[0]
+        self.hidden_h = self.image_processor.output_shape[1]
+        self.hidden_w = self.image_processor.output_shape[2]
         self.output_dim = self.out_channels * self.hidden_h * self.hidden_w
         n_heads = 8  # Fixed number of attention heads
         n_blocks = 2  # Number of CausalTimeBlocks
-
-        self.ae = AutoencoderTiny.from_pretrained("madebyollin/taesd", cache_dir="./cache")
 
         # Positional encoding (for max possible sequence length with rewards)
         self.pos_encoding = nn.Parameter(torch.randn(max_seq_len, self.output_dim))
@@ -330,8 +317,8 @@ class SimpleTransformerEncoder(nn.Module):
         # Process all images through AE
         all_images = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
         with torch.no_grad():
-            states = self.ae.encode(all_images).latents  # (B*T, 4, 12, 12)
-            states = states.view(B, T, -1)  # (B, T, 576) - flatten AE output
+            states = self.image_processor.encode(all_images)  # (B*T, C_h, H_h, W_h)
+            states = states.view(B, T, -1)  # (B, T, hidden_dim)
 
         # Use fourier embeddings for actions (same as STTEncoder)
         action_emb = get_fourier_embeds_from_coordinates(
@@ -367,8 +354,3 @@ class SimpleTransformerEncoder(nn.Module):
         output = self.output_proj(final_repr)  # (B, d_model)
 
         return output
-
-    @torch.no_grad()
-    def decode(self, x):
-        x = x.view(x.size(0), 4, 12, 12)
-        return self.ae.decode(x).sample

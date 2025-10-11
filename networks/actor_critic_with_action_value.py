@@ -219,7 +219,7 @@ class Network(nn.Module):
         # 次のstateをencodeする
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
-            target_state_next = self.encoder.ae.encode(last_obs).latents  # (B, C', H', W')
+            target_state_next = self.encoder.image_processor.encode(last_obs)  # (B, C', H', W')
             B, C, H, W = target_state_next.shape
             target_state_next = target_state_next.flatten(2).permute(0, 2, 1)  # (B, H'*W', C')
 
@@ -256,9 +256,9 @@ class Network(nn.Module):
     def predict_next_state(self, state_curr, action_curr) -> tuple[np.ndarray, float]:
         device = state_curr.device
         B = state_curr.size(0)
-        C = 4
-        H = 12
-        W = 12
+        C = self.encoder.image_processor.output_shape[0]
+        H = self.encoder.image_processor.output_shape[1]
+        W = self.encoder.image_processor.output_shape[2]
         state_curr = state_curr.view(B, -1, C)
         noise_shape = (B, (H * W) + 1, C)
         normal = torch.distributions.Normal(
@@ -281,7 +281,7 @@ class Network(nn.Module):
 
         image_part = next_hidden_state[:, :-1, :]  # (B, H*W, C)
         image_part = image_part.permute(0, 2, 1).view(B, C, H, W)  # (B, C, H, W)
-        next_image = self.encoder.decode(image_part)
+        next_image = self.encoder.image_processor.decode(image_part)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
         next_image = next_image.transpose(1, 2, 0)
