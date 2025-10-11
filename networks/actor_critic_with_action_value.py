@@ -1,3 +1,5 @@
+import argparse
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,7 +19,9 @@ from networks.value_head import ActionValueHead
 
 
 class Network(nn.Module):
-    def __init__(self, observation_space_shape: list[int], action_dim: int, args):
+    def __init__(
+        self, observation_space_shape: list[int], action_dim: int, args: argparse.Namespace
+    ) -> None:
         super(Network, self).__init__()
         self.gamma = 0.99
         self.num_bins = args.num_bins
