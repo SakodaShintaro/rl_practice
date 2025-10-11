@@ -41,7 +41,6 @@ class SingleFrameEncoder(nn.Module):
         self.hidden_w = observation_space_shape[2] // 8
 
         self.output_dim = self.out_channels * self.hidden_h * self.hidden_w
-        print(f"{self.output_dim=}")
         self.norm = nn.LayerNorm(self.output_dim, elementwise_affine=False)
 
     @torch.no_grad()
