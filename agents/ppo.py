@@ -65,8 +65,6 @@ class PpoAgent:
         self.num_bins = args.num_bins
         self.network = Network(observation_space.shape, action_space.shape, args).to(self.device)
         self.rnn_state = self.network.init_state().to(self.device)
-        num_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
-        print(f"Number of trainable parameters: {num_params:,}")
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
             seq_len=self.seq_len + 1,
