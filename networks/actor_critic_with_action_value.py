@@ -28,6 +28,7 @@ class Network(nn.Module):
 
         self.action_dim = action_dim
         self.predictor_step_num = args.predictor_step_num
+        self.observation_space_shape = observation_space_shape
 
         if args.encoder == "stt":
             self.encoder = STTEncoder(
@@ -85,6 +86,7 @@ class Network(nn.Module):
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
         self.detach_predictor = args.detach_predictor
+        self.disable_state_predictor = args.disable_state_predictor
 
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
@@ -217,6 +219,14 @@ class Network(nn.Module):
         return total_actor_loss, activations_dict, info_dict
 
     def compute_sequence_loss(self, data, state_curr):
+        if self.disable_state_predictor:
+            # state_predictorを無効化する場合はダミー損失を返す
+            dummy_loss = torch.tensor(0.0, device=state_curr.device, requires_grad=True)
+            # state_currと同じ形状のダミーアクティベーションを返す
+            activations_dict = {"state_predictor": state_curr}
+            info_dict = {"seq_loss": 0.0}
+            return dummy_loss, activations_dict, info_dict
+
         if self.detach_predictor:
             state_curr = state_curr.detach()
 
@@ -261,6 +271,18 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> tuple[np.ndarray, float]:
+        if self.disable_state_predictor:
+            # state_predictorを無効化する場合は0埋めの値を返す
+            # 元の観測サイズと同じ0埋め画像を返す
+            # observation_space_shapeは(C, H, W)の形式
+            H = self.observation_space_shape[1]
+            W = self.observation_space_shape[2]
+
+            # 0埋めの画像を返す (H, W, 3)の形式
+            next_image = np.zeros((H, W, 3), dtype=np.float32)
+            next_reward = 0.0
+            return next_image, next_reward
+
         device = state_curr.device
         B = state_curr.size(0)
         C = self.encoder.image_processor.output_shape[0]

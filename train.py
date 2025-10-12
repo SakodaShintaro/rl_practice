@@ -74,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
     parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
     parser.add_argument("--detach_predictor", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--disable_state_predictor", type=int, default=0, choices=[0, 1])
 
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")
@@ -183,6 +184,8 @@ def main(args, exp_name: str, seed: int) -> None:
             # log
             elapsed_time_sec = time.time() - start_time
             elapsed_time_min = elapsed_time_sec / 60
+            # wandbにログする前にndarrayを除外
+            log_agent_info = {k: v for k, v in agent_info.items() if not isinstance(v, np.ndarray)}
             data_dict = {
                 "global_step": global_step,
                 "elapsed_time_min": elapsed_time_min,
@@ -192,7 +195,7 @@ def main(args, exp_name: str, seed: int) -> None:
                 "reward_symlog": env_info["reward_symlog"],
                 "reward_scaling": env_info["reward_scaling"],
                 "reward_centering": env_info["reward_centering"],
-                **agent_info,
+                **log_agent_info,
             }
             if pred_image_loss is not None:
                 data_dict["losses/pred_image_loss"] = pred_image_loss
