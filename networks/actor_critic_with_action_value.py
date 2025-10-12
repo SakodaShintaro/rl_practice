@@ -7,9 +7,8 @@ import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 
 from networks.backbone import (
-    RecurrentEncoder,
-    SimpleTransformerEncoder,
     STTEncoder,
+    TemporalOnlyEncoder,
 )
 from networks.epona.flux_dit import FluxDiT
 from networks.epona.layers import LinearEmbedder
@@ -38,14 +37,17 @@ class Network(nn.Module):
                 tempo_block_type=args.tempo_block_type,
                 action_dim=action_dim,
             )
-        elif args.encoder == "simple":
-            self.encoder = SimpleTransformerEncoder(observation_space_shape, self.seq_len)
-        elif args.encoder == "recurrent":
-            self.encoder = RecurrentEncoder(observation_space_shape)
-        else:
-            raise ValueError(
-                f"Unknown encoder: {args.encoder}. Only 'stt', 'simple', and 'recurrent' are supported."
+        elif args.encoder == "gru":
+            self.encoder = TemporalOnlyEncoder(
+                observation_space_shape,
+                seq_len=self.seq_len,
+                temporal_model_type="gru",
+                image_processor_type="simple_cnn",
+                freeze_image_processor=False,
+                use_action_reward=False,
             )
+        else:
+            raise ValueError(f"Unknown encoder: {args.encoder=}")
 
         hidden_image_dim = self.encoder.image_processor.output_shape[0]
         self.reward_encoder = LinearEmbedder(hidden_image_dim)

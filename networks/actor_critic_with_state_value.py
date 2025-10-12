@@ -6,9 +6,8 @@ from torch.distributions import Beta, Categorical
 from torch.nn import functional as F
 
 from networks.backbone import (
-    RecurrentEncoder,
-    SimpleTransformerEncoder,
     STTEncoder,
+    TemporalOnlyEncoder,
 )
 from networks.value_head import StateValueHead
 
@@ -23,7 +22,6 @@ class Network(nn.Module):
         super().__init__()
         self.action_dim = action_space_shape[0]
 
-        args.encoder = "recurrent"
         if args.encoder == "stt":
             self.encoder = STTEncoder(
                 observation_space_shape,
@@ -32,14 +30,17 @@ class Network(nn.Module):
                 tempo_block_type=args.tempo_block_type,
                 action_dim=self.action_dim,
             )
-        elif args.encoder == "simple":
-            self.encoder = SimpleTransformerEncoder(observation_space_shape, args.seq_len)
-        elif args.encoder == "recurrent":
-            self.encoder = RecurrentEncoder(observation_space_shape)
-        else:
-            raise ValueError(
-                f"Unknown encoder: {args.encoder}. Only 'stt', 'simple', and 'recurrent' are supported."
+        elif args.encoder == "gru":
+            self.encoder = TemporalOnlyEncoder(
+                observation_space_shape,
+                seq_len=args.seq_len,
+                temporal_model_type="gru",
+                image_processor_type="simple_cnn",
+                freeze_image_processor=False,
+                use_action_reward=False,
             )
+        else:
+            raise ValueError(f"Unknown encoder: {args.encoder=}")
 
         hidden_dim = self.encoder.output_dim
         self.linear = nn.Linear(hidden_dim, hidden_dim)
