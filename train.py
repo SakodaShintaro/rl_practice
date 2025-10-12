@@ -192,6 +192,10 @@ def main(args, exp_name: str, seed: int) -> None:
                 "elapsed_time_min": elapsed_time_min,
                 "SPS": global_step / elapsed_time_sec,
                 "reward": reward,
+                "reward_const": env_info["reward_const"],
+                "reward_symlog": env_info["reward_symlog"],
+                "reward_scaling": env_info["reward_scaling"],
+                "reward_centering": env_info["reward_centering"],
                 **agent_info,
             }
             if pred_image_loss is not None:
