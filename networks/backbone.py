@@ -335,3 +335,150 @@ class SimpleTransformerEncoder(nn.Module):
         output = self.output_proj(final_repr)  # (B, d_model)
 
         return output, rnn_state
+
+
+class TemporalOnlyEncoder(nn.Module):
+    """
+    統合された時系列エンコーダー
+    RecurrentEncoderとSimpleTransformerEncoderを統合し、柔軟な設定を可能にする
+
+    Args:
+        observation_space_shape: 観測空間の形状 [C, H, W]
+        seq_len: シーケンス長
+        temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
+        image_processor_type: 画像プロセッサのタイプ ("ae" or "simple_cnn")
+        freeze_image_processor: image_processorの勾配を切るかどうか
+        use_action_reward: action, rewardも入れるか
+    """
+
+    def __init__(
+        self,
+        observation_space_shape: list[int],
+        seq_len: int,
+        temporal_model_type: str,
+        image_processor_type: str,
+        freeze_image_processor: bool,
+        use_action_reward: bool,
+    ):
+        super().__init__()
+
+        self.temporal_model_type = temporal_model_type
+        self.freeze_image_processor = freeze_image_processor
+        self.use_action_reward = use_action_reward
+
+        # Image processor
+        self.image_processor = ImageProcessor(
+            observation_space_shape, processor_type=image_processor_type
+        )
+
+        # 画像特徴量の次元を計算
+        image_feature_dim = np.prod(self.image_processor.output_shape)
+
+        # 共通の隠れ層サイズ
+        self.output_dim = 256
+
+        # image_processor後の共通線形層
+        self.lin_hidden_in = nn.Linear(image_feature_dim, self.output_dim)
+
+        # 時系列モデルのタイプによって構造を変える
+        if temporal_model_type == "gru":
+            # GRUベースの実装
+            self.recurrent_layer = nn.GRU(self.output_dim, self.output_dim, batch_first=True)
+
+        elif temporal_model_type == "transformer":
+            # Transformerベースの実装 (SimpleTransformerEncoderと同様)
+            # シーケンス長の計算 (action, rewardを含む場合は3倍)
+            max_seq_len = seq_len * 3 if use_action_reward else seq_len
+
+            n_heads = 8
+            n_blocks = 2
+
+            # Positional encoding
+            self.pos_encoding = nn.Parameter(torch.randn(max_seq_len, self.output_dim))
+
+            # TransformerBlocks
+            config = Config(
+                hidden_dim=self.output_dim,
+                n_head=n_heads,
+                attn_drop_prob=0.0,
+                res_drop_prob=0.0,
+            )
+            self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(n_blocks)])
+
+            # Causal mask
+            matrix = torch.tril(torch.ones(max_seq_len, max_seq_len))
+            self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
+            self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
+
+        else:
+            raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
+
+    def init_state(self) -> torch.Tensor:
+        return torch.zeros(1, 1, self.output_dim)
+
+    def forward(
+        self,
+        images: torch.Tensor,  # (B, T, 3, H, W)
+        actions: torch.Tensor,  # (B, T, action_dim)
+        rewards: torch.Tensor,  # (B, T, 1)
+        rnn_state: torch.Tensor,  # (1, B, hidden_size) for GRU, unused for Transformer
+    ) -> torch.Tensor:
+        """
+        Returns:
+            encoded features: (B, output_dim)
+            rnn_state: (1, B, hidden_size) for GRU, same as input for Transformer
+        """
+        B, T = images.shape[:2]
+
+        # 画像を処理
+        all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
+        if self.freeze_image_processor:
+            with torch.no_grad():
+                image_features = self.image_processor.encode(all_frames)
+        else:
+            image_features = self.image_processor.encode(all_frames)
+
+        # Flatten and linear projection
+        h = image_features.flatten(start_dim=1)  # (B*T, feature_dim)
+        h = F.relu(self.lin_hidden_in(h))  # (B*T, hidden_size)
+        h = h.reshape(B, T, -1)  # (B, T, hidden_size)
+
+        if self.use_action_reward:
+            # action, rewardを埋め込み
+            action_emb = get_fourier_embeds_from_coordinates(
+                self.output_dim, actions
+            )  # (B, T, action_dim, d_model)
+            action_emb = action_emb.sum(dim=2)  # (B, T, d_model)
+
+            reward_emb = get_fourier_embeds_from_coordinates(
+                self.output_dim, rewards
+            )  # (B, T, 1, d_model)
+            reward_emb = reward_emb.sum(dim=2)  # (B, T, d_model)
+
+            # Interleave: [s_0, a_0, r_0, s_1, a_1, r_1, ...]
+            sequence = torch.stack([h, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
+            sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
+        else:
+            # 画像のみ
+            sequence = h  # (B, T, d_model)
+
+        # 時系列モデルによって処理を分岐
+        if self.temporal_model_type == "gru":
+            sequence, rnn_state = self.recurrent_layer(
+                sequence, rnn_state
+            )  # (B, T, hidden_size), (1, B, hidden_size)
+
+        elif self.temporal_model_type == "transformer":
+            # Positional encoding
+            actual_seq_len = sequence.size(1)
+            sequence = sequence + self.pos_encoding[:actual_seq_len].unsqueeze(0)
+
+            # Apply Transformer blocks
+            current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)
+            for block in self.blocks:
+                sequence = block(sequence, current_mask)
+
+        # 最後のトークンの表現
+        final_repr = sequence[:, -1, :]  # (B, d_model)
+
+        return final_repr, rnn_state
