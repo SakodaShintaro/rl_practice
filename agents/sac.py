@@ -118,7 +118,26 @@ class SacAgent:
         self.prev_action = action
         return action, info_dict
 
-    def train(self, global_step, obs, reward, termination, truncation) -> dict:
+    def step(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
+        info_dict = {}
+
+        # train
+        train_info = self._train(global_step, obs, reward, terminated, truncated)
+        info_dict.update(train_info)
+
+        # make decision
+        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
+        info_dict.update(action_info)
+
+        return action, info_dict
+
+    ####################
+    # Internal methods #
+    ####################
+
+    def _train(self, global_step, obs, reward, termination, truncation) -> dict:
         info_dict = {}
 
         if global_step < self.learning_starts:
@@ -202,18 +221,3 @@ class SacAgent:
                 info_dict[f"{key}/{feature_name}"] = value
 
         return info_dict
-
-    def step(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
-    ) -> tuple[np.ndarray, dict]:
-        info_dict = {}
-
-        # train
-        train_info = self.train(global_step, obs, reward, terminated, truncated)
-        info_dict.update(train_info)
-
-        # make decision
-        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
-        info_dict.update(action_info)
-
-        return action, info_dict
