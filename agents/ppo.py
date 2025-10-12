@@ -85,10 +85,9 @@ class PpoAgent:
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
         if self.num_bins > 1:
-            value_range = 1
             self.hl_gauss_loss = HLGaussLoss(
-                min_value=-value_range,
-                max_value=+value_range,
+                min_value=-args.value_range,
+                max_value=+args.value_range,
                 num_bins=self.num_bins,
                 clamp_to_range=True,
             ).to(self.device)
