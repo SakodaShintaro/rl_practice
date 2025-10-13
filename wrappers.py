@@ -8,7 +8,7 @@ from reward_processor import RewardProcessor
 REPEAT = 8
 
 
-def make_env(env_id: str, partial_obs: bool) -> gym.Env:
+def make_env(env_id: str) -> gym.Env:
     env = gym.make(env_id, render_mode="rgb_array")
 
     if env_id == "MiniGrid-MemoryS9-v0":
@@ -23,10 +23,7 @@ def make_env(env_id: str, partial_obs: bool) -> gym.Env:
         return env
 
     elif env_id == "MiniGrid-MemoryS11-v0":
-        if partial_obs:
-            env = minigrid.wrappers.RGBImgPartialObsWrapper(env)
-        else:
-            env = minigrid.wrappers.RGBImgObsWrapper(env)
+        env = minigrid.wrappers.RGBImgPartialObsWrapper(env)
         env = minigrid.wrappers.ImgObsWrapper(env)
         env = DiscreteToContinuousWrapper(env)
         env = ResizeObs(env, shape=(3, 96, 96))

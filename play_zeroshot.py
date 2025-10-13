@@ -28,7 +28,6 @@ def parse_args() -> argparse.Namespace:
         default="CarRacing-v3",
         choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0", "MiniGrid-MemoryS11-v0"],
     )
-    parser.add_argument("--partial_obs", type=int, default=0, choices=[0, 1])
     parser.add_argument(
         "--agent_type",
         type=str,
@@ -135,7 +134,7 @@ if __name__ == "__main__":
     video_dir.mkdir(parents=True, exist_ok=True)
 
     # env setup
-    env = make_env(args.env_id, args.partial_obs)
+    env = make_env(args.env_id)
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 

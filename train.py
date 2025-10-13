@@ -35,7 +35,6 @@ def parse_args() -> argparse.Namespace:
             "MiniGrid-MemoryS11-v0",
         ],
     )
-    parser.add_argument("--partial_obs", type=int, default=1, choices=[0, 1])
     parser.add_argument("--agent_type", type=str, default="ppo", choices=["sac", "avg", "ppo"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -132,7 +131,7 @@ def main(args, exp_name: str, seed: int) -> None:
     log_episode_writer = None
 
     # env setup
-    env = make_env(args.env_id, args.partial_obs)
+    env = make_env(args.env_id)
     env.action_space.seed(seed)
 
     target_score = args.target_score if args.target_score is not None else env.spec.reward_threshold
