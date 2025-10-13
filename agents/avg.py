@@ -120,7 +120,8 @@ class AvgAgent:
             obs_shape=observation_space.shape,
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=(self.action_dim,),
-            device=self.device,
+            output_device=self.device,
+            storage_device=self.device,
         )
 
         self.gamma = args.gamma

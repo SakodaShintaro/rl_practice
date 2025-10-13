@@ -70,7 +70,8 @@ class PpoAgent:
             obs_shape=observation_space.shape,
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
-            device=self.device,
+            output_device=self.device,
+            storage_device=self.device,
         )
         self.latest_buffer = ReplayBuffer(
             size=self.seq_len,
@@ -78,7 +79,8 @@ class PpoAgent:
             obs_shape=observation_space.shape,
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
-            device=self.device,
+            output_device=self.device,
+            storage_device=self.device,
         )
 
         lr = args.learning_rate

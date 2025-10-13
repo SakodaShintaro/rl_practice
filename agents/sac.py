@@ -47,7 +47,7 @@ class SacAgent:
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             output_device=self.device,
-            storage_device=torch.device("cuda"),
+            storage_device=self.device,
         )
 
         # Initialize gradient norm targets
