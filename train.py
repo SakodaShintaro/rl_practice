@@ -41,8 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--target_score", type=float, default=0.95)
     parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument("--encoder", type=str, default="stt", choices=["stt", "gru"])
+    parser.add_argument("--encoder", type=str, default="stt", choices=["stt", "temporal_only"])
     parser.add_argument("--encoder_block_num", type=int, default=1)
+    parser.add_argument(
+        "--tempo_block_type", type=str, default="gru", choices=["transformer", "mamba", "gru"]
+    )
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
@@ -60,9 +63,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seq_len", type=int, default=32)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
-    parser.add_argument(
-        "--tempo_block_type", type=str, default="transformer", choices=["transformer", "mamba"]
-    )
     parser.add_argument("--debug", action="store_true")
 
     # for SAC

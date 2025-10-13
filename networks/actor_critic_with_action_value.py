@@ -38,11 +38,11 @@ class Network(nn.Module):
                 tempo_block_type=args.tempo_block_type,
                 action_dim=action_dim,
             )
-        elif args.encoder == "gru":
+        elif args.encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
                 observation_space_shape,
                 seq_len=self.seq_len,
-                temporal_model_type="gru",
+                temporal_model_type=args.tempo_block_type,
                 image_processor_type="simple_cnn",
                 freeze_image_processor=False,
                 use_action_reward=False,
