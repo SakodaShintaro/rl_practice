@@ -95,9 +95,9 @@ class PpoAgent:
             ).to(self.device)
 
     def initialize_for_episode(self) -> None:
-        self.prev_action = None
-        self.prev_value = None
-        self.prev_logp = None
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        self.prev_logp = 0.0
+        self.prev_value = 0.0
 
     @torch.inference_mode()
     def select_action(
@@ -183,17 +183,14 @@ class PpoAgent:
     ####################
 
     def _train(self, last_value: float) -> None:
-        s = torch.tensor(self.rb.observations).to(self.device)
-        a = torch.tensor(self.rb.actions).to(self.device)
-        r = torch.tensor(self.rb.rewards).to(self.device).view(-1, 1)
-        v = torch.tensor(self.rb.values).to(self.device).view(-1, 1)
-        old_a_logp = torch.tensor(self.rb.log_probs).to(self.device).view(-1, 1)
-        done = torch.tensor(self.rb.dones).to(self.device).view(-1, 1)
-        rnn_states = (
-            torch.tensor(self.rb.rnn_states)
-            .to(self.device)
-            .view(-1, 1, self.network.encoder.output_dim)
-        )
+        buffer_data = self.rb.get_all_data()
+        s = buffer_data.observations
+        a = buffer_data.actions
+        r = buffer_data.rewards.view(-1, 1)
+        v = buffer_data.values.view(-1, 1)
+        old_a_logp = buffer_data.log_probs.view(-1, 1)
+        done = buffer_data.dones.view(-1, 1)
+        rnn_states = buffer_data.rnn_state.view(-1, 1, self.network.encoder.output_dim)
 
         bias = torch.tensor(self.action_bias, device=self.device).view(1, -1)
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)

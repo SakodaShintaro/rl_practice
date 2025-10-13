@@ -102,6 +102,19 @@ class ReplayBuffer:
         self.idx = 0
         self.full = False
 
+    def get_all_data(self) -> ReplayBufferData:
+        """Get all data in the buffer (for PPO training)"""
+        curr_size = self.size if self.full else self.idx
+        return ReplayBufferData(
+            self.observations[:curr_size].to(self.output_device, non_blocking=True),
+            self.rewards[:curr_size].to(self.output_device, non_blocking=True),
+            self.dones[:curr_size].to(self.output_device, non_blocking=True),
+            self.rnn_states[:curr_size].to(self.output_device, non_blocking=True),
+            self.actions[:curr_size].to(self.output_device, non_blocking=True),
+            self.log_probs[:curr_size].to(self.output_device, non_blocking=True),
+            self.values[:curr_size].to(self.output_device, non_blocking=True),
+        )
+
     def add(
         self,
         obs: np.ndarray,
