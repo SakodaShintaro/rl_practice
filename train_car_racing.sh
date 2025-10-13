@@ -9,7 +9,7 @@ python3 train.py baseline \
   --target_score 800.0 \
   --agent_type sac \
   --seq_len 8 \
-  --value_range 60 \
+  --num_bins 1 \
   --learning_rate 1e-4 \
   --step_limit 40_000 \
   --eval_range 20 \
