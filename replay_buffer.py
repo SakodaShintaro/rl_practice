@@ -34,22 +34,63 @@ class ReplayBuffer:
         obs_shape: np.ndarray,
         rnn_state_shape: np.ndarray,
         action_shape: np.ndarray,
-        device: torch.device,
+        output_device: torch.device,
+        storage_device: torch.device,
     ) -> None:
         self.size = size
         self.seq_len = seq_len
         self.action_shape = action_shape
-        self.device = device
+        self.output_device = output_device
+        self.storage_device = storage_device
 
         assert self.seq_len <= self.size, "Replay buffer size must be >= sequence length."
 
-        self.observations = np.zeros((size, *obs_shape), dtype=np.float32)
-        self.rewards = np.zeros((size, 1), dtype=np.float32)
-        self.dones = np.zeros((size, 1), dtype=np.float32)
-        self.rnn_states = np.zeros((size, *rnn_state_shape), dtype=np.float32)
-        self.actions = np.zeros((size, *action_shape), dtype=np.float32)
-        self.log_probs = np.zeros((size, 1), dtype=np.float32)
-        self.values = np.zeros((size, 1), dtype=np.float32)
+        # Use torch tensors with pinned memory for faster CPU->GPU transfer
+        pin_memory = self.storage_device.type == "cpu" and self.output_device.type == "cuda"
+
+        self.observations = (
+            torch.zeros(
+                (size, *obs_shape), dtype=torch.float32, device=self.storage_device
+            ).pin_memory()
+            if pin_memory
+            else torch.zeros((size, *obs_shape), dtype=torch.float32, device=self.storage_device)
+        )
+        self.rewards = (
+            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
+            if pin_memory
+            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
+        )
+        self.dones = (
+            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
+            if pin_memory
+            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
+        )
+        self.rnn_states = (
+            torch.zeros(
+                (size, *rnn_state_shape), dtype=torch.float32, device=self.storage_device
+            ).pin_memory()
+            if pin_memory
+            else torch.zeros(
+                (size, *rnn_state_shape), dtype=torch.float32, device=self.storage_device
+            )
+        )
+        self.actions = (
+            torch.zeros(
+                (size, *action_shape), dtype=torch.float32, device=self.storage_device
+            ).pin_memory()
+            if pin_memory
+            else torch.zeros((size, *action_shape), dtype=torch.float32, device=self.storage_device)
+        )
+        self.log_probs = (
+            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
+            if pin_memory
+            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
+        )
+        self.values = (
+            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
+            if pin_memory
+            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
+        )
 
         self.idx = 0
         self.full = False
@@ -71,13 +112,30 @@ class ReplayBuffer:
         log_prob: float,
         value: float,
     ) -> None:
-        self.observations[self.idx] = obs
-        self.rewards[self.idx] = reward
-        self.dones[self.idx] = done
-        self.rnn_states[self.idx] = rnn_state
-        self.actions[self.idx] = action
-        self.log_probs[self.idx] = log_prob
-        self.values[self.idx] = value
+        # Convert numpy arrays to tensors and copy to buffer
+        if isinstance(obs, np.ndarray):
+            obs_tensor = torch.from_numpy(obs)
+        else:
+            obs_tensor = obs
+        self.observations[self.idx].copy_(obs_tensor.reshape(self.observations[self.idx].shape))
+
+        self.rewards[self.idx].fill_(reward)
+        self.dones[self.idx].fill_(done)
+
+        if isinstance(rnn_state, np.ndarray):
+            rnn_state_tensor = torch.from_numpy(rnn_state)
+        else:
+            rnn_state_tensor = rnn_state
+        self.rnn_states[self.idx].copy_(rnn_state_tensor.reshape(self.rnn_states[self.idx].shape))
+
+        if isinstance(action, np.ndarray):
+            action_tensor = torch.from_numpy(action)
+        else:
+            action_tensor = action
+        self.actions[self.idx].copy_(action_tensor.reshape(self.actions[self.idx].shape))
+
+        self.log_probs[self.idx].fill_(log_prob)
+        self.values[self.idx].fill_(value)
 
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
@@ -90,7 +148,7 @@ class ReplayBuffer:
         indices = np.random.randint(0, curr_size - self.seq_len, size=batch_size)
 
         # Create vectorized sequence indices: (batch_size, seq_len)
-        seq_indices = indices[:, None] + np.arange(self.seq_len)[None, :]
+        seq_indices = torch.from_numpy(indices[:, None] + np.arange(self.seq_len)[None, :])
 
         # Vectorized slicing - much faster than loop + append
         observations = self.observations[seq_indices]
@@ -101,20 +159,19 @@ class ReplayBuffer:
         log_probs = self.log_probs[seq_indices]
         values = self.values[seq_indices]
 
-        # Use from_numpy instead of tensor() for better performance
         return ReplayBufferData(
-            torch.from_numpy(observations).to(self.device),
-            torch.from_numpy(rewards).to(self.device),
-            torch.from_numpy(dones).to(self.device),
-            torch.from_numpy(rnn_states).to(self.device),
-            torch.from_numpy(actions).to(self.device),
-            torch.from_numpy(log_probs).to(self.device),
-            torch.from_numpy(values).to(self.device),
+            observations.to(self.output_device, non_blocking=True),
+            rewards.to(self.output_device, non_blocking=True),
+            dones.to(self.output_device, non_blocking=True),
+            rnn_states.to(self.output_device, non_blocking=True),
+            actions.to(self.output_device, non_blocking=True),
+            log_probs.to(self.output_device, non_blocking=True),
+            values.to(self.output_device, non_blocking=True),
         )
 
     def get_latest(self, seq_len: int) -> ReplayBufferData:
         # Create vectorized indices for the latest sequence
-        indices = (self.idx - seq_len + np.arange(seq_len)) % self.size
+        indices = torch.from_numpy((self.idx - seq_len + np.arange(seq_len)) % self.size)
 
         # Vectorized slicing
         observations = self.observations[indices]
@@ -125,13 +182,12 @@ class ReplayBuffer:
         log_probs = self.log_probs[indices]
         values = self.values[indices]
 
-        # Use from_numpy and add batch dimension
         return ReplayBufferData(
-            torch.from_numpy(observations).unsqueeze(0).to(self.device),
-            torch.from_numpy(rewards).unsqueeze(0).to(self.device),
-            torch.from_numpy(dones).unsqueeze(0).to(self.device),
-            torch.from_numpy(rnn_states).unsqueeze(0).to(self.device),
-            torch.from_numpy(actions).unsqueeze(0).to(self.device),
-            torch.from_numpy(log_probs).unsqueeze(0).to(self.device),
-            torch.from_numpy(values).unsqueeze(0).to(self.device),
+            observations.unsqueeze(0).to(self.output_device, non_blocking=True),
+            rewards.unsqueeze(0).to(self.output_device, non_blocking=True),
+            dones.unsqueeze(0).to(self.output_device, non_blocking=True),
+            rnn_states.unsqueeze(0).to(self.output_device, non_blocking=True),
+            actions.unsqueeze(0).to(self.output_device, non_blocking=True),
+            log_probs.unsqueeze(0).to(self.output_device, non_blocking=True),
+            values.unsqueeze(0).to(self.output_device, non_blocking=True),
         )
