@@ -167,7 +167,13 @@ class AvgAgent:
         info_dict["train_reward"] = train_reward
 
         self.rb.add(
-            obs, train_reward, False, self.rnn_state.cpu().numpy(), self.prev_action, 0.0, 0.0
+            torch.from_numpy(obs).to(self.device),
+            train_reward,
+            False,
+            self.rnn_state.squeeze(0),
+            torch.from_numpy(self.prev_action).to(self.device),
+            0.0,
+            0.0,
         )
 
         latest_data = self.rb.get_latest(self.seq_len)

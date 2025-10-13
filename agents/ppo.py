@@ -104,11 +104,11 @@ class PpoAgent:
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
         self.latest_buffer.add(
-            obs,
+            torch.from_numpy(obs).to(self.device),
             reward,
             terminated or truncated,
-            self.rnn_state.cpu().numpy(),
-            self.prev_action,
+            self.rnn_state.squeeze(0),
+            torch.from_numpy(self.prev_action).to(self.device),
             self.prev_logp,
             self.prev_value,
         )
@@ -157,11 +157,11 @@ class PpoAgent:
 
         # store data to buffer
         self.rb.add(
-            obs,
+            torch.from_numpy(obs).to(self.device),
             reward,
             terminated or truncated,
-            self.rnn_state.cpu().numpy(),
-            self.prev_action,
+            self.rnn_state.squeeze(0),
+            torch.from_numpy(self.prev_action).to(self.device),
             self.prev_logp,
             self.prev_value,
         )

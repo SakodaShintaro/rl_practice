@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-import numpy as np
 import torch
 
 """ Note
@@ -31,9 +30,9 @@ class ReplayBuffer:
         self,
         size: int,
         seq_len: int,
-        obs_shape: np.ndarray,
-        rnn_state_shape: np.ndarray,
-        action_shape: np.ndarray,
+        obs_shape,
+        rnn_state_shape,
+        action_shape,
         output_device: torch.device,
         storage_device: torch.device,
     ) -> None:
@@ -117,36 +116,20 @@ class ReplayBuffer:
 
     def add(
         self,
-        obs: np.ndarray,
+        obs: torch.Tensor,
         reward: float,
         done: bool,
-        rnn_state: np.ndarray,
-        action: np.ndarray,
+        rnn_state: torch.Tensor,
+        action: torch.Tensor,
         log_prob: float,
         value: float,
     ) -> None:
-        # Convert numpy arrays to tensors and copy to buffer
-        if isinstance(obs, np.ndarray):
-            obs_tensor = torch.from_numpy(obs)
-        else:
-            obs_tensor = obs
-        self.observations[self.idx].copy_(obs_tensor.reshape(self.observations[self.idx].shape))
-
+        # Copy tensors to buffer storage
+        self.observations[self.idx].copy_(obs.reshape(self.observations[self.idx].shape))
         self.rewards[self.idx].fill_(reward)
         self.dones[self.idx].fill_(done)
-
-        if isinstance(rnn_state, np.ndarray):
-            rnn_state_tensor = torch.from_numpy(rnn_state)
-        else:
-            rnn_state_tensor = rnn_state
-        self.rnn_states[self.idx].copy_(rnn_state_tensor.reshape(self.rnn_states[self.idx].shape))
-
-        if isinstance(action, np.ndarray):
-            action_tensor = torch.from_numpy(action)
-        else:
-            action_tensor = action
-        self.actions[self.idx].copy_(action_tensor.reshape(self.actions[self.idx].shape))
-
+        self.rnn_states[self.idx].copy_(rnn_state.reshape(self.rnn_states[self.idx].shape))
+        self.actions[self.idx].copy_(action.reshape(self.actions[self.idx].shape))
         self.log_probs[self.idx].fill_(log_prob)
         self.values[self.idx].fill_(value)
 
@@ -158,10 +141,14 @@ class ReplayBuffer:
         assert curr_size >= self.seq_len, "Not enough data to sample a sequence."
 
         # Generate base indices for each batch element
-        indices = np.random.randint(0, curr_size - self.seq_len, size=batch_size)
+        indices = torch.randint(
+            0, curr_size - self.seq_len, (batch_size,), device=self.storage_device
+        )
 
         # Create vectorized sequence indices: (batch_size, seq_len)
-        seq_indices = torch.from_numpy(indices[:, None] + np.arange(self.seq_len)[None, :])
+        seq_indices = (
+            indices[:, None] + torch.arange(self.seq_len, device=self.storage_device)[None, :]
+        )
 
         # Vectorized slicing - much faster than loop + append
         observations = self.observations[seq_indices]
@@ -184,7 +171,9 @@ class ReplayBuffer:
 
     def get_latest(self, seq_len: int) -> ReplayBufferData:
         # Create vectorized indices for the latest sequence
-        indices = torch.from_numpy((self.idx - seq_len + np.arange(seq_len)) % self.size)
+        indices = (
+            self.idx - seq_len + torch.arange(seq_len, device=self.storage_device)
+        ) % self.size
 
         # Vectorized slicing
         observations = self.observations[indices]
