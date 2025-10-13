@@ -85,70 +85,53 @@ class ReplayBuffer:
     def sample(self, batch_size: int) -> ReplayBufferData:
         curr_size = self.size if self.full else self.idx
         assert curr_size >= self.seq_len, "Not enough data to sample a sequence."
+
+        # Generate base indices for each batch element
         indices = np.random.randint(0, curr_size - self.seq_len, size=batch_size)
-        observations = []
-        rewards = []
-        dones = []
-        rnn_states = []
-        actions = []
-        log_probs = []
-        values = []
-        for idx in indices:
-            observations.append(self.observations[idx : idx + self.seq_len])
-            rewards.append(self.rewards[idx : idx + self.seq_len])
-            dones.append(self.dones[idx : idx + self.seq_len])
-            rnn_states.append(self.rnn_states[idx : idx + self.seq_len])
-            actions.append(self.actions[idx : idx + self.seq_len])
-            log_probs.append(self.log_probs[idx : idx + self.seq_len])
-            values.append(self.values[idx : idx + self.seq_len])
-        observations = np.stack(observations)
-        rewards = np.stack(rewards)
-        dones = np.stack(dones)
-        rnn_states = np.stack(rnn_states)
-        actions = np.stack(actions)
-        log_probs = np.stack(log_probs)
-        values = np.stack(values)
+
+        # Create vectorized sequence indices: (batch_size, seq_len)
+        seq_indices = indices[:, None] + np.arange(self.seq_len)[None, :]
+
+        # Vectorized slicing - much faster than loop + append
+        observations = self.observations[seq_indices]
+        rewards = self.rewards[seq_indices]
+        dones = self.dones[seq_indices]
+        rnn_states = self.rnn_states[seq_indices]
+        actions = self.actions[seq_indices]
+        log_probs = self.log_probs[seq_indices]
+        values = self.values[seq_indices]
+
+        # Use from_numpy instead of tensor() for better performance
         return ReplayBufferData(
-            torch.tensor(observations).to(self.device),
-            torch.tensor(rewards).to(self.device),
-            torch.tensor(dones).to(self.device),
-            torch.tensor(rnn_states).to(self.device),
-            torch.tensor(actions).to(self.device),
-            torch.tensor(log_probs).to(self.device),
-            torch.tensor(values).to(self.device),
+            torch.from_numpy(observations).to(self.device),
+            torch.from_numpy(rewards).to(self.device),
+            torch.from_numpy(dones).to(self.device),
+            torch.from_numpy(rnn_states).to(self.device),
+            torch.from_numpy(actions).to(self.device),
+            torch.from_numpy(log_probs).to(self.device),
+            torch.from_numpy(values).to(self.device),
         )
 
     def get_latest(self, seq_len: int) -> ReplayBufferData:
-        observations = []
-        rewards = []
-        dones = []
-        rnn_states = []
-        actions = []
-        log_probs = []
-        values = []
-        for i in range(seq_len):
-            idx = (self.idx - seq_len + i) % self.size
-            observations.append(self.observations[idx])
-            rewards.append(self.rewards[idx])
-            dones.append(self.dones[idx])
-            rnn_states.append(self.rnn_states[idx])
-            actions.append(self.actions[idx])
-            log_probs.append(self.log_probs[idx])
-            values.append(self.values[idx])
+        # Create vectorized indices for the latest sequence
+        indices = (self.idx - seq_len + np.arange(seq_len)) % self.size
 
-        observations = np.stack(observations)
-        rewards = np.stack(rewards)
-        dones = np.stack(dones)
-        rnn_states = np.stack(rnn_states)
-        actions = np.stack(actions)
-        log_probs = np.stack(log_probs)
-        values = np.stack(values)
+        # Vectorized slicing
+        observations = self.observations[indices]
+        rewards = self.rewards[indices]
+        dones = self.dones[indices]
+        rnn_states = self.rnn_states[indices]
+        actions = self.actions[indices]
+        log_probs = self.log_probs[indices]
+        values = self.values[indices]
+
+        # Use from_numpy and add batch dimension
         return ReplayBufferData(
-            torch.tensor(observations).unsqueeze(0).to(self.device),
-            torch.tensor(rewards).unsqueeze(0).to(self.device),
-            torch.tensor(dones).unsqueeze(0).to(self.device),
-            torch.tensor(rnn_states).unsqueeze(0).to(self.device),
-            torch.tensor(actions).unsqueeze(0).to(self.device),
-            torch.tensor(log_probs).unsqueeze(0).to(self.device),
-            torch.tensor(values).unsqueeze(0).to(self.device),
+            torch.from_numpy(observations).unsqueeze(0).to(self.device),
+            torch.from_numpy(rewards).unsqueeze(0).to(self.device),
+            torch.from_numpy(dones).unsqueeze(0).to(self.device),
+            torch.from_numpy(rnn_states).unsqueeze(0).to(self.device),
+            torch.from_numpy(actions).unsqueeze(0).to(self.device),
+            torch.from_numpy(log_probs).unsqueeze(0).to(self.device),
+            torch.from_numpy(values).unsqueeze(0).to(self.device),
         )
