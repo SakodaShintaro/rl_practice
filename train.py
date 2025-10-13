@@ -81,9 +81,6 @@ def parse_args() -> argparse.Namespace:
 
     # for PPO/Recurrent PPO
     parser.add_argument("--buffer_capacity", type=int, default=4096)
-    parser.add_argument(
-        "--model_name", type=str, default="default", choices=["default", "paligemma"]
-    )
 
     return parser.parse_args()
 
