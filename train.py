@@ -40,7 +40,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--target_score", type=float, default=0.95)
     parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument("--encoder", type=str, default="stt", choices=["stt", "temporal_only"])
+    parser.add_argument(
+        "--encoder",
+        type=str,
+        default="spatial_temporal",
+        choices=["spatial_temporal", "temporal_only"],
+    )
     parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument(
         "--tempo_block_type", type=str, default="gru", choices=["transformer", "mamba", "gru"]

@@ -6,7 +6,7 @@ from torch.distributions import Beta, Categorical
 from torch.nn import functional as F
 
 from networks.backbone import (
-    STTEncoder,
+    SpatialTemporalEncoder,
     TemporalOnlyEncoder,
 )
 from networks.value_head import StateValueHead
@@ -22,8 +22,8 @@ class Network(nn.Module):
         super().__init__()
         self.action_dim = action_space_shape[0]
 
-        if args.encoder == "stt":
-            self.encoder = STTEncoder(
+        if args.encoder == "spatial_temporal":
+            self.encoder = SpatialTemporalEncoder(
                 observation_space_shape,
                 seq_len=args.seq_len,
                 n_layer=args.encoder_block_num,

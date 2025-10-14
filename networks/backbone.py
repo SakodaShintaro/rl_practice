@@ -74,7 +74,7 @@ class ImageProcessor(nn.Module):
         return x
 
 
-class STTEncoder(nn.Module):
+class SpatialTemporalEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
     def __init__(
@@ -98,7 +98,7 @@ class STTEncoder(nn.Module):
         reward_tokens_num = 1
         register_tokens_num = 1
 
-        self.stt = SpatialTemporalTransformer(
+        self.spatial_temporal = SpatialTemporalTransformer(
             n_layer=n_layer,
             space_len=(
                 self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
@@ -166,10 +166,10 @@ class STTEncoder(nn.Module):
         all_embed = torch.cat([image_embed, action_embed, reward_embed, register_token], dim=2)
 
         # Apply STT to all frames
-        stt_output = self.stt(all_embed)  # [B, T, S+action_dim+1, C']
+        spatial_temporal_output = self.spatial_temporal(all_embed)  # [B, T, S+action_dim+1, C']
 
         # Use last timestep's image tokens for final representation
-        last_frame_emb = stt_output[:, -1, :, :]  # [B, S+action_dim+1, C']
+        last_frame_emb = spatial_temporal_output[:, -1, :, :]  # [B, S+action_dim+1, C']
 
         if self.use_image_only:
             last_frame_emb = last_frame_emb[:, : self.image_tokens_num, :]  # [B, S, C']

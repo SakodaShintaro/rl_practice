@@ -6,7 +6,7 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import SimpleTransformerEncoder, STTEncoder
+from networks.backbone import SimpleTransformerEncoder, SpatialTemporalEncoder
 from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder
 
 
@@ -16,7 +16,7 @@ def parse_args():
         "--encoder",
         type=str,
         choices=[
-            "stt",
+            "spatial_temporal",
             "simple_transformer",
             "mmmamba",
             "smolvlm",
@@ -84,8 +84,10 @@ if __name__ == "__main__":
     # エンコーダーの初期化
     print("Initializing Encoder")
     target_encoder_list = []
-    if args.encoder == "stt":
-        target_encoder_list.append(STTEncoder(num_images, device, "transformer", action_dim=3))
+    if args.encoder == "spatial_temporal":
+        target_encoder_list.append(
+            SpatialTemporalEncoder(num_images, device, "transformer", action_dim=3)
+        )
     elif args.encoder == "simple_transformer":
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
     elif args.encoder == "mmmamba":
@@ -95,7 +97,9 @@ if __name__ == "__main__":
     elif args.encoder == "qwenvl":
         target_encoder_list.append(QwenVLEncoder(num_images, device))
     else:  # all
-        target_encoder_list.append(STTEncoder(num_images, device, "transformer", action_dim=3))
+        target_encoder_list.append(
+            SpatialTemporalEncoder(num_images, device, "transformer", action_dim=3)
+        )
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
         target_encoder_list.append(MMMambaEncoder(num_images, device))
         target_encoder_list.append(SmolVLMEncoder(num_images, device))

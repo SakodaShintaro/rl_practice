@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 
 from networks.backbone import (
-    STTEncoder,
+    SpatialTemporalEncoder,
     TemporalOnlyEncoder,
 )
 from networks.epona.flux_dit import FluxDiT
@@ -30,8 +30,8 @@ class Network(nn.Module):
         self.predictor_step_num = args.predictor_step_num
         self.observation_space_shape = observation_space_shape
 
-        if args.encoder == "stt":
-            self.encoder = STTEncoder(
+        if args.encoder == "spatial_temporal":
+            self.encoder = SpatialTemporalEncoder(
                 observation_space_shape,
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
