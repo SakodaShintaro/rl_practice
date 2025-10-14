@@ -85,7 +85,8 @@ class SacAgent:
         info_dict = {}
 
         action_norm = np.linalg.norm(self.prev_action)
-        train_reward = 0.1 * reward - self.action_norm_penalty * action_norm
+        scale = 0.1
+        train_reward = scale * (reward - self.action_norm_penalty * action_norm)
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
