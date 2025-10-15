@@ -24,6 +24,7 @@ class SacAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
         self.action_norm_penalty = args.action_norm_penalty
+        self.reward_scale = args.reward_scale
 
         self.learning_starts = args.learning_starts
         self.batch_size = args.batch_size
@@ -85,8 +86,7 @@ class SacAgent:
         info_dict = {}
 
         action_norm = np.linalg.norm(self.prev_action)
-        scale = 0.1
-        train_reward = scale * (reward - self.action_norm_penalty * action_norm)
+        train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
