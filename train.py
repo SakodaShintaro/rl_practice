@@ -72,9 +72,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
-    parser.add_argument("--buffer_size", type=int, default=int(2e4))
+    parser.add_argument("--buffer_size", type=int, default=int(2e5))
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--learning_starts", type=int, default=2000)
+    parser.add_argument("--learning_starts", type=int, default=int(2e4))
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
     parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
