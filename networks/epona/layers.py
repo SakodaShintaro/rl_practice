@@ -32,7 +32,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
 
 
 class EmbedND(nn.Module):
-    def __init__(self, dim: int, theta: int, axes_dim: list[int]):
+    def __init__(self, dim: int, theta: int, axes_dim: tuple[int]):
         super().__init__()
         self.dim = dim
         self.theta = theta

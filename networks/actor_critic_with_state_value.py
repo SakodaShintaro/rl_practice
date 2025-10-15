@@ -15,8 +15,8 @@ from networks.value_head import StateValueHead
 class Network(nn.Module):
     def __init__(
         self,
-        observation_space_shape: list[int],
-        action_space_shape: list[int],
+        observation_space_shape: tuple[int],
+        action_space_shape: tuple[int],
         args: argparse.Namespace,
     ) -> None:
         super().__init__()

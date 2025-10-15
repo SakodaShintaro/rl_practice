@@ -23,7 +23,7 @@ class FluxDiT(nn.Module):
         num_heads: int,
         depth_double_blocks: int,
         depth_single_blocks: int,
-        axes_dim: list[int],
+        axes_dim: tuple[int],
         theta: int,
         qkv_bias: bool,
     ):

@@ -31,7 +31,7 @@ def init_weights(m):
 
 
 class ImageProcessor(nn.Module):
-    def __init__(self, observation_space_shape: list[int], processor_type: str) -> None:
+    def __init__(self, observation_space_shape: tuple[int], processor_type: str) -> None:
         super().__init__()
         self.observation_space_shape = observation_space_shape
         self.processor_type = processor_type
@@ -50,7 +50,7 @@ class ImageProcessor(nn.Module):
             )
         self.output_shape = self._get_conv_output_shape(observation_space_shape)
 
-    def _get_conv_output_shape(self, shape: list[int]) -> list[int]:
+    def _get_conv_output_shape(self, shape: tuple[int]) -> tuple[int]:
         x = torch.zeros(1, *shape)
         if self.processor_type == "ae":
             x = self.processor.encode(x).latents
@@ -79,7 +79,7 @@ class SpatialTemporalEncoder(nn.Module):
 
     def __init__(
         self,
-        observation_space_shape: list[int],
+        observation_space_shape: tuple[int],
         seq_len: int,
         n_layer: int,
         tempo_block_type: str,
@@ -195,7 +195,7 @@ class TemporalOnlyEncoder(nn.Module):
 
     def __init__(
         self,
-        observation_space_shape: list[int],
+        observation_space_shape: tuple[int],
         seq_len: int,
         temporal_model_type: str,
         image_processor_type: str,

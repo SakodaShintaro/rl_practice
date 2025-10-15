@@ -18,7 +18,7 @@ from networks.value_head import ActionValueHead
 
 class Network(nn.Module):
     def __init__(
-        self, observation_space_shape: list[int], action_dim: int, args: argparse.Namespace
+        self, observation_space_shape: tuple[int], action_dim: int, args: argparse.Namespace
     ) -> None:
         super(Network, self).__init__()
         self.gamma = 0.99
