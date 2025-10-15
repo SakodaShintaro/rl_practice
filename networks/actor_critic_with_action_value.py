@@ -25,6 +25,7 @@ class Network(nn.Module):
         self.num_bins = args.num_bins
         self.sparsity = args.sparsity
         self.seq_len = args.seq_len
+        self.dacer_loss_weight = args.dacer_loss_weight
 
         self.action_dim = action_dim
         self.predictor_step_num = args.predictor_step_num
@@ -203,7 +204,7 @@ class Network(nn.Module):
         dacer_loss = F.mse_loss(v, target)
 
         # Combine actor losses
-        total_actor_loss = actor_loss + dacer_loss * 0.05
+        total_actor_loss = actor_loss + dacer_loss * self.dacer_loss_weight
 
         activations_dict = {
             "actor": actor_output_dict["activation"],
