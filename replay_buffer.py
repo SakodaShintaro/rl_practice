@@ -47,49 +47,21 @@ class ReplayBuffer:
         # Use torch tensors with pinned memory for faster CPU->GPU transfer
         pin_memory = self.storage_device.type == "cpu" and self.output_device.type == "cuda"
 
-        self.observations = (
-            torch.zeros(
-                (size, *obs_shape), dtype=torch.float32, device=self.storage_device
-            ).pin_memory()
-            if pin_memory
-            else torch.zeros((size, *obs_shape), dtype=torch.float32, device=self.storage_device)
-        )
-        self.rewards = (
-            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
-            if pin_memory
-            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
-        )
-        self.dones = (
-            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
-            if pin_memory
-            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
-        )
-        self.rnn_states = (
-            torch.zeros(
-                (size, *rnn_state_shape), dtype=torch.float32, device=self.storage_device
-            ).pin_memory()
-            if pin_memory
-            else torch.zeros(
-                (size, *rnn_state_shape), dtype=torch.float32, device=self.storage_device
+        def init_tensor(shape: tuple[int, ...]) -> torch.Tensor:
+            return torch.zeros(
+                shape,
+                dtype=torch.float32,
+                device=self.storage_device,
+                pin_memory=pin_memory,
             )
-        )
-        self.actions = (
-            torch.zeros(
-                (size, *action_shape), dtype=torch.float32, device=self.storage_device
-            ).pin_memory()
-            if pin_memory
-            else torch.zeros((size, *action_shape), dtype=torch.float32, device=self.storage_device)
-        )
-        self.log_probs = (
-            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
-            if pin_memory
-            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
-        )
-        self.values = (
-            torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device).pin_memory()
-            if pin_memory
-            else torch.zeros((size, 1), dtype=torch.float32, device=self.storage_device)
-        )
+
+        self.observations = init_tensor((size, *obs_shape))
+        self.rewards = init_tensor((size, 1))
+        self.dones = init_tensor((size, 1))
+        self.rnn_states = init_tensor((size, *rnn_state_shape))
+        self.actions = init_tensor((size, *action_shape))
+        self.log_probs = init_tensor((size, 1))
+        self.values = init_tensor((size, 1))
 
         self.idx = 0
         self.full = False
