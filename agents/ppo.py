@@ -71,7 +71,7 @@ class PpoAgent:
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             output_device=self.device,
-            storage_device=self.device,
+            storage_device=torch.device(args.buffer_device),
         )
         self.latest_buffer = ReplayBuffer(
             size=self.seq_len,
@@ -80,7 +80,7 @@ class PpoAgent:
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             output_device=self.device,
-            storage_device=self.device,
+            storage_device=torch.device(args.buffer_device),
         )
 
         lr = args.learning_rate

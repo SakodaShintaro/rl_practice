@@ -122,7 +122,7 @@ class AvgAgent:
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=(self.action_dim,),
             output_device=self.device,
-            storage_device=self.device,
+            storage_device=torch.device(args.buffer_device),
         )
 
         self.gamma = args.gamma

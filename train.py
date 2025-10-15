@@ -68,6 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reward_scale", type=float, default=1.0)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--debug", action="store_true")
 
     # for SAC
