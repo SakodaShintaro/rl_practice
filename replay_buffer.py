@@ -44,15 +44,11 @@ class ReplayBuffer:
 
         assert self.seq_len <= self.size, "Replay buffer size must be >= sequence length."
 
-        # Use torch tensors with pinned memory for faster CPU->GPU transfer
-        pin_memory = self.storage_device.type == "cpu" and self.output_device.type == "cuda"
-
         def init_tensor(shape: tuple[int, ...]) -> torch.Tensor:
             return torch.zeros(
                 shape,
                 dtype=torch.float32,
                 device=self.storage_device,
-                pin_memory=pin_memory,
             )
 
         self.observations = init_tensor((size, *obs_shape))
