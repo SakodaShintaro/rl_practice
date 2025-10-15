@@ -13,6 +13,7 @@ python3 train.py baseline \
   --tempo_block_type transformer \
   --seq_len 8 \
   --num_bins 1 \
+  --value_range 60.0 \
   --learning_rate 1e-4 \
   --step_limit 40_000 \
   --eval_range 20 \
