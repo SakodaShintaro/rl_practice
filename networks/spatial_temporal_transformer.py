@@ -209,21 +209,10 @@ class SpatialTemporalTransformer(nn.Module):
             *[SpatialTemporalBlock(config, tempo_block_type) for _ in range(self.n_layer)]
         )
 
-        self.apply(self._init_weights)
-
         matrix = torch.tril(torch.ones(tempo_len, tempo_len))
         time_causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         time_causal_mask = torch.where(matrix == 1, 0, time_causal_mask)
         self.register_buffer("mask_time", time_causal_mask.contiguous())
-
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

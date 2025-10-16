@@ -5,13 +5,6 @@ from .blocks import SimbaBlock
 from .sparse_utils import apply_one_shot_pruning
 
 
-def weights_init_(m):
-    if isinstance(m, nn.Linear):
-        nn.init.xavier_uniform_(m.weight, gain=1)
-        # nn.init.orthogonal_(m.weight.data)
-        nn.init.constant_(m.bias, 0)
-
-
 class StateValueHead(nn.Module):
     def __init__(
         self,
@@ -26,7 +19,6 @@ class StateValueHead(nn.Module):
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, num_bins)
-        self.apply(weights_init_)
 
         self.sparse_mask = (
             None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
@@ -62,7 +54,6 @@ class ActionValueHead(nn.Module):
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, num_bins)
-        self.apply(weights_init_)
 
         self.sparse_mask = (
             None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
