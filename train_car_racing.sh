@@ -7,8 +7,8 @@ python3 train.py baseline \
   --env_id CarRacing-v3 \
   --reward_scale 0.1 \
   --action_norm_penalty 1.0 \
-  --buffer_size 2e4 \
-  --learning_starts 2e3 \
+  --buffer_size 20000 \
+  --learning_starts 2000 \
   --target_score 800.0 \
   --agent_type sac \
   --encoder spatial_temporal \
