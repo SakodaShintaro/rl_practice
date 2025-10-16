@@ -9,6 +9,7 @@ from networks.backbone import (
     SpatialTemporalEncoder,
     TemporalOnlyEncoder,
 )
+from networks.utils import init_weights_normal, init_weights_orthogonal, init_weights_xavier
 from networks.value_head import StateValueHead
 
 
@@ -60,23 +61,13 @@ class Network(nn.Module):
             self.logits_head = nn.Linear(hidden_dim, self.action_dim)
         else:
             raise ValueError("Invalid policy type")
-        self.apply(self._init_weights)
 
-    def _init_weights(self, module: nn.Module) -> None:
-        """Initialize weights with orthogonal initialization.
-
-        Arguments:
-            module {nn.Module} -- Module to initialize
-        """
-        for name, param in module.named_parameters():
-            if "ae." in name:
-                continue
-            if param.dim() != 2:
-                continue
-            if "bias" in name:
-                nn.init.constant_(param, 0)
-            elif "weight" in name:
-                nn.init.orthogonal_(param)
+        if args.weight_init == "orthogonal":
+            self.apply(init_weights_orthogonal)
+        elif args.weight_init == "xavier":
+            self.apply(init_weights_xavier)
+        elif args.weight_init == "normal":
+            self.apply(init_weights_normal)
 
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()

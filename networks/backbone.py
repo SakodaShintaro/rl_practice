@@ -58,6 +58,11 @@ class ImageProcessor(nn.Module):
             x = self.processor(x)
         return list(x.size())[1:]
 
+    def apply(self, fn):
+        # Override apply to only apply to processor if processor_type is "simple_cnn"
+        if self.processor_type == "simple_cnn":
+            super().apply(fn)
+
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if self.processor_type == "ae":
             x = self.processor.encode(x).latents

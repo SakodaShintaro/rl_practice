@@ -13,6 +13,7 @@ from networks.backbone import (
 from networks.epona.flux_dit import FluxDiT
 from networks.epona.layers import LinearEmbedder
 from networks.policy_head import DiffusionPolicy
+from networks.utils import init_weights_normal, init_weights_orthogonal, init_weights_xavier
 from networks.value_head import ActionValueHead
 
 
@@ -96,6 +97,13 @@ class Network(nn.Module):
                 num_bins=self.num_bins,
                 clamp_to_range=True,
             )
+
+        if args.weight_init == "orthogonal":
+            self.apply(init_weights_orthogonal)
+        elif args.weight_init == "xavier":
+            self.apply(init_weights_xavier)
+        elif args.weight_init == "normal":
+            self.apply(init_weights_normal)
 
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
