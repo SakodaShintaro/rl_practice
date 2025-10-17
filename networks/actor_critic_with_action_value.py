@@ -100,32 +100,31 @@ class Network(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
-    def compute_critic_loss(self, data, state_curr):
-        if self.detach_critic:
-            state_curr = state_curr.detach()
-        with torch.no_grad():
-            obs_next = data.observations[:, 1:]
-            actions_next = data.actions[:, 1:]
-            rewards_next = data.rewards[:, 1:]
-            rnn_state_next = data.rnn_state[:, 1:]  # (B, T, hidden_size)
-            rnn_state_next = (
-                rnn_state_next[:, 0].permute(1, 0, 2).contiguous()
-            )  # (1, B, hidden_size)
-            state_next, _ = self.encoder.forward(
-                obs_next, actions_next, rewards_next, rnn_state_next
-            )
-            next_state_actions, _ = self.actor.get_action(state_next)
-            next_critic_output_dict = self.critic(state_next, next_state_actions)
-            next_critic_value = next_critic_output_dict["output"]
-            if self.num_bins > 1:
-                next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
-            else:
-                next_critic_value = next_critic_value.view(-1)
-            curr_reward = data.rewards[:, -1].flatten()
-            curr_continue = 1 - data.dones[:, -1].flatten()
-            target_value = curr_reward + curr_continue * self.gamma * next_critic_value
+    @torch.no_grad()
+    def compute_target_value(self, data) -> torch.Tensor:
+        obs_next = data.observations[:, 1:]
+        actions_next = data.actions[:, 1:]
+        rewards_next = data.rewards[:, 1:]
+        rnn_state_next = data.rnn_state[:, 1:]  # (B, T, hidden_size)
+        rnn_state_next = rnn_state_next[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
+        state_next, _ = self.encoder.forward(obs_next, actions_next, rewards_next, rnn_state_next)
+        next_state_actions, _ = self.actor.get_action(state_next)
+        next_critic_output_dict = self.critic(state_next, next_state_actions)
+        next_critic_value = next_critic_output_dict["output"]
+        if self.num_bins > 1:
+            next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
+        else:
+            next_critic_value = next_critic_value.view(-1)
+        curr_reward = data.rewards[:, -1].flatten()
+        curr_continue = 1 - data.dones[:, -1].flatten()
+        target_value = curr_reward + curr_continue * self.gamma * next_critic_value
+        return target_value
 
-        curr_critic_output_dict = self.critic(state_curr, data.actions[:, -1])
+    def compute_critic_loss(self, curr_state, curr_action, target_value):
+        if self.detach_critic:
+            curr_state = curr_state.detach()
+
+        curr_critic_output_dict = self.critic(curr_state, curr_action)
 
         if self.num_bins > 1:
             curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
@@ -142,7 +141,6 @@ class Network(nn.Module):
             "delta": delta.mean().item(),
             "critic_loss": critic_loss.item(),
             "curr_critic_value": curr_critic_value.mean().item(),
-            "next_critic_value": next_critic_value.mean().item(),
             "target_value": target_value.mean().item(),
         }
 

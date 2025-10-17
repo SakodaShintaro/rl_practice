@@ -218,8 +218,9 @@ class AvgAgent:
             info_dict[f"losses/{key}"] = value
 
         # Critic
+        target_value = self.network.compute_target_value(data)
         critic_loss, critic_activations, critic_info = self.network.compute_critic_loss(
-            data, curr_state
+            curr_state, data.actions[:, -1], target_value
         )
         for key, value in critic_info.items():
             info_dict[f"losses/{key}"] = value
