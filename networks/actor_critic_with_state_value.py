@@ -1,6 +1,7 @@
 import argparse
 
 import torch
+from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.distributions import Beta, Categorical
 from torch.nn import functional as F
@@ -13,6 +14,9 @@ from networks.value_head import StateValueHead
 
 
 class Network(nn.Module):
+    clip_param_policy = 0.2
+    clip_param_value = 0.2
+
     def __init__(
         self,
         observation_space_shape: tuple[int],
@@ -21,6 +25,7 @@ class Network(nn.Module):
     ) -> None:
         super().__init__()
         self.action_dim = action_space_shape[0]
+        self.num_bins = args.num_bins
 
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
@@ -61,6 +66,14 @@ class Network(nn.Module):
         else:
             raise ValueError("Invalid policy type")
         self.apply(self._init_weights)
+
+        if self.num_bins > 1:
+            self.hl_gauss_loss = HLGaussLoss(
+                min_value=-args.value_range,
+                max_value=+args.value_range,
+                num_bins=self.num_bins,
+                clamp_to_range=True,
+            )
 
     def _init_weights(self, module: nn.Module) -> None:
         """Initialize weights with orthogonal initialization.
@@ -122,3 +135,47 @@ class Network(nn.Module):
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (1, B, hidden_size)
         }
+
+    def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:
+        net_out_dict = self.forward(
+            data.rewards[:, :-1],
+            data.observations[:, :-1],
+            data.actions[:, :-1],
+            data.rnn_state[:, 0].permute(1, 0, 2).contiguous(),
+            action=data.actions[:, -1],
+        )
+        a_logp = net_out_dict["a_logp"]
+        entropy = net_out_dict["entropy"]
+        value = net_out_dict["value"]
+        ratio = torch.exp(a_logp - data.log_probs[:, -1])
+
+        surr1 = ratio * curr_adv
+        surr2 = (
+            torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
+            * curr_adv
+        )
+        action_loss = -torch.min(surr1, surr2).mean()
+
+        if self.num_bins > 1:
+            value_loss = self.hl_gauss_loss(value, curr_target_v.squeeze(1))
+        else:
+            value_clipped = torch.clamp(
+                value,
+                data.values[:, -1] - self.clip_param_value,
+                data.values[:, -1] + self.clip_param_value,
+            )
+            value_loss_unclipped = F.mse_loss(value, curr_target_v)
+            value_loss_clipped = F.mse_loss(value_clipped, curr_target_v)
+            value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
+
+        loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
+
+        activations_dict = {}
+
+        info_dict = {
+            "action_loss": action_loss.item(),
+            "value_loss": value_loss.item(),
+            "entropy": entropy.mean().item(),
+        }
+
+        return loss, activations_dict, info_dict

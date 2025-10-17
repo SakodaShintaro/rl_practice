@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--encoder",
         type=str,
-        default="spatial_temporal",
+        default="temporal_only",
         choices=["spatial_temporal", "temporal_only"],
     )
     parser.add_argument("--encoder_block_num", type=int, default=1)

@@ -1,11 +1,9 @@
 import numpy as np
 import torch
-import torch.nn.functional as F
-from hl_gauss_pytorch import HLGaussLoss
 from torch import nn, optim
 
 from networks.actor_critic_with_state_value import Network
-from replay_buffer import ReplayBuffer
+from replay_buffer import ReplayBuffer, ReplayBufferData
 
 
 class SequentialBatchSampler:
@@ -41,8 +39,6 @@ class SequentialBatchSampler:
 
 class PpoAgent:
     max_grad_norm = 5.0
-    clip_param_policy = 0.2
-    clip_param_value = 0.2
     ppo_epoch = 4
     gamma = 0.99
 
@@ -86,14 +82,6 @@ class PpoAgent:
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
-        if self.num_bins > 1:
-            self.hl_gauss_loss = HLGaussLoss(
-                min_value=-args.value_range,
-                max_value=+args.value_range,
-                num_bins=self.num_bins,
-                clamp_to_range=True,
-            ).to(self.device)
-
     def initialize_for_episode(self) -> None:
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0
@@ -123,7 +111,7 @@ class PpoAgent:
         self.rnn_state = result_dict["rnn_state"]
 
         if self.num_bins > 1:
-            value = self.hl_gauss_loss(value)
+            value = self.network.hl_gauss_loss(value)
 
         action = action.squeeze().cpu().numpy()
         a_logp = a_logp.item()
@@ -223,44 +211,24 @@ class PpoAgent:
                 drop_last=False,
             ):
                 indices = np.array(indices, dtype=np.int64)  # [B, T]
-                indices_input = indices[:, :-1]  # [B, self.seq_len]
-                index_curr = indices[:, -2]  # [B]
-                index_next = indices[:, -1]  # [B]
-
-                net_out_dict = self.network(
-                    r[indices_input],
-                    s[indices_input],
-                    a[indices_input],
-                    rnn_states[indices[:, 0]].permute(1, 0, 2).contiguous(),
-                    a[index_next],
+                data = ReplayBufferData(
+                    observations=s[indices],
+                    rewards=r[indices],
+                    dones=done[indices],
+                    rnn_state=rnn_states[indices],
+                    actions=a[indices],
+                    log_probs=old_a_logp[indices],
+                    values=v[indices],
                 )
-                a_logp = net_out_dict["a_logp"]
-                entropy = net_out_dict["entropy"]
-                value = net_out_dict["value"]
-                ratio = torch.exp(a_logp - old_a_logp[index_next])
+                curr_adv = adv[indices[:, -2]]
+                curr_target_v = target_v[indices[:, -2]]
 
-                surr1 = ratio * adv[index_curr]
-                surr2 = (
-                    torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
-                    * adv[index_curr]
+                loss, activations_dict, info_dict = self.network.compute_loss(
+                    data, curr_target_v, curr_adv
                 )
-                action_loss = -torch.min(surr1, surr2).mean()
 
-                if self.num_bins > 1:
-                    value_loss = self.hl_gauss_loss(value, target_v[index_curr].squeeze(1))
-                else:
-                    value_clipped = torch.clamp(
-                        value,
-                        v[index_next] - self.clip_param_value,
-                        v[index_next] + self.clip_param_value,
-                    )
-                    value_loss_unclipped = F.mse_loss(value, target_v[index_curr])
-                    value_loss_clipped = F.mse_loss(value_clipped, target_v[index_curr])
-                    value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
-
-                loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
-                sum_action_loss += action_loss.item() * len(index_curr)
-                sum_value_loss += value_loss.item() * len(index_curr)
+                sum_action_loss += info_dict["action_loss"] * len(data.observations)
+                sum_value_loss += info_dict["value_loss"] * len(data.observations)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -271,9 +239,9 @@ class PpoAgent:
             ave_value_loss = sum_value_loss / self.buffer_capacity
             ave_action_loss_list.append(ave_action_loss)
             ave_value_loss_list.append(ave_value_loss)
-        result_dict = {}
-        result_dict["ppo/average_action_loss"] = np.mean(ave_action_loss_list)
-        result_dict["ppo/average_value_loss"] = np.mean(ave_value_loss_list)
-        result_dict["ppo/average_target_v"] = target_v.mean().item()
-        result_dict["ppo/average_adv"] = adv.mean().item()
+
+        result_dict = {
+            "ppo/average_action_loss": np.mean(ave_action_loss_list),
+            "ppo/average_value_loss": np.mean(ave_value_loss_list),
+        }
         return result_dict
