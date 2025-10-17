@@ -153,41 +153,19 @@ class SacAgent:
         elif global_step == self.learning_starts:
             print(f"Start training at global step {global_step}.")
 
-        # training
+        # Sample data for training using ReplayBuffer
         data = self.rb.sample(self.batch_size)
 
-        # Compute all losses using refactored methods
-        obs_curr = data.observations[:, :-1]  # (B, T, C, H, W)
-        actions_curr = data.actions[:, :-1]  # (B, T, action_dim)
-        rewards_curr = data.rewards[:, :-1]  # (B, T)
-        rnn_state = data.rnn_state[:, :-1]  # (B, T, hidden_size)
-        rnn_state = rnn_state[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
-        state_curr, _ = self.network.encoder.forward(
-            obs_curr, actions_curr, rewards_curr, rnn_state
-        )
-
-        # Actor
-        actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(state_curr)
-        for key, value in actor_info.items():
-            info_dict[f"losses/{key}"] = value
-
-        # Critic
+        # compute target value
         target_value = self.network.compute_target_value(data)
-        critic_loss, critic_activations, critic_info = self.network.compute_critic_loss(
-            state_curr, data.actions[:, -1], target_value
-        )
-        for key, value in critic_info.items():
-            info_dict[f"losses/{key}"] = value
 
-        # Sequence modeling
-        sequence_loss, sequence_activations, sequence_info = self.network.compute_sequence_loss(
-            data, state_curr
-        )
-        for key, value in sequence_info.items():
-            info_dict[f"losses/{key}"] = value
+        # compute loss
+        loss, activation_dict, info_dict = self.network.compute_loss(data, target_value)
+
+        # add prefixes to info_dict keys
+        info_dict = {f"losses/{key}": value for key, value in info_dict.items()}
 
         # optimize the model
-        loss = actor_loss + critic_loss + sequence_loss
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -216,13 +194,7 @@ class SacAgent:
             apply_masks_during_training(self.network.state_predictor)
 
         # Feature metrics
-        feature_dict = {
-            "state": state_curr,
-            **actor_activations,
-            **critic_activations,
-            **sequence_activations,
-        }
-        for feature_name, feature in feature_dict.items():
+        for feature_name, feature in activation_dict.items():
             info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
 
             result_dict = self.metrics_computers[feature_name](feature)

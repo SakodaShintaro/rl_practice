@@ -100,6 +100,42 @@ class Network(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
+    def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
+        obs_curr = data.observations[:, :-1]
+        actions_curr = data.actions[:, :-1]
+        rewards_curr = data.rewards[:, :-1]
+        rnn_state_curr = data.rnn_state[:, :-1]  # (B, T, hidden_size)
+        rnn_state_curr = rnn_state_curr[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
+
+        state_curr, _ = self.encoder.forward(
+            obs_curr, actions_curr, rewards_curr, rnn_state_curr
+        )  # (B, state_dim)
+
+        action_curr = data.actions[:, -1]  # (B, action_dim)
+
+        critic_loss, critic_activations, critic_info = self._compute_critic_loss(
+            state_curr, action_curr, target_value
+        )
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr)
+
+        total_loss = critic_loss + actor_loss + seq_loss
+
+        activations_dict = {
+            "state": state_curr,
+            **critic_activations,
+            **actor_activations,
+            **seq_activations,
+        }
+
+        info_dict = {
+            **critic_info,
+            **actor_info,
+            **seq_info,
+        }
+
+        return total_loss, activations_dict, info_dict
+
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:
         obs_next = data.observations[:, 1:]
@@ -120,7 +156,11 @@ class Network(nn.Module):
         target_value = curr_reward + curr_continue * self.gamma * next_critic_value
         return target_value
 
-    def compute_critic_loss(self, curr_state, curr_action, target_value):
+    ####################
+    # Internal methods #
+    ####################
+
+    def _compute_critic_loss(self, curr_state, curr_action, target_value):
         if self.detach_critic:
             curr_state = curr_state.detach()
 
@@ -146,7 +186,7 @@ class Network(nn.Module):
 
         return critic_loss, activations_dict, info_dict
 
-    def compute_actor_loss(self, state_curr):
+    def _compute_actor_loss(self, state_curr):
         if self.detach_actor:
             state_curr = state_curr.detach()
         pi, log_pi = self.actor.get_action(state_curr)
@@ -217,7 +257,7 @@ class Network(nn.Module):
 
         return total_actor_loss, activations_dict, info_dict
 
-    def compute_sequence_loss(self, data, state_curr):
+    def _compute_sequence_loss(self, data, state_curr):
         if self.disable_state_predictor:
             # state_predictorを無効化する場合はダミー損失を返す
             dummy_loss = torch.tensor(0.0, device=state_curr.device, requires_grad=True)

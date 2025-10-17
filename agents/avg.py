@@ -134,12 +134,14 @@ class AvgAgent:
             "total": self.network,
             "actor": self.network.actor,
             "critic": self.network.critic,
+            "state_predictor": self.network.state_predictor,
         }
 
         self.metrics_computers = {
             "state": StatisticalMetricsComputer(),
             "actor": StatisticalMetricsComputer(),
             "critic": StatisticalMetricsComputer(),
+            "state_predictor": StatisticalMetricsComputer(),
         }
 
         lr = args.learning_rate
@@ -200,33 +202,19 @@ class AvgAgent:
         # Sample data for training using ReplayBuffer
         data = self.rb.get_latest(self.seq_len + 1)
 
-        # Encode current state
-        obs_curr = data.observations[:, :-1]
-        actions_curr = data.actions[:, :-1]
-        rewards_curr = data.rewards[:, :-1]
-        rnn_state_initial = (
-            data.rnn_state[:, 0].permute(1, 0, 2).contiguous()
-        )  # (1, B, hidden_size)
-
-        curr_state, _ = self.network.encoder.forward(
-            obs_curr, actions_curr, rewards_curr, rnn_state_initial
-        )
-
-        # Actor
-        actor_loss, actor_activations, actor_info = self.network.compute_actor_loss(curr_state)
-        for key, value in actor_info.items():
-            info_dict[f"losses/{key}"] = value
-
-        # Critic
+        # compute target value
         target_value = self.network.compute_target_value(data)
-        critic_loss, critic_activations, critic_info = self.network.compute_critic_loss(
-            curr_state, data.actions[:, -1], target_value
-        )
-        for key, value in critic_info.items():
-            info_dict[f"losses/{key}"] = value
+
+        # compute loss
+        loss, activation_dict, info_dict = self.network.compute_loss(data, target_value)
+
+        # store delta for ObGD
+        delta = info_dict["delta"]
+
+        # add prefixes to info_dict keys
+        info_dict = {f"losses/{key}": value for key, value in info_dict.items()}
 
         # optimize the model
-        loss = actor_loss + critic_loss
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -238,19 +226,14 @@ class AvgAgent:
             info_dict[f"gradients/{key}"] = compute_gradient_norm(value)
             info_dict[f"parameters/{key}"] = compute_parameter_norm(value)
 
+        # perform optimization step
         if self.use_eligibility_trace:
-            delta = critic_info["delta"]
             self.optimizer.step(delta, reset=terminated or truncated)
         else:
             self.optimizer.step()
 
         # Feature metrics
-        feature_dict = {
-            "state": curr_state,
-            **actor_activations,
-            **critic_activations,
-        }
-        for feature_name, feature in feature_dict.items():
+        for feature_name, feature in activation_dict.items():
             info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
 
             result_dict = self.metrics_computers[feature_name](feature)
