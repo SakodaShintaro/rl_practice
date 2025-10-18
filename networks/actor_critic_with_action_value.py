@@ -100,6 +100,38 @@ class Network(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
+    def forward(
+        self,
+        r_seq: torch.Tensor,  # (B, T, 1)
+        s_seq: torch.Tensor,  # (B, T, C, H, W)
+        a_seq: torch.Tensor,  # (B, T, action_dim)
+        rnn_state: torch.Tensor,  # (1, B, hidden_size)
+        action: torch.Tensor | None = None,  # (B, action_dim) or None
+    ) -> dict:
+        """Forward pass compatible with actor_critic_with_state_value interface.
+
+        This method encodes the sequence and returns action and action-value.
+        """
+        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
+
+        # Get action from actor
+        if action is None:
+            action, a_logp = self.actor.get_action(x)
+        else:
+            _, a_logp = self.actor.get_action(x)
+
+        # Get action-value from critic
+        q_dict = self.critic(x, action)
+        q_value = q_dict["output"]  # (B, 1) or (B, num_bins)
+
+        return {
+            "action": action,  # (B, action_dim)
+            "a_logp": a_logp,  # (B, 1)
+            "value": q_value,  # (B, 1) or (B, num_bins)
+            "x": x,  # (B, hidden_dim)
+            "rnn_state": rnn_state,  # (1, B, hidden_size)
+        }
+
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
         obs_curr = data.observations[:, :-1]
         actions_curr = data.actions[:, :-1]

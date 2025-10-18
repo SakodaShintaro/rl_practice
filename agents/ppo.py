@@ -2,7 +2,8 @@ import numpy as np
 import torch
 from torch import nn, optim
 
-from networks.actor_critic_with_state_value import Network
+from networks.actor_critic_with_action_value import Network as ActionValueNetwork
+from networks.actor_critic_with_state_value import Network as StateValueNetwork
 from replay_buffer import ReplayBuffer, ReplayBufferData
 
 
@@ -58,7 +59,16 @@ class PpoAgent:
         self.batch_size = args.batch_size
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
-        self.network = Network(observation_space.shape, action_space.shape, args).to(self.device)
+        self.use_action_value = args.use_action_value
+
+        if self.use_action_value:
+            self.network = ActionValueNetwork(
+                observation_space.shape, action_dim=self.action_dim, args=args
+            ).to(self.device)
+        else:
+            self.network = StateValueNetwork(observation_space.shape, action_space.shape, args).to(
+                self.device
+            )
         self.rnn_state = self.network.init_state().to(self.device)
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
@@ -223,12 +233,17 @@ class PpoAgent:
                 curr_adv = adv[indices[:, -2]]
                 curr_target_v = target_v[indices[:, -2]]
 
-                loss, activations_dict, info_dict = self.network.compute_loss(
-                    data, curr_target_v, curr_adv
-                )
+                if self.use_action_value:
+                    loss, activations_dict, info_dict = self.network.compute_loss(
+                        data, curr_target_v.squeeze(1)
+                    )
+                else:
+                    loss, activations_dict, info_dict = self.network.compute_loss(
+                        data, curr_target_v, curr_adv
+                    )
 
-                sum_action_loss += info_dict["action_loss"] * len(data.observations)
-                sum_value_loss += info_dict["value_loss"] * len(data.observations)
+                sum_action_loss += info_dict["actor_loss"] * len(data.observations)
+                sum_value_loss += info_dict["critic_loss"] * len(data.observations)
 
                 self.optimizer.zero_grad()
                 loss.backward()

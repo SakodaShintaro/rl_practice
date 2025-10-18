@@ -173,8 +173,8 @@ class Network(nn.Module):
         activations_dict = {}
 
         info_dict = {
-            "action_loss": action_loss.item(),
-            "value_loss": value_loss.item(),
+            "actor_loss": action_loss.item(),
+            "critic_loss": value_loss.item(),
             "entropy": entropy.mean().item(),
         }
 
