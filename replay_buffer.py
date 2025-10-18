@@ -30,9 +30,9 @@ class ReplayBuffer:
         self,
         size: int,
         seq_len: int,
-        obs_shape,
-        rnn_state_shape,
-        action_shape,
+        obs_shape: tuple[int, ...],
+        rnn_state_shape: tuple[int, ...],
+        action_shape: tuple[int, ...],
         output_device: torch.device,
         storage_device: torch.device,
     ) -> None:

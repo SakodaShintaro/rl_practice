@@ -9,9 +9,9 @@ import numpy as np
 import torch
 from torch import optim
 
-from agents.sac import Network
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from metrics.statistical_metrics_computer import StatisticalMetricsComputer
+from networks.actor_critic_with_action_value import Network
 from replay_buffer import ReplayBuffer
 
 

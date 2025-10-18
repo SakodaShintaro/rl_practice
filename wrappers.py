@@ -72,7 +72,7 @@ class ReduceActionSpaceWrapper(gym.Wrapper):
     For MiniGrid Memory environments, reduce to 3 actions: turn left, turn right, move forward.
     """
 
-    def __init__(self, env, n_actions=3):
+    def __init__(self, env, n_actions):
         super().__init__(env)
         self.n_actions = n_actions
         self.action_space = gym.spaces.Discrete(n_actions)
@@ -89,7 +89,7 @@ class ActionRepeatWrapper(gym.Wrapper):
     Repeat the same action for multiple steps
     """
 
-    def __init__(self, env, repeat=8):
+    def __init__(self, env, repeat):
         super().__init__(env)
         self.repeat = repeat
 
