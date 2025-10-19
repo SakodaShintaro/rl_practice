@@ -3,7 +3,7 @@ set -eux
 
 cd $(dirname $0)
 
-python3 train.py baseline \
+python3 train.py score \
   --env_id CarRacing-v3 \
   --agent_type on_policy \
   --use_action_value=0 \
@@ -16,7 +16,7 @@ python3 train.py baseline \
   --num_bins 1 \
   --value_range 60.0 \
   --learning_rate 1e-4 \
-  --step_limit 400_000 \
+  --step_limit 80_000 \
   --eval_range 20 \
   --disable_state_predictor=0 \
   --policy_type Beta \
