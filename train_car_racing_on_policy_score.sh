@@ -21,3 +21,4 @@ python3 train.py baseline \
   --step_limit 400_000 \
   --eval_range 20 \
   --disable_state_predictor=0 \
+  --policy_type Beta \
