@@ -70,11 +70,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
     parser.add_argument("--buffer_device", type=str, default="cuda")
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--debug", action="store_true")
 
     # for off_policy
     parser.add_argument("--buffer_size", type=int, default=int(2e5))
-    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=int(2e4))
     parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_weight_projection", action="store_true")
