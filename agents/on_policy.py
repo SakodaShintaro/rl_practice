@@ -60,6 +60,8 @@ class OnPolicyAgent:
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
         self.use_action_value = args.use_action_value
+        self.action_norm_penalty = args.action_norm_penalty
+        self.reward_scale = args.reward_scale
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
@@ -101,9 +103,12 @@ class OnPolicyAgent:
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
+        action_norm = np.linalg.norm(self.prev_action)
+        train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
+
         self.latest_buffer.add(
             torch.from_numpy(obs).to(self.device),
-            reward,
+            train_reward,
             terminated or truncated,
             self.rnn_state.squeeze(0),
             torch.from_numpy(self.prev_action).to(self.device),
@@ -133,6 +138,8 @@ class OnPolicyAgent:
         action_info = {
             "a_logp": a_logp,
             "value": value,
+            "action_norm": action_norm,
+            "train_reward": train_reward,
         }
 
         for key in ["x", "value_x", "policy_x"]:
@@ -153,10 +160,14 @@ class OnPolicyAgent:
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
+        # compute train reward
+        action_norm = np.linalg.norm(self.prev_action)
+        train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
+
         # store data to buffer
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
-            reward,
+            train_reward,
             terminated or truncated,
             self.rnn_state.squeeze(0),
             torch.from_numpy(self.prev_action).to(self.device),
