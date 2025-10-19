@@ -9,8 +9,6 @@ python3 train.py baseline \
   --use_action_value=0 \
   --reward_scale 0.1 \
   --action_norm_penalty 1.0 \
-  --buffer_size 20000 \
-  --learning_starts 2000 \
   --target_score 800.0 \
   --encoder spatial_temporal \
   --tempo_block_type transformer \
