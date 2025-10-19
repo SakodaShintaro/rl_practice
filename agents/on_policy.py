@@ -267,7 +267,7 @@ class OnPolicyAgent:
             ave_value_loss_list.append(ave_value_loss)
 
         result_dict = {
-            "on_policy/average_action_loss": np.mean(ave_action_loss_list),
-            "on_policy/average_value_loss": np.mean(ave_value_loss_list),
+            "losses/actor_loss": np.mean(ave_action_loss_list),
+            "losses/critic_loss": np.mean(ave_value_loss_list),
         }
         return result_dict
