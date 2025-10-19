@@ -13,7 +13,6 @@ import numpy as np
 import torch
 
 import wandb
-from agents.avg import AvgAgent
 from agents.off_policy import OffPolicyAgent
 from agents.on_policy import OnPolicyAgent
 from utils import create_full_image_with_reward
@@ -36,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         ],
     )
     parser.add_argument(
-        "--agent_type", type=str, default="on_policy", choices=["off_policy", "avg", "on_policy"]
+        "--agent_type", type=str, default="on_policy", choices=["off_policy", "on_policy"]
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -158,8 +157,6 @@ def main(args, exp_name: str, seed: int) -> None:
 
     if args.agent_type == "off_policy":
         agent = OffPolicyAgent(args, env.observation_space, env.action_space)
-    elif args.agent_type == "avg":
-        agent = AvgAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "on_policy":
         agent = OnPolicyAgent(args, env.observation_space, env.action_space)
     else:
