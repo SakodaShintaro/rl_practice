@@ -57,7 +57,7 @@ class Network(nn.Module):
             sparsity=0.0,
         )
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
-        self.policy_type = "Categorical"
+        self.policy_type = args.policy_type
         if self.policy_type == "Beta":
             self.alpha_head = nn.Linear(hidden_dim, self.action_dim)
             self.beta_head = nn.Linear(hidden_dim, self.action_dim)

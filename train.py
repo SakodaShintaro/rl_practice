@@ -87,9 +87,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.8, type=float)
 
-    # for PPO/Recurrent PPO
+    # for PPO
     parser.add_argument("--buffer_capacity", type=int, default=4096)
     parser.add_argument("--use_action_value", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--policy_type", type=str, default="Categorical", choices=["Beta", "Categorical"])
 
     return parser.parse_args()
 
