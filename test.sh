@@ -5,4 +5,3 @@ python3 train.py test --debug --agent_type off_policy --encoder spatial_temporal
 python3 train.py test --debug --agent_type off_policy --encoder temporal_only
 python3 train.py test --debug --agent_type on_policy --encoder temporal_only
 python3 train.py test --debug --agent_type on_policy --encoder temporal_only --use_action_value=1
-python3 train.py test --debug --agent_type avg --encoder spatial_temporal --tempo_block_type transformer
