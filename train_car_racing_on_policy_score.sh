@@ -5,7 +5,7 @@ cd $(dirname $0)
 
 python3 train.py baseline \
   --env_id CarRacing-v3 \
-  --agent_type ppo \
+  --agent_type on_policy \
   --use_action_value=0 \
   --reward_scale 0.1 \
   --action_norm_penalty 1.0 \

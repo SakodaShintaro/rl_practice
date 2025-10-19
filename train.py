@@ -14,8 +14,8 @@ import torch
 
 import wandb
 from agents.avg import AvgAgent
-from agents.ppo import PpoAgent
-from agents.sac import SacAgent
+from agents.off_policy import OffPolicyAgent
+from agents.on_policy import OnPolicyAgent
 from utils import create_full_image_with_reward
 from wrappers import make_env
 
@@ -35,7 +35,9 @@ def parse_args() -> argparse.Namespace:
             "MiniGrid-MemoryS11-v0",
         ],
     )
-    parser.add_argument("--agent_type", type=str, default="ppo", choices=["sac", "avg", "ppo"])
+    parser.add_argument(
+        "--agent_type", type=str, default="on_policy", choices=["off_policy", "avg", "on_policy"]
+    )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--target_score", type=float, default=0.95)
@@ -71,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--debug", action="store_true")
 
-    # for SAC
+    # for off_policy
     parser.add_argument("--buffer_size", type=int, default=int(2e5))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_starts", type=int, default=int(2e4))
@@ -87,10 +89,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_eligibility_trace", action="store_true")
     parser.add_argument("--et_lambda", default=0.8, type=float)
 
-    # for PPO
+    # for on_policy
     parser.add_argument("--buffer_capacity", type=int, default=4096)
     parser.add_argument("--use_action_value", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--policy_type", type=str, default="Categorical", choices=["Beta", "Categorical"])
+    parser.add_argument(
+        "--policy_type", type=str, default="Categorical", choices=["Beta", "Categorical"]
+    )
 
     return parser.parse_args()
 
@@ -152,12 +156,12 @@ def main(args, exp_name: str, seed: int) -> None:
     obs, _ = env.reset(seed=seed)
     step_limit = args.step_limit
 
-    if args.agent_type == "sac":
-        agent = SacAgent(args, env.observation_space, env.action_space)
+    if args.agent_type == "off_policy":
+        agent = OffPolicyAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "avg":
         agent = AvgAgent(args, env.observation_space, env.action_space)
-    elif args.agent_type == "ppo":
-        agent = PpoAgent(args, env.observation_space, env.action_space)
+    elif args.agent_type == "on_policy":
+        agent = OnPolicyAgent(args, env.observation_space, env.action_space)
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 

@@ -10,7 +10,7 @@ from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
 
 
-class SacAgent:
+class OffPolicyAgent:
     def __init__(self, args, observation_space, action_space) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

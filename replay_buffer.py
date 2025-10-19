@@ -70,7 +70,7 @@ class ReplayBuffer:
         self.full = False
 
     def get_all_data(self) -> ReplayBufferData:
-        """Get all data in the buffer (for PPO training)"""
+        """Get all data in the buffer (for on-policy training)"""
         curr_size = self.size if self.full else self.idx
         return ReplayBufferData(
             self.observations[:curr_size].to(self.output_device, non_blocking=True),

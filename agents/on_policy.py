@@ -38,9 +38,9 @@ class SequentialBatchSampler:
             return (num_samples + self.batch_size - 1) // self.batch_size
 
 
-class PpoAgent:
+class OnPolicyAgent:
     max_grad_norm = 5.0
-    ppo_epoch = 4
+    on_policy_epoch = 4
     gamma = 0.99
 
     def __init__(self, args, observation_space, action_space) -> None:
@@ -211,7 +211,7 @@ class PpoAgent:
 
         ave_action_loss_list = []
         ave_value_loss_list = []
-        for _ in range(self.ppo_epoch):
+        for _ in range(self.on_policy_epoch):
             sum_action_loss = 0.0
             sum_value_loss = 0.0
             for indices in SequentialBatchSampler(
@@ -256,7 +256,7 @@ class PpoAgent:
             ave_value_loss_list.append(ave_value_loss)
 
         result_dict = {
-            "ppo/average_action_loss": np.mean(ave_action_loss_list),
-            "ppo/average_value_loss": np.mean(ave_value_loss_list),
+            "on_policy/average_action_loss": np.mean(ave_action_loss_list),
+            "on_policy/average_value_loss": np.mean(ave_value_loss_list),
         }
         return result_dict
