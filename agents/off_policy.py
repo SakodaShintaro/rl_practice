@@ -145,7 +145,7 @@ class OffPolicyAgent:
     # Internal methods #
     ####################
 
-    def _train(self, global_step, obs, reward, termination, truncation) -> dict:
+    def _train(self, global_step, obs, reward, terminated, truncated) -> dict:
         info_dict = {}
 
         if global_step < self.learning_starts:
