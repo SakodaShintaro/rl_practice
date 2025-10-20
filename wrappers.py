@@ -20,6 +20,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = RewardProcessorInfoWrapper(env)
+        env = ZeroObsOnDoneWrapper(env)
         return env
 
     elif env_id == "MiniGrid-MemoryS11-v0":
@@ -30,6 +31,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = RewardProcessorInfoWrapper(env)
+        env = ZeroObsOnDoneWrapper(env)
         return env
 
     elif env_id == "CarRacing-v3":
@@ -41,6 +43,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = RewardProcessorInfoWrapper(env)
+        env = ZeroObsOnDoneWrapper(env)
         return env
 
     else:
@@ -204,5 +207,26 @@ class RewardProcessorInfoWrapper(gym.Wrapper):
         # Add all processed rewards to info
         for key, processor in self.processors.items():
             info[key] = processor.normalize(reward)
+
+        return obs, reward, terminated, truncated, info
+
+
+class ZeroObsOnDoneWrapper(gym.ObservationWrapper):
+    """
+    Zero out observations when episode is terminated or truncated.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+
+    def observation(self, obs):
+        return obs
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # Zero out observation if episode is done
+        if terminated or truncated:
+            obs = np.zeros_like(obs)
 
         return obs, reward, terminated, truncated, info
