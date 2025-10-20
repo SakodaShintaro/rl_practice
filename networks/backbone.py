@@ -86,11 +86,12 @@ class SpatialTemporalEncoder(nn.Module):
         temporal_model_type: str,
         image_processor_type: str,
         freeze_image_processor: bool,
-        use_action_reward: bool,
+        use_image_only: bool,
     ):
         super().__init__()
 
         self.freeze_image_processor = freeze_image_processor
+        self.use_image_only = use_image_only
 
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=image_processor_type
@@ -117,8 +118,6 @@ class SpatialTemporalEncoder(nn.Module):
             res_drop_prob=0.0,
             temporal_model_type=temporal_model_type,
         )
-
-        self.use_image_only = True
 
         token_num = (
             self.image_tokens_num
@@ -204,7 +203,7 @@ class TemporalOnlyEncoder(nn.Module):
         temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
         image_processor_type: 画像プロセッサのタイプ ("ae" or "simple_cnn")
         freeze_image_processor: image_processorの勾配を切るかどうか
-        use_action_reward: action, rewardも入れるか
+        use_image_only: 画像のみを使うか（Falseならaction, rewardも入れる）
     """
 
     def __init__(
@@ -216,13 +215,13 @@ class TemporalOnlyEncoder(nn.Module):
         temporal_model_type: str,
         image_processor_type: str,
         freeze_image_processor: bool,
-        use_action_reward: bool,
+        use_image_only: bool,
     ):
         super().__init__()
 
         self.temporal_model_type = temporal_model_type
         self.freeze_image_processor = freeze_image_processor
-        self.use_action_reward = use_action_reward
+        self.use_image_only = use_image_only
 
         # Image processor
         self.image_processor = ImageProcessor(
@@ -248,7 +247,7 @@ class TemporalOnlyEncoder(nn.Module):
         elif temporal_model_type == "transformer":
             # Transformerベースの実装 (SimpleTransformerEncoderと同様)
             # シーケンス長の計算 (action, rewardを含む場合は3倍)
-            max_seq_len = seq_len * 3 if use_action_reward else seq_len
+            max_seq_len = seq_len if use_image_only else seq_len * 3
 
             n_heads = 8
 
@@ -302,7 +301,10 @@ class TemporalOnlyEncoder(nn.Module):
         h = F.relu(self.lin_hidden_in(h))  # (B*T, hidden_size)
         h = h.reshape(B, T, -1)  # (B, T, hidden_size)
 
-        if self.use_action_reward:
+        if self.use_image_only:
+            # 画像のみ
+            sequence = h  # (B, T, d_model)
+        else:
             # action, rewardを埋め込み
             action_emb = get_fourier_embeds_from_coordinates(
                 self.output_dim, actions
@@ -317,9 +319,6 @@ class TemporalOnlyEncoder(nn.Module):
             # Interleave: [s_0, a_0, r_0, s_1, a_1, r_1, ...]
             sequence = torch.stack([h, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
             sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
-        else:
-            # 画像のみ
-            sequence = h  # (B, T, d_model)
 
         # 時系列モデルによって処理を分岐
         if self.temporal_model_type == "gru":

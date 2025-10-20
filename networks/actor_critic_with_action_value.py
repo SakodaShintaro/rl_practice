@@ -40,7 +40,7 @@ class Network(nn.Module):
                 temporal_model_type=args.temporal_model_type,
                 image_processor_type="ae",
                 freeze_image_processor=True,
-                use_action_reward=False,
+                use_image_only=True,
             )
         elif args.encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
@@ -51,7 +51,7 @@ class Network(nn.Module):
                 temporal_model_type=args.temporal_model_type,
                 image_processor_type="simple_cnn",
                 freeze_image_processor=False,
-                use_action_reward=False,
+                use_image_only=True,
             )
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")

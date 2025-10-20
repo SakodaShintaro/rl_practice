@@ -95,7 +95,7 @@ if __name__ == "__main__":
                 temporal_model_type="transformer",
                 image_processor_type="ae",
                 freeze_image_processor=False,
-                use_action_reward=False,
+                use_image_only=True,
             )
         )
     elif args.encoder == "simple_transformer":
@@ -116,7 +116,7 @@ if __name__ == "__main__":
                 temporal_model_type="transformer",
                 image_processor_type="ae",
                 freeze_image_processor=False,
-                use_action_reward=False,
+                use_image_only=True,
             )
         )
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
