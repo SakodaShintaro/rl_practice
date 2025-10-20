@@ -61,6 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_bins", type=int, default=51)
     parser.add_argument("--value_range", type=float, default=2.0)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
+    parser.add_argument("--max_grad_norm", type=float, default=5.0)
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--step_limit", type=int, default=1_000_000)

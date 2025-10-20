@@ -30,6 +30,7 @@ class OffPolicyAgent:
         self.batch_size = args.batch_size
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
+        self.max_grad_norm = args.max_grad_norm
 
         # Sequence observation management
         self.seq_len = args.seq_len
@@ -170,7 +171,7 @@ class OffPolicyAgent:
         loss.backward()
 
         # Clip gradients
-        torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
 
         # Gradient and parameter norms
         for key, value in self.monitoring_targets.items():

@@ -39,7 +39,6 @@ class SequentialBatchSampler:
 
 
 class OnPolicyAgent:
-    max_grad_norm = 5.0
     on_policy_epoch = 4
     gamma = 0.99
 
@@ -62,6 +61,7 @@ class OnPolicyAgent:
         self.use_action_value = args.use_action_value
         self.action_norm_penalty = args.action_norm_penalty
         self.reward_scale = args.reward_scale
+        self.max_grad_norm = args.max_grad_norm
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
