@@ -199,7 +199,7 @@ class TemporalOnlyEncoder(nn.Module):
     Args:
         observation_space_shape: 観測空間の形状 [C, H, W]
         seq_len: シーケンス長
-        n_layer: レイヤー数 (未使用)
+        n_layer: レイヤー数 (GRUならnum_layers、transformerならブロック数)
         action_dim: アクションの次元 (未使用)
         temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
         image_processor_type: 画像プロセッサのタイプ ("ae" or "simple_cnn")
@@ -241,7 +241,9 @@ class TemporalOnlyEncoder(nn.Module):
         # 時系列モデルのタイプによって構造を変える
         if temporal_model_type == "gru":
             # GRUベースの実装
-            self.recurrent_layer = nn.GRU(self.output_dim, self.output_dim, batch_first=True)
+            self.recurrent_layer = nn.GRU(
+                self.output_dim, self.output_dim, num_layers=n_layer, batch_first=True
+            )
 
         elif temporal_model_type == "transformer":
             # Transformerベースの実装 (SimpleTransformerEncoderと同様)
@@ -249,7 +251,6 @@ class TemporalOnlyEncoder(nn.Module):
             max_seq_len = seq_len * 3 if use_action_reward else seq_len
 
             n_heads = 8
-            n_blocks = 2
 
             # Positional encoding
             self.pos_encoding = nn.Parameter(torch.randn(max_seq_len, self.output_dim))
@@ -261,7 +262,7 @@ class TemporalOnlyEncoder(nn.Module):
                 attn_drop_prob=0.0,
                 res_drop_prob=0.0,
             )
-            self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(n_blocks)])
+            self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(n_layer)])
 
             # Causal mask
             matrix = torch.tril(torch.ones(max_seq_len, max_seq_len))
