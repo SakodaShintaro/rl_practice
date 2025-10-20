@@ -16,6 +16,6 @@ python3 train.py pathwise \
   --num_bins 1 \
   --value_range 60.0 \
   --learning_rate 1e-4 \
-  --step_limit 80_000 \
+  --step_limit 200_000 \
   --eval_range 20 \
   --disable_state_predictor=0 \
