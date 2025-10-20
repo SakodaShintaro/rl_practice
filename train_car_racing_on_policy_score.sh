@@ -11,7 +11,7 @@ python3 train.py score \
   --action_norm_penalty 1.0 \
   --target_score 800.0 \
   --encoder spatial_temporal \
-  --tempo_block_type transformer \
+  --temporal_model_type transformer \
   --seq_len 8 \
   --num_bins 1 \
   --value_range 60.0 \

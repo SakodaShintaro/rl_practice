@@ -82,12 +82,19 @@ class SpatialTemporalEncoder(nn.Module):
         observation_space_shape: tuple[int],
         seq_len: int,
         n_layer: int,
-        tempo_block_type: str,
         action_dim: int,
+        temporal_model_type: str,
+        image_processor_type: str,
+        freeze_image_processor: bool,
+        use_action_reward: bool,
     ):
         super().__init__()
 
-        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+        self.freeze_image_processor = freeze_image_processor
+
+        self.image_processor = ImageProcessor(
+            observation_space_shape, processor_type=image_processor_type
+        )
 
         # image_processor outputs [B, C, H, W] -> treat as [B, H * W, C] (H * W tokens, C channels each)
         self.hidden_image_dim = self.image_processor.output_shape[0]
@@ -108,7 +115,7 @@ class SpatialTemporalEncoder(nn.Module):
             n_head=1,
             attn_drop_prob=0.0,
             res_drop_prob=0.0,
-            tempo_block_type=tempo_block_type,
+            temporal_model_type=temporal_model_type,
         )
 
         self.use_image_only = True
@@ -145,11 +152,16 @@ class SpatialTemporalEncoder(nn.Module):
         # Reshape to process all frames: (B*T, C, H, W)
         all_frames = images.reshape(-1, *images.shape[2:])
 
-        with torch.no_grad():
+        if self.freeze_image_processor:
+            with torch.no_grad():
+                # Encode all frames at once
+                all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
+        else:
             # Encode all frames at once
             all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
-            all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
-            image_embed = all_latents.flatten(3).transpose(2, 3)  # [B, T, S(=H'*W'), C']
+
+        all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
+        image_embed = all_latents.flatten(3).transpose(2, 3)  # [B, T, S(=H'*W'), C']
 
         # [B, T, action_dim] -> [B, T, action_dim, C']
         action_embed = get_fourier_embeds_from_coordinates(self.hidden_image_dim, actions)
@@ -187,6 +199,8 @@ class TemporalOnlyEncoder(nn.Module):
     Args:
         observation_space_shape: 観測空間の形状 [C, H, W]
         seq_len: シーケンス長
+        n_layer: レイヤー数 (未使用)
+        action_dim: アクションの次元 (未使用)
         temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
         image_processor_type: 画像プロセッサのタイプ ("ae" or "simple_cnn")
         freeze_image_processor: image_processorの勾配を切るかどうか
@@ -197,6 +211,8 @@ class TemporalOnlyEncoder(nn.Module):
         self,
         observation_space_shape: tuple[int],
         seq_len: int,
+        n_layer: int,
+        action_dim: int,
         temporal_model_type: str,
         image_processor_type: str,
         freeze_image_processor: bool,

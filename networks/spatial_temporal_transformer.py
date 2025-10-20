@@ -157,14 +157,14 @@ class MambaBlock(nn.Module):
 
 
 class SpatialTemporalBlock(nn.Module):
-    def __init__(self, config, tempo_block_type):
+    def __init__(self, config, temporal_model_type):
         super().__init__()
-        if tempo_block_type == "mamba":
+        if temporal_model_type == "mamba":
             self.tempo_block = MambaBlock(config)
-        elif tempo_block_type == "transformer":
+        elif temporal_model_type == "transformer":
             self.tempo_block = TransformerBlock(config)
         else:
-            raise ValueError(f"Unknown tempo_block_type: {tempo_block_type}")
+            raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = TransformerBlock(config)
 
     def forward(self, x, attn_mask):
@@ -187,7 +187,7 @@ class SpatialTemporalTransformer(nn.Module):
         n_head: int,
         attn_drop_prob: float,
         res_drop_prob: float,
-        tempo_block_type: str,
+        temporal_model_type: str,
     ):
         super().__init__()
         config = Config(
@@ -206,7 +206,7 @@ class SpatialTemporalTransformer(nn.Module):
         nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
         self.spatial_temporal_blocks = nn.Sequential(
-            *[SpatialTemporalBlock(config, tempo_block_type) for _ in range(self.n_layer)]
+            *[SpatialTemporalBlock(config, temporal_model_type) for _ in range(self.n_layer)]
         )
 
         self.apply(self._init_weights)

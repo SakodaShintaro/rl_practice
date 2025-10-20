@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument(
-        "--tempo_block_type", type=str, default="gru", choices=["transformer", "mamba", "gru"]
+        "--temporal_model_type", type=str, default="gru", choices=["transformer", "mamba", "gru"]
     )
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)

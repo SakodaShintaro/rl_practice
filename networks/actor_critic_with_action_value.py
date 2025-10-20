@@ -36,14 +36,19 @@ class Network(nn.Module):
                 observation_space_shape,
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
-                tempo_block_type=args.tempo_block_type,
                 action_dim=action_dim,
+                temporal_model_type=args.temporal_model_type,
+                image_processor_type="ae",
+                freeze_image_processor=True,
+                use_action_reward=False,
             )
         elif args.encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
                 observation_space_shape,
                 seq_len=self.seq_len,
-                temporal_model_type=args.tempo_block_type,
+                n_layer=args.encoder_block_num,
+                action_dim=action_dim,
+                temporal_model_type=args.temporal_model_type,
                 image_processor_type="simple_cnn",
                 freeze_image_processor=False,
                 use_action_reward=False,

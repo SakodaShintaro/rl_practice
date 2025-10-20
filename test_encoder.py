@@ -84,9 +84,19 @@ if __name__ == "__main__":
     # エンコーダーの初期化
     print("Initializing Encoder")
     target_encoder_list = []
+    observation_space_shape = (3, 96, 96)
     if args.encoder == "spatial_temporal":
         target_encoder_list.append(
-            SpatialTemporalEncoder(num_images, device, "transformer", action_dim=3)
+            SpatialTemporalEncoder(
+                observation_space_shape=observation_space_shape,
+                seq_len=seq_len,
+                n_layer=1,
+                action_dim=3,
+                temporal_model_type="transformer",
+                image_processor_type="ae",
+                freeze_image_processor=False,
+                use_action_reward=False,
+            )
         )
     elif args.encoder == "simple_transformer":
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
@@ -98,7 +108,16 @@ if __name__ == "__main__":
         target_encoder_list.append(QwenVLEncoder(num_images, device))
     else:  # all
         target_encoder_list.append(
-            SpatialTemporalEncoder(num_images, device, "transformer", action_dim=3)
+            SpatialTemporalEncoder(
+                observation_space_shape=observation_space_shape,
+                seq_len=seq_len,
+                n_layer=1,
+                action_dim=3,
+                temporal_model_type="transformer",
+                image_processor_type="ae",
+                freeze_image_processor=False,
+                use_action_reward=False,
+            )
         )
         target_encoder_list.append(SimpleTransformerEncoder(num_images, device))
         target_encoder_list.append(MMMambaEncoder(num_images, device))
