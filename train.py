@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main(args, exp_name: str, seed: int) -> None:
+def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     wandb.init(
         project=f"rl_practice_{args.env_id}",
         config=vars(args),

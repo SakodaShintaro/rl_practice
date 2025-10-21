@@ -191,7 +191,7 @@ class OnPolicyAgent:
     # Internal methods #
     ####################
 
-    def _train(self, last_value: float) -> None:
+    def _train(self, last_value: float) -> dict:
         buffer_data = self.rb.get_all_data()
         s = buffer_data.observations
         a = buffer_data.actions
