@@ -10,6 +10,7 @@ from networks.backbone import (
     SpatialTemporalEncoder,
     TemporalOnlyEncoder,
 )
+from networks.prediction_head import StatePredictionHead
 from networks.value_head import StateValueHead
 
 
@@ -26,6 +27,8 @@ class Network(nn.Module):
         super().__init__()
         self.action_dim = action_space_shape[0]
         self.num_bins = args.num_bins
+        self.observation_space_shape = observation_space_shape
+        self.predictor_step_num = args.predictor_step_num
 
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
@@ -53,6 +56,8 @@ class Network(nn.Module):
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
         hidden_dim = self.encoder.output_dim
+        hidden_image_dim = self.encoder.image_processor.output_shape[0]
+
         self.linear = nn.Linear(hidden_dim, hidden_dim)
         self.value_head = StateValueHead(
             in_channels=hidden_dim,
@@ -70,6 +75,16 @@ class Network(nn.Module):
             self.logits_head = nn.Linear(hidden_dim, self.action_dim)
         else:
             raise ValueError("Invalid policy type")
+
+        self.prediction_head = StatePredictionHead(
+            hidden_image_dim=hidden_image_dim,
+            action_dim=self.action_dim,
+            predictor_hidden_dim=args.predictor_hidden_dim,
+            predictor_block_num=args.predictor_block_num,
+        )
+
+        self.disable_state_predictor = args.disable_state_predictor
+
         self.apply(self._init_weights)
 
         if self.num_bins > 1:
@@ -184,3 +199,14 @@ class Network(nn.Module):
         }
 
         return loss, activations_dict, info_dict
+
+    @torch.inference_mode()
+    def predict_next_state(self, state_curr, action_curr):
+        return self.prediction_head.predict_next_state(
+            state_curr,
+            action_curr,
+            self.encoder.image_processor,
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )

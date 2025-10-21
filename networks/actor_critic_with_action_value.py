@@ -10,9 +10,8 @@ from networks.backbone import (
     SpatialTemporalEncoder,
     TemporalOnlyEncoder,
 )
-from networks.epona.flux_dit import FluxDiT
-from networks.epona.layers import LinearEmbedder
 from networks.policy_head import DiffusionPolicy
+from networks.prediction_head import StatePredictionHead
 from networks.value_head import ActionValueHead
 
 
@@ -57,7 +56,6 @@ class Network(nn.Module):
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
         hidden_image_dim = self.encoder.image_processor.output_shape[0]
-        self.reward_encoder = LinearEmbedder(hidden_image_dim)
 
         self.actor = DiffusionPolicy(
             state_dim=self.encoder.output_dim,
@@ -74,19 +72,11 @@ class Network(nn.Module):
             num_bins=self.num_bins,
             sparsity=args.sparsity,
         )
-        self.state_predictor = FluxDiT(
-            in_channels=hidden_image_dim,
-            out_channels=hidden_image_dim,
-            vec_in_dim=action_dim,
-            context_in_dim=hidden_image_dim,
-            hidden_size=args.predictor_hidden_dim,
-            mlp_ratio=4.0,
-            num_heads=8,
-            depth_double_blocks=args.predictor_block_num,
-            depth_single_blocks=args.predictor_block_num,
-            axes_dim=[64],
-            theta=10000,
-            qkv_bias=True,
+        self.prediction_head = StatePredictionHead(
+            hidden_image_dim=hidden_image_dim,
+            action_dim=action_dim,
+            predictor_hidden_dim=args.predictor_hidden_dim,
+            predictor_block_num=args.predictor_block_num,
         )
 
         self.detach_actor = args.detach_actor
@@ -317,7 +307,7 @@ class Network(nn.Module):
             target_state_next = target_state_next.flatten(2).permute(0, 2, 1)  # (B, H'*W', C')
 
         reward_next = data.rewards[:, -1]  # (B, 1)
-        target_reward_next = self.reward_encoder.encode(reward_next)  # (B, C')
+        target_reward_next = self.prediction_head.reward_encoder.encode(reward_next)  # (B, C')
         x1 = torch.cat([target_state_next, target_reward_next], dim=1)  # (B, H'*W'+1, C')
 
         # Flow Matching for state prediction
@@ -332,7 +322,7 @@ class Network(nn.Module):
         state_curr = state_curr.view(B, -1, C)
 
         # Predict velocity for state
-        pred_dict = self.state_predictor.forward(xt, t, state_curr, action_curr)
+        pred_dict = self.prediction_head.state_predictor.forward(xt, t, state_curr, action_curr)
         pred_vt = pred_dict["output"]  # (B, H*W, C)
 
         # Flow Matching loss
@@ -347,51 +337,11 @@ class Network(nn.Module):
 
     @torch.inference_mode()
     def predict_next_state(self, state_curr, action_curr) -> tuple[np.ndarray, float]:
-        if self.disable_state_predictor:
-            # state_predictorを無効化する場合は0埋めの値を返す
-            # 元の観測サイズと同じ0埋め画像を返す
-            # observation_space_shapeは(C, H, W)の形式
-            H = self.observation_space_shape[1]
-            W = self.observation_space_shape[2]
-
-            # 0埋めの画像を返す (H, W, 3)の形式
-            next_image = np.zeros((H, W, 3), dtype=np.float32)
-            next_reward = 0.0
-            return next_image, next_reward
-
-        device = state_curr.device
-        B = state_curr.size(0)
-        C = self.encoder.image_processor.output_shape[0]
-        H = self.encoder.image_processor.output_shape[1]
-        W = self.encoder.image_processor.output_shape[2]
-        state_curr = state_curr.view(B, -1, C)
-        noise_shape = (B, (H * W) + 1, C)
-        normal = torch.distributions.Normal(
-            torch.zeros(noise_shape, device=device),
-            torch.ones(noise_shape, device=device),
+        return self.prediction_head.predict_next_state(
+            state_curr,
+            action_curr,
+            self.encoder.image_processor,
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
         )
-        next_hidden_state = normal.sample().to(device)
-        next_hidden_state = torch.clamp(next_hidden_state, -3.0, 3.0)
-        dt = 1.0 / self.predictor_step_num
-
-        curr_time = torch.zeros((B), device=device)
-
-        for _ in range(self.predictor_step_num):
-            tmp_dict = self.state_predictor.forward(
-                next_hidden_state, curr_time, state_curr, action_curr
-            )
-            vt = tmp_dict["output"]  # (B, H*W + 1, C)
-            next_hidden_state = next_hidden_state + dt * vt
-            curr_time += dt
-
-        image_part = next_hidden_state[:, :-1, :]  # (B, H*W, C)
-        image_part = image_part.permute(0, 2, 1).view(B, C, H, W)  # (B, C, H, W)
-        next_image = self.encoder.image_processor.decode(image_part)
-        next_image = next_image.detach().cpu().numpy()
-        next_image = next_image.squeeze(0)
-        next_image = next_image.transpose(1, 2, 0)
-
-        reward_part = next_hidden_state[:, -1, :]  # (B, 1, C)
-        next_reward = self.reward_encoder.decode(reward_part)  # (B, 1)
-
-        return next_image, next_reward.item()

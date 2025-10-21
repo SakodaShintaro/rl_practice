@@ -142,6 +142,17 @@ class OnPolicyAgent:
         self.prev_value = value
         info_dict["value"] = value
 
+        # predict next state
+        action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
+        action_normalized = (
+            action_tensor - torch.tensor(self.action_bias, device=self.device)
+        ) / torch.tensor(self.action_scale, device=self.device)
+        next_image, next_reward = self.network.predict_next_state(
+            result_dict["x"], action_normalized.unsqueeze(0)
+        )
+        info_dict["next_image"] = next_image
+        info_dict["next_reward"] = next_reward
+
         return action, info_dict
 
     def step(

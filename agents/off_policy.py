@@ -57,7 +57,7 @@ class OffPolicyAgent:
             "total": self.network,
             "actor": self.network.actor,
             "critic": self.network.critic,
-            "state_predictor": self.network.state_predictor,
+            "state_predictor": self.network.prediction_head.state_predictor,
         }
 
         # Initialize weight projection if enabled
@@ -66,7 +66,7 @@ class OffPolicyAgent:
             self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
             self.weight_projection_norms["critic"] = get_initial_norms(self.network.critic)
             self.weight_projection_norms["state_predictor"] = get_initial_norms(
-                self.network.state_predictor
+                self.network.prediction_head.state_predictor
             )
 
         self.metrics_computers = {
@@ -187,14 +187,15 @@ class OffPolicyAgent:
             weight_project(self.network.actor, self.weight_projection_norms["actor"])
             weight_project(self.network.critic, self.weight_projection_norms["critic"])
             weight_project(
-                self.network.state_predictor, self.weight_projection_norms["state_predictor"]
+                self.network.prediction_head.state_predictor,
+                self.weight_projection_norms["state_predictor"],
             )
 
         # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
         if self.apply_masks_during_training:
             apply_masks_during_training(self.network.actor)
             apply_masks_during_training(self.network.critic)
-            apply_masks_during_training(self.network.state_predictor)
+            apply_masks_during_training(self.network.prediction_head.state_predictor)
 
         # Feature metrics
         for feature_name, feature in activation_dict.items():
