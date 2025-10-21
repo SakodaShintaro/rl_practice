@@ -149,15 +149,13 @@ class OnPolicyAgent:
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
+        # train
+        train_info = self._train(self.prev_value)
+        info_dict.update(train_info)
+
         # make decision
         action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
         info_dict.update(action_info)
-
-        # train
-        if self.rb.is_full():
-            train_result = self._train(action_info["value"])
-            info_dict.update(train_result)
-            self.rb.reset()
 
         return action, info_dict
 
@@ -166,6 +164,11 @@ class OnPolicyAgent:
     ####################
 
     def _train(self, last_value: float) -> dict:
+        info_dict = {}
+
+        if not self.rb.is_full():
+            return info_dict
+
         buffer_data = self.rb.get_all_data()
         s = buffer_data.observations
         a = buffer_data.actions
@@ -244,4 +247,7 @@ class OnPolicyAgent:
             "losses/actor_loss": np.mean(ave_action_loss_list),
             "losses/critic_loss": np.mean(ave_value_loss_list),
         }
+
+        self.rb.reset()
+
         return result_dict
