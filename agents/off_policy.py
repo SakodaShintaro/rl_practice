@@ -110,11 +110,10 @@ class OffPolicyAgent:
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
-            action, selected_log_pi = self.network.actor.get_action(output_enc)
+            action, _ = self.network.actor.get_action(output_enc)
             action = action[0].detach().cpu().numpy()
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
-            info_dict["selected_log_pi"] = selected_log_pi[0].item()
 
         # predict next state
         action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
