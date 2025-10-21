@@ -285,9 +285,9 @@ class LinearEmbedder(nn.Module):
     def decode(self, embedded):
         if self.use_bias:
             bias_expanded = self.encoder.bias.unsqueeze(0).unsqueeze(0)
-            decoded_values = (embedded - bias_expanded) / self.encoder.weight[:, 0]
+            decoded_values = (embedded - bias_expanded) / (self.encoder.weight[:, 0] + 1e-6)
         else:
-            decoded_values = embedded / self.encoder.weight[:, 0]
+            decoded_values = embedded / (self.encoder.weight[:, 0] + 1e-6)
 
         decoded = decoded_values.mean(dim=-1)
         return decoded
