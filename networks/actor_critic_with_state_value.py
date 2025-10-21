@@ -135,16 +135,26 @@ class Network(nn.Module):
 
             dist = Beta(alpha, beta)
             if action is None:
-                action = dist.sample()
-            a_logp = dist.log_prob(action).sum(dim=1, keepdim=True)
+                action_01 = dist.sample()
+                action = action_01 * 2.0 - 1.0  # Scale from [0, 1] to [-1, 1]
+            else:
+                action_01 = (action + 1.0) / 2.0  # Scale from [-1, 1] to [0, 1]
+            # Adjust log probability for change of variables: |d(action_01)/d(action)| = 1/2
+            a_logp = (
+                dist.log_prob(action_01).sum(dim=1, keepdim=True)
+                - torch.log(torch.tensor(2.0, device=policy_x.device)) * self.action_dim
+            )
         elif self.policy_type == "Categorical":
             logits = self.logits_head(policy_x)
             dist = Categorical(logits=logits)
             if action is None:
-                action = dist.sample()
-                a_logp = dist.log_prob(action).unsqueeze(1)
-                action = F.one_hot(action, num_classes=self.action_dim).float()
+                action_idx = dist.sample()
+                a_logp = dist.log_prob(action_idx).unsqueeze(1)
+                # Create encoding: selected=+1, others=-1
+                action = F.one_hot(action_idx, num_classes=self.action_dim).float()
+                action = action * 2.0 - 1.0  # [0,1] one-hot -> [-1,+1] encoding
             else:
+                # Find which action was selected from the encoding
                 a_logp = dist.log_prob(action.argmax(dim=1)).unsqueeze(1)
 
         return {

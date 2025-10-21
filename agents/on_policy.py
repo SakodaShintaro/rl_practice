@@ -48,10 +48,8 @@ class OnPolicyAgent:
         self.action_dim = np.prod(action_space.shape)
         self.action_low = action_space.low
         self.action_high = action_space.high
-        self.action_scale = action_space.high - action_space.low
-        self.action_bias = (action_space.high + action_space.low) / 2.0 - 0.5 * self.action_scale
-        print(f"Action space: {action_space}, dim: {self.action_dim}")
-        print(f"  scale: {self.action_scale}, bias: {self.action_bias}")
+        self.action_scale = (action_space.high - action_space.low) / 2.0
+        self.action_bias = (action_space.high + action_space.low) / 2.0
 
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
@@ -143,13 +141,8 @@ class OnPolicyAgent:
         info_dict["value"] = value
 
         # predict next state
-        action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
-        action_normalized = (
-            action_tensor - torch.tensor(self.action_bias, device=self.device)
-        ) / torch.tensor(self.action_scale, device=self.device)
-        next_image, next_reward = self.network.predict_next_state(
-            result_dict["x"], action_normalized.unsqueeze(0)
-        )
+        action_tensor = result_dict["action"]
+        next_image, next_reward = self.network.predict_next_state(result_dict["x"], action_tensor)
         info_dict["next_image"] = next_image
         info_dict["next_reward"] = next_reward
 
