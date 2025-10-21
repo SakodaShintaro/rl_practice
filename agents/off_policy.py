@@ -86,11 +86,13 @@ class OffPolicyAgent:
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
+        # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
         train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
         info_dict["action_norm"] = action_norm
         info_dict["train_reward"] = train_reward
 
+        # add to replay buffer
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
             train_reward,
@@ -101,19 +103,21 @@ class OffPolicyAgent:
             0.0,
         )
 
+        # inference
         latest_data = self.rb.get_latest(self.seq_len)
-
         output_enc, self.rnn_state = self.network.encoder.forward(
             latest_data.observations, latest_data.actions, latest_data.rewards, self.rnn_state
         )
 
+        # action
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
             action, _ = self.network.actor.get_action(output_enc)
-            action = action[0].detach().cpu().numpy()
+            action = action[0].cpu().numpy()
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
+        self.prev_action = action
 
         # predict next state
         action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
@@ -123,7 +127,6 @@ class OffPolicyAgent:
         info_dict["next_image"] = next_image
         info_dict["next_reward"] = next_reward
 
-        self.prev_action = action
         return action, info_dict
 
     def step(

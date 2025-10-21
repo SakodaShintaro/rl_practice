@@ -81,90 +81,29 @@ class OnPolicyAgent:
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
         )
-        self.latest_buffer = ReplayBuffer(
-            size=self.seq_len,
-            seq_len=self.seq_len,
-            obs_shape=observation_space.shape,
-            rnn_state_shape=self.rnn_state.squeeze(1).shape,
-            action_shape=action_space.shape,
-            output_device=self.device,
-            storage_device=torch.device(args.buffer_device),
-        )
 
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
-
-    def initialize_for_episode(self) -> None:
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0
         self.prev_value = 0.0
+
+    def initialize_for_episode(self) -> None:
+        pass
 
     @torch.inference_mode()
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
-        action_norm = np.linalg.norm(self.prev_action)
-        train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
-
-        self.latest_buffer.add(
-            torch.from_numpy(obs).to(self.device),
-            train_reward,
-            terminated or truncated,
-            self.rnn_state.squeeze(0),
-            torch.from_numpy(self.prev_action).to(self.device),
-            self.prev_logp,
-            self.prev_value,
-        )
-        latest_data = self.latest_buffer.get_latest(1)
-
-        result_dict = self.network(
-            latest_data.rewards, latest_data.observations, latest_data.actions, self.rnn_state
-        )
-        action = result_dict["action"]
-        a_logp = result_dict["a_logp"]
-        value = result_dict["value"]
-        self.rnn_state = result_dict["rnn_state"]
-
-        if self.num_bins > 1:
-            value = self.network.hl_gauss_loss(value)
-
-        action = action.squeeze().cpu().numpy()
-        a_logp = a_logp.item()
-        value = value.item()
-
-        action = action * self.action_scale + self.action_bias
-        action = np.clip(action, self.action_low, self.action_high)
-
-        action_info = {
-            "a_logp": a_logp,
-            "value": value,
-            "action_norm": action_norm,
-            "train_reward": train_reward,
-        }
-
-        for key in ["x", "value_x", "policy_x"]:
-            if key in result_dict:
-                value_tensor = result_dict[key]
-                action_info[f"activation/{key}_norm"] = value_tensor.norm(dim=1).mean().item()
-                action_info[f"activation/{key}_mean"] = value_tensor.mean(dim=1).mean().item()
-                action_info[f"activation/{key}_std"] = value_tensor.std(dim=1).mean().item()
-
-        self.prev_action = action
-        self.prev_value = value
-        self.prev_logp = a_logp
-
-        return action, action_info
-
-    def step(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
-    ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
-        # compute train reward
+        # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
         train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
+        info_dict["action_norm"] = action_norm
+        info_dict["train_reward"] = train_reward
 
-        # store data to buffer
+        # add to replay buffer
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
             train_reward,
@@ -174,6 +113,41 @@ class OnPolicyAgent:
             self.prev_logp,
             self.prev_value,
         )
+
+        # inference
+        latest_data = self.rb.get_latest(1)
+        result_dict = self.network(
+            latest_data.rewards, latest_data.observations, latest_data.actions, self.rnn_state
+        )
+        self.rnn_state = result_dict["rnn_state"]
+
+        # action
+        action = result_dict["action"]
+        action = action[0].cpu().numpy()
+        action = action * self.action_scale + self.action_bias
+        action = np.clip(action, self.action_low, self.action_high)
+        self.prev_action = action
+
+        # log prob
+        a_logp = result_dict["a_logp"]
+        a_logp = a_logp.item()
+        self.prev_logp = a_logp
+        info_dict["a_logp"] = a_logp
+
+        # value
+        value = result_dict["value"]
+        if self.num_bins > 1:
+            value = self.network.hl_gauss_loss(value)
+        value = value.item()
+        self.prev_value = value
+        info_dict["value"] = value
+
+        return action, info_dict
+
+    def step(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
+        info_dict = {}
 
         # make decision
         action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
