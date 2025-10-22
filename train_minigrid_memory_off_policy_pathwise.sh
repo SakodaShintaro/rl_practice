@@ -8,3 +8,4 @@ python3 train.py pathwise \
   --encoder temporal_only \
   --temporal_model_type gru \
   --step_limit 100_000 \
+  --use_done=1 \

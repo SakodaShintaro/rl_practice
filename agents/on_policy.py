@@ -60,6 +60,7 @@ class OnPolicyAgent:
         self.action_norm_penalty = args.action_norm_penalty
         self.reward_scale = args.reward_scale
         self.max_grad_norm = args.max_grad_norm
+        self.use_done = args.use_done
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
@@ -105,7 +106,7 @@ class OnPolicyAgent:
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
             train_reward,
-            terminated or truncated,
+            (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
             torch.from_numpy(self.prev_action).to(self.device),
             self.prev_logp,

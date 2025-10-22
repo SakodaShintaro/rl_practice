@@ -31,6 +31,7 @@ class OffPolicyAgent:
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
         self.max_grad_norm = args.max_grad_norm
+        self.use_done = args.use_done
 
         # Sequence observation management
         self.seq_len = args.seq_len
@@ -96,7 +97,7 @@ class OffPolicyAgent:
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
             train_reward,
-            False,
+            (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
             torch.from_numpy(self.prev_action).to(self.device),
             0.0,
