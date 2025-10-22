@@ -19,3 +19,4 @@ python3 train.py pathwise \
   --step_limit 200_000 \
   --eval_range 20 \
   --disable_state_predictor=0 \
+  --max_grad_norm 1.0 \
