@@ -2,6 +2,8 @@ import math
 
 import torch
 from torch import nn
+from torch.distributions import Beta, Categorical
+from torch.nn import functional as F
 
 from .blocks import SimbaBlock
 from .sparse_utils import apply_one_shot_pruning
@@ -110,3 +112,66 @@ class DiffusionPolicy(nn.Module):
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
+
+
+class BetaPolicy(nn.Module):
+    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+        super().__init__()
+        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.alpha_head = nn.Linear(hidden_dim, action_dim)
+        self.beta_head = nn.Linear(hidden_dim, action_dim)
+        self.action_dim = action_dim
+
+    def forward(
+        self, x: torch.Tensor, action: torch.Tensor | None = None
+    ) -> dict[str, torch.Tensor]:
+        policy_x = self.policy_enc(x)
+        alpha = self.alpha_head(policy_x).exp() + 1
+        beta = self.beta_head(policy_x).exp() + 1
+
+        dist = Beta(alpha, beta)
+        if action is None:
+            action_01 = dist.sample()
+            action = action_01 * 2.0 - 1.0
+        else:
+            action_01 = (action + 1.0) / 2.0
+
+        a_logp = (
+            dist.log_prob(action_01).sum(dim=1, keepdim=True)
+            - torch.log(torch.tensor(2.0, device=policy_x.device)) * self.action_dim
+        )
+
+        return {
+            "action": action,
+            "a_logp": a_logp,
+            "entropy": dist.entropy().unsqueeze(1),
+        }
+
+
+class CategoricalPolicy(nn.Module):
+    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+        super().__init__()
+        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.logits_head = nn.Linear(hidden_dim, action_dim)
+        self.action_dim = action_dim
+
+    def forward(
+        self, x: torch.Tensor, action: torch.Tensor | None = None
+    ) -> dict[str, torch.Tensor]:
+        policy_x = self.policy_enc(x)
+        logits = self.logits_head(policy_x)
+        dist = Categorical(logits=logits)
+
+        if action is None:
+            action_idx = dist.sample()
+            a_logp = dist.log_prob(action_idx).unsqueeze(1)
+            action = F.one_hot(action_idx, num_classes=self.action_dim).float()
+            action = action * 2.0 - 1.0
+        else:
+            a_logp = dist.log_prob(action.argmax(dim=1)).unsqueeze(1)
+
+        return {
+            "action": action,
+            "a_logp": a_logp,
+            "entropy": dist.entropy().unsqueeze(1),
+        }
