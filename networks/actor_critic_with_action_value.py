@@ -62,6 +62,7 @@ class Network(nn.Module):
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
+            denoising_time=args.denoising_time,
             sparsity=args.sparsity,
         )
         self.value_head = ActionValueHead(

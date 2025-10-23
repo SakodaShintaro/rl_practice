@@ -57,6 +57,7 @@ class DiffusionPolicy(nn.Module):
         action_dim: int,
         hidden_dim: int,
         block_num: int,
+        denoising_time: float,
         sparsity: float,
     ) -> None:
         super().__init__()
@@ -67,6 +68,7 @@ class DiffusionPolicy(nn.Module):
         self.fc_out = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
         self.step_num = 5
+        self.denoising_time = denoising_time
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.sparse_mask = (
             None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
@@ -98,7 +100,7 @@ class DiffusionPolicy(nn.Module):
         )
         action = normal.sample().to(x.device)
         action = torch.clamp(action, -3.0, 3.0)
-        dt = 1.0 / self.step_num
+        dt = self.denoising_time / self.step_num
 
         curr_time = torch.zeros((bs), device=x.device)
 
