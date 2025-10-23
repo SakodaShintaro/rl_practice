@@ -145,6 +145,7 @@ class BetaPolicy(nn.Module):
             "action": action,
             "a_logp": a_logp,
             "entropy": dist.entropy().unsqueeze(1),
+            "activation": policy_x,
         }
 
 
@@ -174,4 +175,5 @@ class CategoricalPolicy(nn.Module):
             "action": action,
             "a_logp": a_logp,
             "entropy": dist.entropy().unsqueeze(1),
+            "activation": policy_x,
         }

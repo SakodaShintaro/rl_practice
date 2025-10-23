@@ -135,18 +135,27 @@ class Network(nn.Module):
         }
 
     def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:
-        net_out_dict = self.forward(
-            data.rewards[:, :-1],
-            data.observations[:, :-1],
-            data.actions[:, :-1],
-            data.rnn_state[:, 0].permute(1, 0, 2).contiguous(),
-            action=data.actions[:, -1],
-        )
-        a_logp = net_out_dict["a_logp"]
-        entropy = net_out_dict["entropy"]
-        value = net_out_dict["value"]
-        ratio = torch.exp(a_logp - data.log_probs[:, -1])
+        # Encode state
+        obs_curr = data.observations[:, :-1]
+        actions_curr = data.actions[:, :-1]
+        rewards_curr = data.rewards[:, :-1]
+        rnn_state_curr = data.rnn_state[:, 0].permute(1, 0, 2).contiguous()
 
+        state_curr, _ = self.encoder.forward(obs_curr, actions_curr, rewards_curr, rnn_state_curr)
+
+        # Get policy output
+        policy_dict = self.policy_head(state_curr, action=data.actions[:, -1])
+        a_logp = policy_dict["a_logp"]
+        entropy = policy_dict["entropy"]
+        policy_activation = policy_dict["activation"]
+
+        # Get value output
+        value_dict = self.value_head(state_curr)
+        value = value_dict["output"]
+        value_activation = value_dict["activation"]
+
+        # Compute policy loss
+        ratio = torch.exp(a_logp - data.log_probs[:, -1])
         surr1 = ratio * curr_adv
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
@@ -154,6 +163,7 @@ class Network(nn.Module):
         )
         action_loss = -torch.min(surr1, surr2).mean()
 
+        # Compute value loss
         if self.num_bins > 1:
             value_loss = self.hl_gauss_loss(value, curr_target_v.squeeze(1))
         else:
@@ -168,7 +178,12 @@ class Network(nn.Module):
 
         loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
 
-        activations_dict = {}
+        activations_dict = {
+            "state": state_curr,
+            "actor": policy_activation,
+            "critic": value_activation,
+            "state_predictor": state_curr,
+        }
 
         info_dict = {
             "actor_loss": action_loss.item(),
