@@ -57,14 +57,14 @@ class Network(nn.Module):
 
         hidden_image_dim = self.encoder.image_processor.output_shape[0]
 
-        self.actor = DiffusionPolicy(
+        self.policy_head = DiffusionPolicy(
             state_dim=self.encoder.output_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
             sparsity=args.sparsity,
         )
-        self.critic = ActionValueHead(
+        self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
@@ -109,14 +109,14 @@ class Network(nn.Module):
         """
         x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
-        # Get action from actor
+        # Get action from policy_head
         if action is None:
-            action, a_logp = self.actor.get_action(x)
+            action, a_logp = self.policy_head.get_action(x)
         else:
-            _, a_logp = self.actor.get_action(x)
+            _, a_logp = self.policy_head.get_action(x)
 
-        # Get action-value from critic
-        q_dict = self.critic(x, action)
+        # Get action-value from value_head
+        q_dict = self.value_head(x, action)
         q_value = q_dict["output"]  # (B, 1) or (B, num_bins)
 
         return {
@@ -171,8 +171,8 @@ class Network(nn.Module):
         rnn_state_next = data.rnn_state[:, 1:]  # (B, T, hidden_size)
         rnn_state_next = rnn_state_next[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
         state_next, _ = self.encoder.forward(obs_next, actions_next, rewards_next, rnn_state_next)
-        next_state_actions, _ = self.actor.get_action(state_next)
-        next_critic_output_dict = self.critic(state_next, next_state_actions)
+        next_state_actions, _ = self.policy_head.get_action(state_next)
+        next_critic_output_dict = self.value_head(state_next, next_state_actions)
         next_critic_value = next_critic_output_dict["output"]
         if self.num_bins > 1:
             next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
@@ -191,7 +191,7 @@ class Network(nn.Module):
         if self.detach_critic:
             curr_state = curr_state.detach()
 
-        curr_critic_output_dict = self.critic(curr_state, curr_action)
+        curr_critic_output_dict = self.value_head(curr_state, curr_action)
 
         if self.num_bins > 1:
             curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
@@ -216,12 +216,12 @@ class Network(nn.Module):
     def _compute_actor_loss(self, state_curr):
         if self.detach_actor:
             state_curr = state_curr.detach()
-        pi, log_pi = self.actor.get_action(state_curr)
+        pi, log_pi = self.policy_head.get_action(state_curr)
 
-        for param in self.critic.parameters():
+        for param in self.value_head.parameters():
             param.requires_grad_(False)
 
-        critic_pi_output_dict = self.critic(state_curr, pi)
+        critic_pi_output_dict = self.value_head(state_curr, pi)
         critic_pi = critic_pi_output_dict["output"]
         if self.num_bins > 1:
             critic_pi = self.hl_gauss_loss(critic_pi).unsqueeze(-1)
@@ -229,7 +229,7 @@ class Network(nn.Module):
             critic_pi = critic_pi.unsqueeze(-1)
         actor_loss = -critic_pi.mean()
 
-        for param in self.critic.parameters():
+        for param in self.value_head.parameters():
             param.requires_grad_(True)
 
         # DACER2 loss (https://arxiv.org/abs/2505.23426)
@@ -260,11 +260,11 @@ class Network(nn.Module):
                 target /= target.norm(dim=1, keepdim=True) + 1e-8
                 return w_t * target
 
-        target = calc_target(self.critic, actions)
+        target = calc_target(self.value_head, actions)
         noise = torch.randn_like(actions)
         noise = torch.clamp(noise, -3.0, 3.0)
         a_t = (1.0 - t) * noise + t * actions
-        actor_output_dict = self.actor.forward(a_t, t.squeeze(1), state_curr)
+        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr)
         v = actor_output_dict["output"]
         dacer_loss = F.mse_loss(v, target)
 

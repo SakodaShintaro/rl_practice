@@ -56,16 +56,16 @@ class OffPolicyAgent:
         # Initialize gradient norm targets
         self.monitoring_targets = {
             "total": self.network,
-            "actor": self.network.actor,
-            "critic": self.network.critic,
+            "actor": self.network.policy_head,
+            "critic": self.network.value_head,
             "state_predictor": self.network.prediction_head.state_predictor,
         }
 
         # Initialize weight projection if enabled
         self.weight_projection_norms = {}
         if args.use_weight_projection:
-            self.weight_projection_norms["actor"] = get_initial_norms(self.network.actor)
-            self.weight_projection_norms["critic"] = get_initial_norms(self.network.critic)
+            self.weight_projection_norms["actor"] = get_initial_norms(self.network.policy_head)
+            self.weight_projection_norms["critic"] = get_initial_norms(self.network.value_head)
             self.weight_projection_norms["state_predictor"] = get_initial_norms(
                 self.network.prediction_head.state_predictor
             )
@@ -114,7 +114,7 @@ class OffPolicyAgent:
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
-            action, _ = self.network.actor.get_action(output_enc)
+            action, _ = self.network.policy_head.get_action(output_enc)
             action = action[0].cpu().numpy()
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
@@ -185,8 +185,8 @@ class OffPolicyAgent:
 
         # Apply weight projection after optimizer step
         if self.use_weight_projection:
-            weight_project(self.network.actor, self.weight_projection_norms["actor"])
-            weight_project(self.network.critic, self.weight_projection_norms["critic"])
+            weight_project(self.network.policy_head, self.weight_projection_norms["actor"])
+            weight_project(self.network.value_head, self.weight_projection_norms["critic"])
             weight_project(
                 self.network.prediction_head.state_predictor,
                 self.weight_projection_norms["state_predictor"],
@@ -194,8 +194,8 @@ class OffPolicyAgent:
 
         # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
         if self.apply_masks_during_training:
-            apply_masks_during_training(self.network.actor)
-            apply_masks_during_training(self.network.critic)
+            apply_masks_during_training(self.network.policy_head)
+            apply_masks_during_training(self.network.value_head)
             apply_masks_during_training(self.network.prediction_head.state_predictor)
 
         # Feature metrics
