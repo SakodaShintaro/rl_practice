@@ -2,8 +2,12 @@ import numpy as np
 import torch
 from torch import nn, optim
 
+from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
+from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.actor_critic_with_action_value import Network as ActionValueNetwork
 from networks.actor_critic_with_state_value import Network as StateValueNetwork
+from networks.sparse_utils import apply_masks_during_training
+from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer, ReplayBufferData
 
 
@@ -61,6 +65,8 @@ class OnPolicyAgent:
         self.reward_scale = args.reward_scale
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
+        self.use_weight_projection = args.use_weight_projection
+        self.apply_masks_during_training = args.apply_masks_during_training
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
@@ -83,6 +89,31 @@ class OnPolicyAgent:
 
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
+
+        # Initialize gradient norm targets
+        self.monitoring_targets = {
+            "total": self.network,
+            "actor": self.network.policy_head,
+            "critic": self.network.value_head,
+            "state_predictor": self.network.prediction_head.state_predictor,
+        }
+
+        # Initialize weight projection if enabled
+        self.weight_projection_norms = {}
+        if args.use_weight_projection:
+            self.weight_projection_norms["actor"] = get_initial_norms(self.network.policy_head)
+            self.weight_projection_norms["critic"] = get_initial_norms(self.network.value_head)
+            self.weight_projection_norms["state_predictor"] = get_initial_norms(
+                self.network.prediction_head.state_predictor
+            )
+
+        self.metrics_computers = {
+            "state": StatisticalMetricsComputer(),
+            "actor": StatisticalMetricsComputer(),
+            "critic": StatisticalMetricsComputer(),
+            "state_predictor": StatisticalMetricsComputer(),
+        }
+
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0
         self.prev_value = 0.0
@@ -204,6 +235,9 @@ class OnPolicyAgent:
 
         ave_action_loss_list = []
         ave_value_loss_list = []
+        metrics_dict = {}
+        is_first_batch = True
+
         for _ in range(self.on_policy_epoch):
             sum_action_loss = 0.0
             sum_value_loss = 0.0
@@ -241,7 +275,42 @@ class OnPolicyAgent:
                 self.optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+
+                # Collect metrics on the first batch only
+                if is_first_batch:
+                    # Gradient and parameter norms
+                    for key, value in self.monitoring_targets.items():
+                        metrics_dict[f"gradients/{key}"] = compute_gradient_norm(value)
+                        metrics_dict[f"parameters/{key}"] = compute_parameter_norm(value)
+
+                    # Feature metrics
+                    for feature_name, feature in activations_dict.items():
+                        metrics_dict[f"activation_norms/{feature_name}"] = (
+                            feature.norm(dim=1).mean().item()
+                        )
+
+                        result_dict = self.metrics_computers[feature_name](feature)
+                        for key, value in result_dict.items():
+                            metrics_dict[f"{key}/{feature_name}"] = value
+
+                    is_first_batch = False
+
                 self.optimizer.step()
+
+                # Apply weight projection after optimizer step
+                if self.use_weight_projection:
+                    weight_project(self.network.policy_head, self.weight_projection_norms["actor"])
+                    weight_project(self.network.value_head, self.weight_projection_norms["critic"])
+                    weight_project(
+                        self.network.prediction_head.state_predictor,
+                        self.weight_projection_norms["state_predictor"],
+                    )
+
+                # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
+                if self.apply_masks_during_training:
+                    apply_masks_during_training(self.network.policy_head)
+                    apply_masks_during_training(self.network.value_head)
+                    apply_masks_during_training(self.network.prediction_head.state_predictor)
 
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
@@ -251,6 +320,7 @@ class OnPolicyAgent:
         result_dict = {
             "losses/actor_loss": np.mean(ave_action_loss_list),
             "losses/critic_loss": np.mean(ave_value_loss_list),
+            **metrics_dict,
         }
 
         self.rb.reset()
