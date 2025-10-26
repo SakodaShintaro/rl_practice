@@ -172,17 +172,26 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     while True:
         # initialize episode
         obs, _ = env.reset()
+        agent.initialize_for_episode()
+
+        # initial action
+        action, agent_info = agent.select_action(global_step, obs, 0.0, False, False)
+
+        # initial render
         obs_for_render = obs.copy().transpose(1, 2, 0)
-        pred_image = np.zeros_like(obs_for_render)
-        pred_reward = 0.0
-        pred_image_loss = None
-        pred_reward_loss = None
         initial_rgb_image = create_full_image_with_reward(
-            env.render(), obs_for_render, np.zeros_like(obs_for_render), pred_image, 0.0, 0.0
+            env.render(),
+            obs_for_render,
+            np.zeros_like(obs_for_render),
+            np.zeros_like(obs_for_render),
+            0.0,
+            0.0,
         )
         bgr_image_list = [cv2.cvtColor(initial_rgb_image, cv2.COLOR_RGB2BGR)]
-        agent.initialize_for_episode()
-        action, agent_info = agent.select_action(global_step, obs, 0.0, False, False)
+
+        # initial prediction for next step
+        pred_image = agent_info.get("next_image", np.zeros_like(obs_for_render))
+        pred_reward = agent_info.get("next_reward", 0.0)
 
         while True:
             global_step += 1
@@ -207,10 +216,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 "reward_centering": env_info["reward_centering"],
                 **log_agent_info,
             }
-            if pred_image_loss is not None:
-                data_dict["losses/pred_image_loss"] = pred_image_loss
-            if pred_reward_loss is not None:
-                data_dict["losses/pred_reward_loss"] = pred_reward_loss
+            data_dict["losses/pred_image_loss"] = np.mean(np.abs(pred_image - obs_for_render))
+            data_dict["losses/pred_reward_loss"] = np.abs(pred_reward - reward)
             wandb.log(data_dict)
 
             # render
@@ -225,10 +232,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             else:
                 curr_reconstruction = np.zeros_like(obs_for_render)
 
-            pred_image = agent_info.get("next_image", np.zeros_like(obs_for_render))
-            pred_image_loss = np.mean(np.abs(pred_image - obs_for_render))
-            pred_reward = agent_info.get("next_reward", 0.0)
-            pred_reward_loss = np.abs(pred_reward - reward)
             rgb_image = create_full_image_with_reward(
                 env.render(), obs_for_render, curr_reconstruction, pred_image, pred_reward, reward
             )
@@ -243,6 +246,10 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
             if global_step >= step_limit:
                 break
+
+            # update prediction for next step
+            pred_image = agent_info.get("next_image", np.zeros_like(obs_for_render))
+            pred_reward = agent_info.get("next_reward", 0.0)
 
         if global_step >= step_limit:
             break
