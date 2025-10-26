@@ -79,15 +79,14 @@ def create_full_image_with_reward(
 
     # 2回目のconcat: first_concatの右側に報酬可視化を追加
     # ここではRGB形式のままで返す
-    concat = cv2.vconcat([reward_vis_normalized])
-    rem = first_concat.shape[0] - concat.shape[0]
+    rem = first_concat.shape[0] - reward_vis_normalized.shape[0]
     if rem >= 0:
-        concat = cv2.copyMakeBorder(concat, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    concat *= 255
-    concat = np.clip(concat, 0, 255).astype(np.uint8)
+        reward_vis_normalized = cv2.copyMakeBorder(reward_vis_normalized, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    reward_vis_normalized *= 255
+    reward_vis_normalized = np.clip(reward_vis_normalized, 0, 255).astype(np.uint8)
 
     # first_concatをBGRからRGBに変換してから結合
     first_concat_rgb = cv2.cvtColor(first_concat, cv2.COLOR_BGR2RGB)
-    final_image_rgb = cv2.hconcat([first_concat_rgb, concat])
+    final_image_rgb = cv2.hconcat([first_concat_rgb, reward_vis_normalized])
 
     return final_image_rgb
