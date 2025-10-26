@@ -135,9 +135,13 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
         video_dir = result_dir / "video"
         video_dir.mkdir(parents=True, exist_ok=True)
+
+        image_dir = result_dir / "images"
+        image_dir.mkdir(parents=True, exist_ok=True)
     else:
         result_dir = None
         video_dir = None
+        image_dir = None
     image_save_interval = 500
     log_episode_path = result_dir / "log_episode.tsv" if result_dir is not None else None
     log_episode_file = None
@@ -296,6 +300,13 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
                 imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
+                # 画像としても保存
+                curr_image_dir = image_dir / "best_episode_frames"
+                curr_image_dir.mkdir(parents=True, exist_ok=True)
+                for idx, img in enumerate(bgr_image_list):
+                    image_path = curr_image_dir / f"{idx:08d}.png"
+                    cv2.imwrite(str(image_path), img)
+
         if (
             episode_id == 0 or (episode_id + 1) % image_save_interval == 0
         ) and result_dir is not None:
@@ -303,6 +314,13 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             if bgr_image_list:
                 rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
                 imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+
+                # 画像としても保存
+                curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}_frames"
+                curr_image_dir.mkdir(parents=True, exist_ok=True)
+                for idx, img in enumerate(bgr_image_list):
+                    image_path = curr_image_dir / f"{idx:08d}.png"
+                    cv2.imwrite(str(image_path), img)
 
         episode_id += 1
 
