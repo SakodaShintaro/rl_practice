@@ -10,3 +10,4 @@ python3 train.py pathwise \
   --step_limit 400_000 \
   --use_done=1 \
   --denoising_time 0.8 \
+  --disable_state_predictor=0 \
