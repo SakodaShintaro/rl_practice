@@ -37,7 +37,7 @@ def convert_to_uint8(image: np.ndarray) -> np.ndarray:
         return image.copy()
 
 
-def create_reward_visualization(pred_reward: float, actual_reward: float) -> np.ndarray:
+def create_reward_image(pred_reward: float, actual_reward: float) -> np.ndarray:
     """
     報酬予測と実際の報酬を可視化する関数（シンプルなテキスト表示）
     """
@@ -108,18 +108,18 @@ def add_text_label_on_top(image: np.ndarray, text: str) -> np.ndarray:
 
 
 def concat_labeled_images(
-    env_render: np.ndarray,
+    environment: np.ndarray,
     observation: np.ndarray,
-    pred_image: np.ndarray,
-    reward_vis: np.ndarray,
+    prediction: np.ndarray,
+    reward: np.ndarray,
 ) -> np.ndarray:
     """
     複数の画像を結合した画像を作成（RGB形式で返す）
     全ての画像をuint8に変換し、ラベルを追加する。
     """
     # 画像とラベル名を配列として定義
-    images = [env_render, observation, pred_image, reward_vis]
-    labels = ["env_render", "observation", "pred_image", "reward"]
+    images = [environment, observation, prediction, reward]
+    labels = ["environment", "observation", "prediction", "reward"]
 
     # uint8変換とラベル付与を一括処理
     labeled_images = [
