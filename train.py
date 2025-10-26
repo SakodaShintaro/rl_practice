@@ -15,7 +15,7 @@ import torch
 import wandb
 from agents.off_policy import OffPolicyAgent
 from agents.on_policy import OnPolicyAgent
-from utils import create_full_image_with_reward
+from utils import concat_labeled_images, create_reward_visualization
 from wrappers import make_env
 
 
@@ -182,12 +182,12 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
         # initial render
         obs_for_render = obs.copy().transpose(1, 2, 0)
-        initial_rgb_image = create_full_image_with_reward(
+        reward_vis = create_reward_visualization(0.0, 0.0)
+        initial_rgb_image = concat_labeled_images(
             env.render(),
             obs_for_render,
             np.zeros_like(obs_for_render),
-            0.0,
-            0.0,
+            reward_vis,
         )
         bgr_image_list = [cv2.cvtColor(initial_rgb_image, cv2.COLOR_RGB2BGR)]
 
@@ -225,9 +225,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)
 
-            rgb_image = create_full_image_with_reward(
-                env.render(), obs_for_render, pred_image, pred_reward, reward
-            )
+            reward_vis = create_reward_visualization(pred_reward, reward)
+            rgb_image = concat_labeled_images(env.render(), obs_for_render, pred_image, reward_vis)
             bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
             bgr_image_list.append(bgr_image)
             if args.render:
