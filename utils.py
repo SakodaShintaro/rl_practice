@@ -88,7 +88,10 @@ def add_text_label_on_top(image: np.ndarray, text: str) -> np.ndarray:
     (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
 
     # テキスト領域の高さ（余白を含む）
+    # FFMPEGのlibx264エンコーダーは高さが2で割り切れる必要があるため、偶数に調整
     label_height = text_height + baseline + 10
+    if label_height % 2 != 0:
+        label_height += 1
 
     # テキスト用の画像領域を作成（画像と同じ幅）
     label_img = np.full((label_height, image.shape[1], 3), bg_color, dtype=np.uint8)
