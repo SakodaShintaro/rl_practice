@@ -6,9 +6,9 @@ def concat_images(image_list: list[np.ndarray]) -> np.ndarray:
     """
     image_listを並べて連結する。
     Args:
-        image_list (list[np.ndarray]): The list of images to concatenate.
+        image_list (list[np.ndarray]): The list of rgb images to concatenate.
     Returns:
-        np.ndarray: The concatenated image.
+        np.ndarray: The concatenated bgr image (np.uint8).
     """
     max_height = max(img.shape[0] for img in image_list)
     padded_images = []
@@ -31,7 +31,7 @@ def create_reward_visualization(pred_reward: float, actual_reward: float) -> np.
     """
     報酬予測と実際の報酬を可視化する関数（シンプルなテキスト表示）
     """
-    height, width = (500, 200)
+    height, width = (200, 200)
     img = np.zeros((height, width, 3), dtype=np.uint8)
 
     # 背景を黒に設定
@@ -69,24 +69,9 @@ def create_full_image_with_reward(
     """
     環境画像、観測画像、再構築画像、予測画像、報酬可視化を全て結合した画像を作成（RGB形式で返す）
     """
-    # まず既存の画像を連結
-    first_concat = concat_images([env_render, obs_for_render, reconstruction, pred_image])
-
-    # 報酬可視化を作成してメイン画像の高さに合わせる
     reward_vis = create_reward_visualization(pred_reward, actual_reward)
-    reward_vis_resized = cv2.resize(reward_vis, (reward_vis.shape[1], first_concat.shape[0]))
-    reward_vis_normalized = reward_vis_resized.astype(np.float32) / 255.0
-
-    # 2回目のconcat: first_concatの右側に報酬可視化を追加
-    # ここではRGB形式のままで返す
-    rem = first_concat.shape[0] - reward_vis_normalized.shape[0]
-    if rem >= 0:
-        reward_vis_normalized = cv2.copyMakeBorder(reward_vis_normalized, 0, rem, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    reward_vis_normalized *= 255
-    reward_vis_normalized = np.clip(reward_vis_normalized, 0, 255).astype(np.uint8)
-
-    # first_concatをBGRからRGBに変換してから結合
-    first_concat_rgb = cv2.cvtColor(first_concat, cv2.COLOR_BGR2RGB)
-    final_image_rgb = cv2.hconcat([first_concat_rgb, reward_vis_normalized])
-
+    final_image_bgr = concat_images(
+        [env_render, obs_for_render, reconstruction, pred_image, reward_vis]
+    )
+    final_image_rgb = cv2.cvtColor(final_image_bgr, cv2.COLOR_BGR2RGB)
     return final_image_rgb
