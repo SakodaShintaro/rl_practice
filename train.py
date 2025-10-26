@@ -69,7 +69,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seq_len", type=int, default=32)
     parser.add_argument("--reward_scale", type=float, default=1.0)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
-    parser.add_argument("--render_reconstruction", type=int, default=0, choices=[0, 1])
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--use_done", type=int, default=0, choices=[0, 1])
@@ -187,7 +186,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             env.render(),
             obs_for_render,
             np.zeros_like(obs_for_render),
-            np.zeros_like(obs_for_render),
             0.0,
             0.0,
         )
@@ -226,18 +224,9 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)
-            if args.render_reconstruction:
-                with torch.inference_mode():
-                    net = agent.network.encoder.ae
-                    x = torch.tensor(obs.copy(), device=net.device).unsqueeze(0)
-                    x = net.encode(x).latents
-                    x = net.decode(x).sample
-                    curr_reconstruction = x.cpu().numpy().squeeze(0).transpose(1, 2, 0)
-            else:
-                curr_reconstruction = np.zeros_like(obs_for_render)
 
             rgb_image = create_full_image_with_reward(
-                env.render(), obs_for_render, curr_reconstruction, pred_image, pred_reward, reward
+                env.render(), obs_for_render, pred_image, pred_reward, reward
             )
             bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
             bgr_image_list.append(bgr_image)

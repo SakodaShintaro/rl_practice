@@ -110,7 +110,6 @@ def add_text_label_on_top(image: np.ndarray, text: str) -> np.ndarray:
 def create_full_image_with_reward(
     env_render: np.ndarray,
     observation: np.ndarray,
-    reconstruction: np.ndarray,
     pred_image: np.ndarray,
     pred_reward: float,
     actual_reward: float,
@@ -119,31 +118,20 @@ def create_full_image_with_reward(
     環境画像、観測画像、再構築画像、予測画像、報酬可視化を全て結合した画像を作成（RGB形式で返す）
     全ての画像をuint8に変換し、ラベルを追加する。
     """
-    # 各画像をuint8に変換
-    env_render_uint8 = convert_to_uint8(env_render)
-    observation_uint8 = convert_to_uint8(observation)
-    reconstruction_uint8 = convert_to_uint8(reconstruction)
-    pred_image_uint8 = convert_to_uint8(pred_image)
+    # 画像とラベル名を配列として定義
+    images = [env_render, observation, pred_image]
+    labels = ["env_render", "observation", "pred_image"]
 
-    # 各画像にラベルを追加
-    env_render_labeled = add_text_label_on_top(env_render_uint8, "env_render")
-    observation_labeled = add_text_label_on_top(observation_uint8, "observation")
-    reconstruction_labeled = add_text_label_on_top(reconstruction_uint8, "reconstruction")
-    pred_image_labeled = add_text_label_on_top(pred_image_uint8, "pred_image")
+    # uint8変換とラベル付与を一括処理
+    labeled_images = [
+        add_text_label_on_top(convert_to_uint8(img), label) for img, label in zip(images, labels)
+    ]
 
     # 報酬可視化を作成してラベルを追加
     reward_vis = create_reward_visualization(pred_reward, actual_reward)
     reward_vis_labeled = add_text_label_on_top(reward_vis, "reward")
 
     # 全ての画像を連結
-    final_image_bgr = concat_images(
-        [
-            env_render_labeled,
-            observation_labeled,
-            reconstruction_labeled,
-            pred_image_labeled,
-            reward_vis_labeled,
-        ]
-    )
+    final_image_bgr = concat_images(labeled_images + [reward_vis_labeled])
     final_image_rgb = cv2.cvtColor(final_image_bgr, cv2.COLOR_BGR2RGB)
     return final_image_rgb
