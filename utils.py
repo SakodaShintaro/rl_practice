@@ -13,14 +13,8 @@ def concat_images(image_list: list[np.ndarray]) -> np.ndarray:
     max_height = max(img.shape[0] for img in image_list)
     padded_images = []
     for img in image_list:
-        if img.dtype == np.float32:
-            img *= 255.0
-            img = np.clip(img, 0, 255).astype(np.uint8)
-        if img.shape[0] < max_height:
-            padding = np.zeros((max_height - img.shape[0], img.shape[1], 3), dtype=img.dtype)
-            padded_img = np.vstack((img, padding))
-        else:
-            padded_img = img
+        padding = np.zeros((max_height - img.shape[0], img.shape[1], 3), dtype=img.dtype)
+        padded_img = np.vstack((img, padding))
         padded_images.append(padded_img)
     concat = cv2.hconcat(padded_images)
     bgr_array = cv2.cvtColor(concat, cv2.COLOR_RGB2BGR)
@@ -112,7 +106,7 @@ def add_text_label_on_top(image: np.ndarray, text: str) -> np.ndarray:
 
 def create_full_image_with_reward(
     env_render: np.ndarray,
-    obs_for_render: np.ndarray,
+    observation: np.ndarray,
     reconstruction: np.ndarray,
     pred_image: np.ndarray,
     pred_reward: float,
@@ -124,13 +118,13 @@ def create_full_image_with_reward(
     """
     # 各画像をuint8に変換
     env_render_uint8 = convert_to_uint8(env_render)
-    obs_for_render_uint8 = convert_to_uint8(obs_for_render)
+    observation_uint8 = convert_to_uint8(observation)
     reconstruction_uint8 = convert_to_uint8(reconstruction)
     pred_image_uint8 = convert_to_uint8(pred_image)
 
     # 各画像にラベルを追加
     env_render_labeled = add_text_label_on_top(env_render_uint8, "env_render")
-    obs_for_render_labeled = add_text_label_on_top(obs_for_render_uint8, "obs_for_render")
+    observation_labeled = add_text_label_on_top(observation_uint8, "observation")
     reconstruction_labeled = add_text_label_on_top(reconstruction_uint8, "reconstruction")
     pred_image_labeled = add_text_label_on_top(pred_image_uint8, "pred_image")
 
@@ -142,7 +136,7 @@ def create_full_image_with_reward(
     final_image_bgr = concat_images(
         [
             env_render_labeled,
-            obs_for_render_labeled,
+            observation_labeled,
             reconstruction_labeled,
             pred_image_labeled,
             reward_vis_labeled,
