@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import torch
 
 
 class RewardProcessor:
@@ -15,7 +16,7 @@ class RewardProcessor:
         """Update the running mean and std with the new reward."""
         self.return_rms.update(np.array([reward]))
 
-    def normalize(self, reward: float) -> float:
+    def normalize(self, reward: torch.Tensor) -> torch.Tensor:
         """Normalize the reward."""
         if self.type == "none":
             result = reward
@@ -30,7 +31,7 @@ class RewardProcessor:
             raise ValueError(msg)
 
         MAX_VALUE = 10.0
-        result = np.clip(result, -MAX_VALUE, MAX_VALUE)
+        result = torch.clamp(result, -MAX_VALUE, MAX_VALUE)
         return result
 
     def inverse(self, reward: float) -> float:
@@ -57,8 +58,9 @@ if __name__ == "__main__":
     for r in rewards:
         rp_scaling.update(r)
         rp_centering.update(r)
-        norm_r_scaling = rp_scaling.normalize(r)
-        norm_r_centering = rp_centering.normalize(r)
+        r_tensor = torch.tensor(r)
+        norm_r_scaling = rp_scaling.normalize(r_tensor).item()
+        norm_r_centering = rp_centering.normalize(r_tensor).item()
         inv_r_scaling = rp_scaling.inverse(norm_r_scaling)
         inv_r_centering = rp_centering.inverse(norm_r_centering)
         print(

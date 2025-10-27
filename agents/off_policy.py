@@ -163,9 +163,7 @@ class OffPolicyAgent:
         data = self.rb.sample(self.batch_size)
 
         # apply reward processing
-        for i in range(data.rewards.shape[0]):
-            for j in range(data.rewards.shape[1]):
-                data.rewards[i, j] = self.reward_processor.normalize(data.rewards[i, j].item())
+        data.rewards = self.reward_processor.normalize(data.rewards)
 
         # compute target value
         target_value = self.network.compute_target_value(data)

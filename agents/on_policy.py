@@ -222,8 +222,7 @@ class OnPolicyAgent:
         a = (a - bias) / scale
 
         # apply reward processing
-        for i in range(r.shape[0]):
-            r[i, 0] = self.reward_processor.normalize(r[i, 0].item())
+        r = self.reward_processor.normalize(r)
 
         # preprocessing
         target_v = torch.zeros_like(v[:-1])
