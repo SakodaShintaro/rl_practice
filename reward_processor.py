@@ -34,7 +34,7 @@ class RewardProcessor:
         result = torch.clamp(result, -MAX_VALUE, MAX_VALUE)
         return result
 
-    def inverse(self, reward: float) -> float:
+    def inverse(self, reward: torch.Tensor) -> torch.Tensor:
         """Inverse normalization of the reward."""
         if self.type == "none":
             result = reward
@@ -59,10 +59,12 @@ if __name__ == "__main__":
         rp_scaling.update(r)
         rp_centering.update(r)
         r_tensor = torch.tensor(r)
-        norm_r_scaling = rp_scaling.normalize(r_tensor).item()
-        norm_r_centering = rp_centering.normalize(r_tensor).item()
-        inv_r_scaling = rp_scaling.inverse(norm_r_scaling)
-        inv_r_centering = rp_centering.inverse(norm_r_centering)
+        norm_r_scaling_tensor = rp_scaling.normalize(r_tensor)
+        norm_r_centering_tensor = rp_centering.normalize(r_tensor)
+        inv_r_scaling = rp_scaling.inverse(norm_r_scaling_tensor).item()
+        inv_r_centering = rp_centering.inverse(norm_r_centering_tensor).item()
+        norm_r_scaling = norm_r_scaling_tensor.item()
+        norm_r_centering = norm_r_centering_tensor.item()
         print(
             f"{r=:+6.2f}, {norm_r_scaling=:+6.2f}, {norm_r_centering=:+6.2f} -> {inv_r_scaling=:+6.2f}, {inv_r_centering=:+6.2f}"
         )
