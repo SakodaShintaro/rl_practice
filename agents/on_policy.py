@@ -135,6 +135,9 @@ class OnPolicyAgent:
         self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
         info_dict["reward_with_penalty"] = reward_with_penalty
+        info_dict["processed_reward"] = self.reward_processor.normalize(
+            torch.tensor(reward_with_penalty)
+        ).item()
 
         # add to replay buffer
         self.rb.add(
