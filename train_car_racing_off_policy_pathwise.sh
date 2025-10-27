@@ -17,4 +17,3 @@ python3 train.py pathwise \
   --learning_rate 1e-4 \
   --step_limit 40_000 \
   --eval_range 20 \
-  --disable_state_predictor=0 \

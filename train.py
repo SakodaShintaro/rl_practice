@@ -82,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
     parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
     parser.add_argument("--detach_predictor", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--disable_state_predictor", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--disable_state_predictor", type=int, default=0, choices=[0, 1])
     parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
     parser.add_argument("--denoising_time", type=float, default=1.0)
 

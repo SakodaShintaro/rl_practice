@@ -18,5 +18,4 @@ python3 train.py score \
   --learning_rate 1e-4 \
   --step_limit 200_000 \
   --eval_range 20 \
-  --disable_state_predictor=0 \
   --policy_type Beta \

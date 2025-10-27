@@ -9,3 +9,4 @@ python3 train.py score \
   --encoder temporal_only \
   --temporal_model_type gru \
   --use_done=1 \
+  --disable_state_predictor=1 \
