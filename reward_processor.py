@@ -6,11 +6,11 @@ import torch
 class RewardProcessor:
     """Reward Processor."""
 
-    def __init__(self, processing_type: str, constant: float) -> None:
+    def __init__(self, processing_type: str, reward_scale: float) -> None:
         self.return_rms = gym.wrappers.utils.RunningMeanStd(shape=())
         self.epsilon = 1e-8
         self.type = processing_type
-        self.constant = constant
+        self.reward_scale = reward_scale
 
     def update(self, reward: float) -> None:
         """Update the running mean and std with the new reward."""
@@ -21,7 +21,7 @@ class RewardProcessor:
         if self.type == "none":
             result = reward
         elif self.type == "const":
-            result = reward / self.constant
+            result = reward * self.reward_scale
         elif self.type == "scaling":
             result = reward / np.sqrt(self.return_rms.var + self.epsilon)
         elif self.type == "centering":
@@ -39,7 +39,7 @@ class RewardProcessor:
         if self.type == "none":
             result = reward
         elif self.type == "const":
-            result = reward * self.constant
+            result = reward / self.reward_scale
         elif self.type == "scaling":
             result = reward * np.sqrt(self.return_rms.var + self.epsilon)
         elif self.type == "centering":
