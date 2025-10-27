@@ -9,6 +9,7 @@ from networks.actor_critic_with_state_value import Network as StateValueNetwork
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer, ReplayBufferData
+from reward_processor import RewardProcessor
 
 
 class SequentialBatchSampler:
@@ -62,11 +63,12 @@ class OnPolicyAgent:
         self.num_bins = args.num_bins
         self.use_action_value = args.use_action_value
         self.action_norm_penalty = args.action_norm_penalty
-        self.reward_scale = args.reward_scale
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
+
+        self.reward_processor = RewardProcessor("const", args.reward_scale)
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
@@ -129,14 +131,15 @@ class OnPolicyAgent:
 
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
-        train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
+        reward_with_penalty = reward - self.action_norm_penalty * action_norm
+        self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
-        info_dict["train_reward"] = train_reward
+        info_dict["reward_with_penalty"] = reward_with_penalty
 
         # add to replay buffer
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
-            train_reward,
+            reward_with_penalty,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
             torch.from_numpy(self.prev_action).to(self.device),
@@ -217,6 +220,10 @@ class OnPolicyAgent:
         bias = torch.tensor(self.action_bias, device=self.device).view(1, -1)
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)
         a = (a - bias) / scale
+
+        # apply reward processing
+        for i in range(r.shape[0]):
+            r[i, 0] = self.reward_processor.normalize(r[i, 0].item())
 
         # preprocessing
         target_v = torch.zeros_like(v[:-1])

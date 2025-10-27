@@ -8,6 +8,7 @@ from networks.actor_critic_with_action_value import Network
 from networks.sparse_utils import apply_masks_during_training
 from networks.weight_project import get_initial_norms, weight_project
 from replay_buffer import ReplayBuffer
+from reward_processor import RewardProcessor
 
 
 class OffPolicyAgent:
@@ -24,7 +25,7 @@ class OffPolicyAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
         self.action_norm_penalty = args.action_norm_penalty
-        self.reward_scale = args.reward_scale
+        self.reward_processor = RewardProcessor("const", args.reward_scale)
 
         self.learning_starts = args.learning_starts
         self.batch_size = args.batch_size
@@ -89,14 +90,15 @@ class OffPolicyAgent:
 
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
-        train_reward = self.reward_scale * (reward - self.action_norm_penalty * action_norm)
+        reward_with_penalty = reward - self.action_norm_penalty * action_norm
+        self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
-        info_dict["train_reward"] = train_reward
+        info_dict["reward_with_penalty"] = reward_with_penalty
 
         # add to replay buffer
         self.rb.add(
             torch.from_numpy(obs).to(self.device),
-            train_reward,
+            reward_with_penalty,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
             torch.from_numpy(self.prev_action).to(self.device),
@@ -159,6 +161,11 @@ class OffPolicyAgent:
 
         # Sample data for training using ReplayBuffer
         data = self.rb.sample(self.batch_size)
+
+        # apply reward processing
+        for i in range(data.rewards.shape[0]):
+            for j in range(data.rewards.shape[1]):
+                data.rewards[i, j] = self.reward_processor.normalize(data.rewards[i, j].item())
 
         # compute target value
         target_value = self.network.compute_target_value(data)
