@@ -8,8 +8,6 @@ python3 train.py pathwise \
   --agent_type off_policy \
   --reward_scale 0.1 \
   --action_norm_penalty 1.0 \
-  --buffer_size 20000 \
-  --learning_starts 2000 \
   --target_score 800.0 \
   --encoder spatial_temporal \
   --temporal_model_type transformer \
