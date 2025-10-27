@@ -21,8 +21,6 @@ class RewardProcessor:
             result = reward
         elif self.type == "const":
             result = reward / self.constant
-        elif self.type == "symlog":
-            result = self._symlog(reward)
         elif self.type == "scaling":
             result = reward / np.sqrt(self.return_rms.var + self.epsilon)
         elif self.type == "centering":
