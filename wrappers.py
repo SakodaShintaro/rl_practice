@@ -3,8 +3,6 @@ import gymnasium as gym
 import minigrid
 import numpy as np
 
-from reward_processor import RewardProcessor
-
 REPEAT = 8
 
 
@@ -19,7 +17,6 @@ def make_env(env_id: str) -> gym.Env:
         env = DiscreteToContinuousWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = RewardProcessorInfoWrapper(env)
         env = ZeroObsOnDoneWrapper(env)
         return env
 
@@ -30,7 +27,6 @@ def make_env(env_id: str) -> gym.Env:
         env = ResizeObs(env, shape=(3, 96, 96))
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = RewardProcessorInfoWrapper(env)
         env = ZeroObsOnDoneWrapper(env)
         return env
 
@@ -42,7 +38,6 @@ def make_env(env_id: str) -> gym.Env:
         env = AverageRewardEarlyStopWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = RewardProcessorInfoWrapper(env)
         env = ZeroObsOnDoneWrapper(env)
         return env
 
@@ -181,34 +176,6 @@ class ResizeObs(gym.ObservationWrapper):
         # obs is (H, W, C), resize and return (H, W, C)
         h, w = self.shape[1:]  # target height and width
         return cv2.resize(obs, (w, h), interpolation=cv2.INTER_AREA)
-
-
-class RewardProcessorInfoWrapper(gym.Wrapper):
-    """
-    Wrapper that applies RewardProcessor and adds processed rewards to info dict.
-    The original reward is kept, but info contains all processed variants.
-    """
-
-    def __init__(self, env):
-        super().__init__(env)
-        self.processors = {
-            "reward_const": RewardProcessor("const"),
-            "reward_symlog": RewardProcessor("symlog"),
-            "reward_scaling": RewardProcessor("scaling"),
-            "reward_centering": RewardProcessor("centering"),
-        }
-
-    def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-
-        # Add all processed rewards to info
-        for key, processor in self.processors.items():
-            info[key] = processor.normalize(reward)
-
-        return obs, reward, terminated, truncated, info
 
 
 class ZeroObsOnDoneWrapper(gym.ObservationWrapper):

@@ -212,10 +212,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 "elapsed_time_min": elapsed_time_min,
                 "SPS": global_step / elapsed_time_sec,
                 "reward": reward,
-                "reward_const": env_info["reward_const"],
-                "reward_symlog": env_info["reward_symlog"],
-                "reward_scaling": env_info["reward_scaling"],
-                "reward_centering": env_info["reward_centering"],
                 **log_agent_info,
             }
             data_dict["losses/pred_image_loss"] = np.mean(np.abs(pred_image - obs_for_render))
