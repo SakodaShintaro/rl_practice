@@ -6,7 +6,6 @@ cd $(dirname $0)
 python3 train.py pathwise \
   --env_id CarRacing-v3 \
   --agent_type off_policy \
-  --reward_scale 0.1 \
   --action_norm_penalty 1.0 \
   --target_score 800.0 \
   --encoder spatial_temporal \

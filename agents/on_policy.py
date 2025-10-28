@@ -68,7 +68,7 @@ class OnPolicyAgent:
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
 
-        self.reward_processor = RewardProcessor("const", args.reward_scale)
+        self.reward_processor = RewardProcessor("scaling", 1.0)
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
