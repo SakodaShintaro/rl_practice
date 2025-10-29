@@ -11,6 +11,7 @@ class RewardProcessor:
         self.epsilon = 1e-8
         self.type = processing_type
         self.reward_scale = reward_scale
+        assert self.reward_scale > 0.0
 
     def update(self, reward: float) -> None:
         """Update the running mean and std with the new reward."""
@@ -24,8 +25,10 @@ class RewardProcessor:
             result = reward * self.reward_scale
         elif self.type == "scaling":
             result = reward / np.sqrt(self.return_rms.var + self.epsilon)
+            result *= self.reward_scale
         elif self.type == "centering":
             result = (reward - self.return_rms.mean) / np.sqrt(self.return_rms.var + self.epsilon)
+            result *= self.reward_scale
         else:
             msg = "Invalid normalizer type"
             raise ValueError(msg)
@@ -41,8 +44,10 @@ class RewardProcessor:
         elif self.type == "const":
             result = reward / self.reward_scale
         elif self.type == "scaling":
+            reward /= self.reward_scale
             result = reward * np.sqrt(self.return_rms.var + self.epsilon)
         elif self.type == "centering":
+            reward /= self.reward_scale
             result = reward * np.sqrt(self.return_rms.var + self.epsilon) + self.return_rms.mean
         else:
             msg = "Invalid normalizer type"
@@ -52,8 +57,8 @@ class RewardProcessor:
 
 
 if __name__ == "__main__":
-    rp_scaling = RewardProcessor("scaling", 0.0)
-    rp_centering = RewardProcessor("centering", 0.0)
+    rp_scaling = RewardProcessor("scaling", 1.0)
+    rp_centering = RewardProcessor("centering", 1.0)
     rewards = [0.5, 10.0, 2.0, 3.0, 4.0, 5.0, -4.0, -10.0, 0.0, 1.0, -1.0]
     for r in rewards:
         rp_scaling.update(r)

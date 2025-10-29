@@ -25,7 +25,7 @@ class OffPolicyAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
         self.action_norm_penalty = args.action_norm_penalty
-        self.reward_processor = RewardProcessor("const", args.reward_scale)
+        self.reward_processor = RewardProcessor("scaling", 1.0)
 
         self.learning_starts = args.learning_starts
         self.batch_size = args.batch_size

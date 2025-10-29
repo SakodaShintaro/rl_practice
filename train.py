@@ -67,7 +67,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step_limit", type=int, default=1_000_000)
     parser.add_argument("--eval_range", type=int, default=100)
     parser.add_argument("--seq_len", type=int, default=32)
-    parser.add_argument("--reward_scale", type=float, default=1.0)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--batch_size", type=int, default=32)
