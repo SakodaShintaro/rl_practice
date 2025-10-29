@@ -8,5 +8,4 @@ python3 train.py score \
   --use_action_value=0 \
   --encoder temporal_only \
   --temporal_model_type gru \
-  --use_done=1 \
   --disable_state_predictor=1 \

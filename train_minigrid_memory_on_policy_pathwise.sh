@@ -8,5 +8,4 @@ python3 train.py pathwise \
   --use_action_value=1 \
   --encoder temporal_only \
   --temporal_model_type gru \
-  --use_done=1 \
   --disable_state_predictor=1 \

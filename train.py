@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--use_done", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
     parser.add_argument("--debug", action="store_true")
 
     # for off_policy
