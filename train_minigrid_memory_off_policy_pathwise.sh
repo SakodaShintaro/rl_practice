@@ -8,5 +8,4 @@ python3 train.py pathwise \
   --encoder temporal_only \
   --temporal_model_type transformer \
   --step_limit 800_000 \
-  --use_done=1 \
   --denoising_time 0.8 \
