@@ -1,0 +1,69 @@
+defaults:
+  - env: MiniGrid-MemoryS9-v0
+  - agent: on_policy
+  - _self_
+
+# Experiment settings
+exp_name: ???
+trial_num: 1
+seed: -1
+render: 1
+target_score: 0.95
+off_wandb: false
+debug: false
+
+# Network architecture
+encoder: temporal_only  # spatial_temporal or temporal_only
+encoder_block_num: 1
+temporal_model_type: gru  # transformer, mamba, or gru
+actor_hidden_dim: 512
+actor_block_num: 1
+critic_hidden_dim: 1024
+critic_block_num: 1
+predictor_hidden_dim: 512
+predictor_block_num: 2
+predictor_step_num: 1
+
+# Value function parameters
+num_bins: 51
+value_range: 2.0
+
+# Training parameters
+learning_rate: 0.0002
+max_grad_norm: 5.0
+sparsity: 0.0
+gamma: 0.99
+step_limit: 1000000
+eval_range: 100
+seq_len: 32
+action_norm_penalty: 0.0
+buffer_device: cuda
+batch_size: 32
+use_done: 1
+use_weight_projection: false
+apply_masks_during_training: 1
+
+# Off-policy parameters (with default values, overridden in agent config)
+buffer_size: 20000
+learning_starts: 2000
+detach_actor: 1
+detach_critic: 0
+detach_predictor: 0
+disable_state_predictor: 0
+dacer_loss_weight: 0.05
+denoising_time: 1.0
+use_eligibility_trace: false
+et_lambda: 0.8
+
+# On-policy parameters (with default values, overridden in agent config)
+buffer_capacity: 4096
+use_action_value: 0
+policy_type: Categorical
+
+# Hydra settings
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

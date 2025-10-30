@@ -1,5 +1,4 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
-import argparse
 import csv
 import os
 import random
@@ -8,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import hydra
 import imageio
 import numpy as np
 import torch
+from omegaconf import DictConfig, OmegaConf
 
 import wandb
 from agents.off_policy import OffPolicyAgent
@@ -19,90 +20,10 @@ from utils import concat_labeled_images, create_reward_image
 from wrappers import make_env
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("exp_name", type=str)
-    parser.add_argument("--trial_num", type=int, default=1)
-    parser.add_argument(
-        "--env_id",
-        type=str,
-        default="MiniGrid-MemoryS9-v0",
-        choices=[
-            "CarRacing-v3",
-            "MiniGrid-Empty-5x5-v0",
-            "MiniGrid-MemoryS9-v0",
-            "MiniGrid-MemoryS11-v0",
-        ],
-    )
-    parser.add_argument(
-        "--agent_type", type=str, default="on_policy", choices=["off_policy", "on_policy"]
-    )
-    parser.add_argument("--seed", type=int, default=-1)
-    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--target_score", type=float, default=0.95)
-    parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument(
-        "--encoder",
-        type=str,
-        default="temporal_only",
-        choices=["spatial_temporal", "temporal_only"],
-    )
-    parser.add_argument("--encoder_block_num", type=int, default=1)
-    parser.add_argument(
-        "--temporal_model_type", type=str, default="gru", choices=["transformer", "mamba", "gru"]
-    )
-    parser.add_argument("--actor_hidden_dim", type=int, default=512)
-    parser.add_argument("--actor_block_num", type=int, default=1)
-    parser.add_argument("--critic_hidden_dim", type=int, default=1024)
-    parser.add_argument("--critic_block_num", type=int, default=1)
-    parser.add_argument("--predictor_hidden_dim", type=int, default=512)
-    parser.add_argument("--predictor_block_num", type=int, default=2)
-    parser.add_argument("--predictor_step_num", type=int, default=1)
-    parser.add_argument("--num_bins", type=int, default=51)
-    parser.add_argument("--value_range", type=float, default=2.0)
-    parser.add_argument("--learning_rate", type=float, default=2e-4)
-    parser.add_argument("--max_grad_norm", type=float, default=5.0)
-    parser.add_argument("--sparsity", type=float, default=0.0)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--step_limit", type=int, default=1_000_000)
-    parser.add_argument("--eval_range", type=int, default=100)
-    parser.add_argument("--seq_len", type=int, default=32)
-    parser.add_argument("--action_norm_penalty", type=float, default=0.0)
-    parser.add_argument("--buffer_device", type=str, default="cuda")
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--debug", action="store_true")
-
-    # for off_policy
-    parser.add_argument("--buffer_size", type=int, default=int(2e4))
-    parser.add_argument("--learning_starts", type=int, default=int(2e3))
-    parser.add_argument("--apply_masks_during_training", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--use_weight_projection", action="store_true")
-    parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--detach_predictor", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--disable_state_predictor", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
-    parser.add_argument("--denoising_time", type=float, default=1.0)
-
-    # for AVG
-    parser.add_argument("--use_eligibility_trace", action="store_true")
-    parser.add_argument("--et_lambda", default=0.8, type=float)
-
-    # for on_policy
-    parser.add_argument("--buffer_capacity", type=int, default=4096)
-    parser.add_argument("--use_action_value", type=int, default=0, choices=[0, 1])
-    parser.add_argument(
-        "--policy_type", type=str, default="Categorical", choices=["Beta", "Categorical"]
-    )
-
-    return parser.parse_args()
-
-
-def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
+def main(cfg: DictConfig, exp_name: str, seed: int) -> None:
     wandb.init(
-        project=f"rl_practice_{args.env_id}",
-        config=vars(args),
+        project=f"rl_practice_{cfg.env_id}",
+        config=OmegaConf.to_container(cfg, resolve=True),
         name=exp_name,
         save_code=True,
         settings=wandb.Settings(quiet=True),
@@ -117,7 +38,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     torch.cuda.set_device(0)
 
     # Create result directories and save files only if not in debug mode
-    if not args.debug:
+    if not cfg.debug:
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
         result_dir.mkdir(parents=True, exist_ok=True)
@@ -146,10 +67,10 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     log_episode_writer = None
 
     # env setup
-    env = make_env(args.env_id)
+    env = make_env(cfg.env_id)
     env.action_space.seed(seed)
 
-    target_score = args.target_score if args.target_score is not None else env.spec.reward_threshold
+    target_score = cfg.target_score if cfg.target_score is not None else env.spec.reward_threshold
 
     start_time = time.time()
 
@@ -158,14 +79,14 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     score_list = []
     best_score = -float("inf")
     obs, _ = env.reset(seed=seed)
-    step_limit = args.step_limit
+    step_limit = cfg.step_limit
 
-    if args.agent_type == "off_policy":
-        agent = OffPolicyAgent(args, env.observation_space, env.action_space)
-    elif args.agent_type == "on_policy":
-        agent = OnPolicyAgent(args, env.observation_space, env.action_space)
+    if cfg.agent_type == "off_policy":
+        agent = OffPolicyAgent(cfg, env.observation_space, env.action_space)
+    elif cfg.agent_type == "on_policy":
+        agent = OnPolicyAgent(cfg, env.observation_space, env.action_space)
     else:
-        raise ValueError(f"Unknown agent type: {args.agent_type}")
+        raise ValueError(f"Unknown agent type: {cfg.agent_type}")
 
     parameter_count = sum(p.numel() for p in agent.network.parameters())
     print(f"Parameter count: {parameter_count:,}")
@@ -226,7 +147,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             )
             bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
             bgr_image_list.append(bgr_image)
-            if args.render:
+            if cfg.render:
                 cv2.imshow("CarRacing", bgr_image)
                 cv2.waitKey(1)
 
@@ -245,7 +166,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
         score = env_info["episode"]["r"]
         score_list.append(score)
-        score_list = score_list[-args.eval_range :]
+        score_list = score_list[-cfg.eval_range :]
         recent_average_score = np.mean(score_list)
 
         data_dict = {
@@ -267,7 +188,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             log_episode_writer.writerow(data_dict)
             log_episode_file.flush()
 
-        is_solved = recent_average_score > target_score and episode_id >= args.eval_range
+        is_solved = recent_average_score > target_score and episode_id >= cfg.eval_range
 
         if episode_id % 5 == 0 or is_solved:
             print(
@@ -321,27 +242,37 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     wandb.finish()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    if args.debug:
-        args.off_wandb = True
-        args.learning_starts = 10
-        args.buffer_capacity = 50
-        args.render = 0
-        args.step_limit = 100
-        args.seq_len = 8
-        args.buffer_size = int(2e4)
+@hydra.main(version_base=None, config_path="config", config_name="config")
+def run(cfg: DictConfig) -> None:
+    if cfg.debug:
+        cfg.off_wandb = True
+        cfg.render = 0
+        cfg.step_limit = 100
+        cfg.seq_len = 8
 
-    if args.off_wandb:
+        # off_policy specific settings
+        if cfg.agent_type == "off_policy":
+            cfg.learning_starts = 10
+            cfg.buffer_size = int(2e4)
+
+        # on_policy specific settings
+        if cfg.agent_type == "on_policy":
+            cfg.buffer_capacity = 50
+
+    if cfg.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
     if not os.environ.get("DISPLAY"):
         print("Because a headless environment is detected, rendering is automatically disabled.")
-        args.render = 0
+        cfg.render = 0
 
-    exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
-    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+    exp_name = f"{cfg.agent_type.upper()}_{cfg.exp_name}"
+    seed = cfg.seed if cfg.seed != -1 else np.random.randint(0, 10000)
 
-    for i in range(args.trial_num):
-        suffix = f"_{i:02d}" if args.trial_num > 1 else ""
-        main(args, exp_name + suffix, seed + i)
+    for i in range(cfg.trial_num):
+        suffix = f"_{i:02d}" if cfg.trial_num > 1 else ""
+        main(cfg, exp_name + suffix, seed + i)
+
+
+if __name__ == "__main__":
+    run()
