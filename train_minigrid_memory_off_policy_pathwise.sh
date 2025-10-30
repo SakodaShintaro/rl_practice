@@ -1,9 +1,10 @@
 #!/bin/bash
 set -eux
 
+suffix=${1:-""}
 cd $(dirname $0)
 
-python3 train.py pathwise \
+python3 train.py pathwise$suffix \
   --agent_type off_policy \
   --encoder temporal_only \
   --temporal_model_type transformer \
