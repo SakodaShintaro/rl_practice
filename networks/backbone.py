@@ -85,17 +85,16 @@ class SpatialTemporalEncoder(nn.Module):
         action_dim: int,
         temporal_model_type: str,
         image_processor_type: str,
-        freeze_image_processor: bool,
         use_image_only: bool,
     ):
         super().__init__()
 
-        self.freeze_image_processor = freeze_image_processor
         self.use_image_only = use_image_only
 
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=image_processor_type
         )
+        self.freeze_image_processor = image_processor_type == "ae"
 
         # image_processor outputs [B, C, H, W] -> treat as [B, H * W, C] (H * W tokens, C channels each)
         self.hidden_image_dim = self.image_processor.output_shape[0]
@@ -202,7 +201,6 @@ class TemporalOnlyEncoder(nn.Module):
         action_dim: アクションの次元 (未使用)
         temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
         image_processor_type: 画像プロセッサのタイプ ("ae" or "simple_cnn")
-        freeze_image_processor: image_processorの勾配を切るかどうか
         use_image_only: 画像のみを使うか（Falseならaction, rewardも入れる）
     """
 
@@ -214,13 +212,12 @@ class TemporalOnlyEncoder(nn.Module):
         action_dim: int,
         temporal_model_type: str,
         image_processor_type: str,
-        freeze_image_processor: bool,
         use_image_only: bool,
     ):
         super().__init__()
 
         self.temporal_model_type = temporal_model_type
-        self.freeze_image_processor = freeze_image_processor
+        self.freeze_image_processor = image_processor_type == "ae"
         self.use_image_only = use_image_only
 
         # Image processor
