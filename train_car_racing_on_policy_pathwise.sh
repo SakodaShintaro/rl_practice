@@ -14,7 +14,6 @@ python3 train.py pathwise \
   --seq_len 8 \
   --num_bins 1 \
   --value_range 60.0 \
-  --learning_rate 1e-4 \
   --step_limit 200_000 \
   --eval_range 20 \
   --max_grad_norm 1.0 \
