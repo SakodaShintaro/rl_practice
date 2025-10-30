@@ -16,3 +16,4 @@ python3 train.py pathwise$suffix \
   --value_range 60.0 \
   --step_limit 40_000 \
   --eval_range 20 \
+  --image_processor_type=ae \

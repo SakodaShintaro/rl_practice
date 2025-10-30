@@ -18,3 +18,4 @@ python3 train.py score$suffix \
   --step_limit 200_000 \
   --eval_range 20 \
   --policy_type Beta \
+  --image_processor_type=ae \

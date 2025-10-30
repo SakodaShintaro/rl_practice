@@ -18,3 +18,4 @@ python3 train.py pathwise$suffix \
   --step_limit 200_000 \
   --eval_range 20 \
   --max_grad_norm 1.0 \
+  --image_processor_type=ae \

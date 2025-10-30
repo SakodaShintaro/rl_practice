@@ -37,7 +37,7 @@ class Network(nn.Module):
                 n_layer=args.encoder_block_num,
                 action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
-                image_processor_type="ae",
+                image_processor_type=args.image_processor_type,
                 use_image_only=True,
             )
         elif args.encoder == "temporal_only":
@@ -47,7 +47,7 @@ class Network(nn.Module):
                 n_layer=args.encoder_block_num,
                 action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
-                image_processor_type="simple_cnn",
+                image_processor_type=args.image_processor_type,
                 use_image_only=True,
             )
         else:

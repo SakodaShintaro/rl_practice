@@ -10,3 +10,4 @@ python3 train.py pathwise$suffix \
   --encoder temporal_only \
   --temporal_model_type gru \
   --disable_state_predictor=1 \
+  --image_processor_type=simple_cnn \
