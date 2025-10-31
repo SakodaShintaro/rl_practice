@@ -69,6 +69,7 @@ class OnPolicyAgent:
         self.apply_masks_during_training = args.apply_masks_during_training
 
         self.reward_processor = RewardProcessor("scaling", 1.0)
+        self.normalizing_by_return = args.normalizing_by_return
 
         if self.use_action_value:
             self.network = ActionValueNetwork(
@@ -129,7 +130,8 @@ class OnPolicyAgent:
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
-        self.reward_processor.update(reward_with_penalty)
+        if not self.normalizing_by_return:
+            self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
         info_dict["reward_with_penalty"] = reward_with_penalty
         info_dict["processed_reward"] = self.reward_processor.normalize(

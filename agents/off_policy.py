@@ -26,6 +26,7 @@ class OffPolicyAgent:
         self.action_bias = (action_space.high + action_space.low) / 2.0
         self.action_norm_penalty = args.action_norm_penalty
         self.reward_processor = RewardProcessor("scaling", 1.0)
+        self.normalizing_by_return = args.normalizing_by_return
 
         self.learning_starts = args.learning_starts
         self.batch_size = args.batch_size
@@ -88,7 +89,8 @@ class OffPolicyAgent:
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
-        self.reward_processor.update(reward_with_penalty)
+        if not self.normalizing_by_return:
+            self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
         info_dict["reward_with_penalty"] = reward_with_penalty
         info_dict["processed_reward"] = self.reward_processor.normalize(

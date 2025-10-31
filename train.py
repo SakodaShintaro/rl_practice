@@ -74,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--normalizing_by_return", type=int, default=0, choices=[0, 1])
     parser.add_argument("--debug", action="store_true")
 
     # for off_policy
@@ -249,6 +250,9 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         score_list.append(score)
         score_list = score_list[-args.eval_range :]
         recent_average_score = np.mean(score_list)
+
+        if args.normalizing_by_return:
+            agent.reward_processor.update(score)
 
         data_dict = {
             "global_step": global_step,
