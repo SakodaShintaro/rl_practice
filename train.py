@@ -177,7 +177,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     while True:
         # initialize episode
         obs, _ = env.reset()
-        agent.initialize_for_episode()
 
         # initial action
         action, agent_info = agent.select_action(global_step, obs, 0.0, False, False)

@@ -79,9 +79,6 @@ class OffPolicyAgent:
         }
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
-    def initialize_for_episode(self) -> None:
-        pass
-
     @torch.inference_mode()
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool

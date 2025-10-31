@@ -48,9 +48,6 @@ class RandomAgent:
     def select_action(self, obs):
         return self.action_space.sample()
 
-    def initialize_for_episode(self):
-        pass
-
 
 class VLMAgent:
     def __init__(self, encoder_type, device=None):
@@ -75,7 +72,6 @@ class VLMAgent:
 
 def run_episode(env, agent, render=False):
     obs, _ = env.reset()
-    agent.initialize_for_episode()
 
     total_reward = 0
     step_count = 0

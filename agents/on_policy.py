@@ -120,9 +120,6 @@ class OnPolicyAgent:
         self.prev_logp = 0.0
         self.prev_value = 0.0
 
-    def initialize_for_episode(self) -> None:
-        pass
-
     @torch.inference_mode()
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
