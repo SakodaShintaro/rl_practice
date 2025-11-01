@@ -30,6 +30,10 @@ class MemoryMazeGymWrapper(gym.Env):
     """
 
     def __init__(self, env_id: str):
+        # Image sizes
+        self.obs_size = 96
+        self.render_size = 256
+
         # Parse the environment ID to get the size
         # Format: memory_maze:MemoryMaze-9x9-v0
         if "9x9" in env_id:
@@ -50,8 +54,10 @@ class MemoryMazeGymWrapper(gym.Env):
         # Set action space
         self.action_space = _convert_to_space(self.env.action_spec())
 
-        # Agent gets egocentric camera at 96x96
-        self.observation_space = spaces.Box(low=0, high=255, shape=(96, 96, 3), dtype=np.uint8)
+        # Agent gets egocentric camera
+        self.observation_space = spaces.Box(
+            low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8
+        )
         self._last_render_image = None
 
     def _create_memory_maze_env(self, maze_size, n_targets, time_limit):
@@ -86,7 +92,7 @@ class MemoryMazeGymWrapper(gym.Env):
             target_height_above_ground=-0.6,
             enable_global_task_observables=True,
             control_timestep=1.0 / 4.0,
-            camera_resolution=96,
+            camera_resolution=self.obs_size,
             target_randomize_colors=False,
         )
 
@@ -124,12 +130,14 @@ class MemoryMazeGymWrapper(gym.Env):
 
     def _extract_observations(self, obs_dict):
         """Extract egocentric camera for agent and top camera for render."""
-        # Agent observation: 'image' (egocentric with target color border, 96x96)
+        # Agent observation: 'image' (egocentric with target color border)
         agent_obs = obs_dict["image"]
 
-        # Render observation: top camera (96x96, upscale to 256x256 for visibility)
+        # Render observation: top camera (upscaled for visibility)
         top_camera_obs = obs_dict["top_camera"]
-        render_obs = cv2.resize(top_camera_obs, (256, 256), interpolation=cv2.INTER_LINEAR)
+        render_obs = cv2.resize(
+            top_camera_obs, (self.render_size, self.render_size), interpolation=cv2.INTER_LINEAR
+        )
 
         return agent_obs, render_obs
 
@@ -150,8 +158,8 @@ class MemoryMazeGymWrapper(gym.Env):
     def render(self):
         if self._last_render_image is not None:
             return self._last_render_image
-        # Default size based on 9x9 maze with cell_size=32
-        return np.zeros((9 * 32, 9 * 32, 3), dtype=np.uint8)
+        # Default: black image with render_size
+        return np.zeros((self.render_size, self.render_size, 3), dtype=np.uint8)
 
 
 def _convert_to_space(spec: Any) -> gym.Space:
