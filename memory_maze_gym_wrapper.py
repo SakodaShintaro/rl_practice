@@ -16,7 +16,6 @@ from memory_maze.maze import (
 from memory_maze.tasks import MemoryMazeTask
 from memory_maze.wrappers import (
     AgentPositionWrapper,
-    DiscreteActionSetWrapper,
     MazeLayoutWrapper,
     RemapObservationWrapper,
     TargetColorAsBorderWrapper,
@@ -120,19 +119,6 @@ class MemoryMazeGymWrapper(gym.Env):
         }
         env = RemapObservationWrapper(env, obs_mapping)
         env = TargetColorAsBorderWrapper(env)  # This modifies 'image' in-place
-
-        # Discrete actions
-        env = DiscreteActionSetWrapper(
-            env,
-            [
-                np.array([0.0, 0.0]),  # noop
-                np.array([-1.0, 0.0]),  # forward
-                np.array([0.0, -1.0]),  # left
-                np.array([0.0, +1.0]),  # right
-                np.array([-1.0, -1.0]),  # forward + left
-                np.array([-1.0, +1.0]),  # forward + right
-            ],
-        )
 
         return env
 

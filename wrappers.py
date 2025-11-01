@@ -34,7 +34,6 @@ def make_env(env_id: str) -> gym.Env:
 
     elif env_id == "MemoryMaze-9x9-v0":
         env = MemoryMazeGymWrapper(env_id)
-        env = DiscreteToContinuousWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
