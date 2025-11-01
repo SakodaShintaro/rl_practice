@@ -92,7 +92,7 @@ class MemoryMazeGymWrapper(gym.Env):
             target_height_above_ground=-0.6,
             enable_global_task_observables=True,
             control_timestep=1.0 / 4.0,
-            camera_resolution=self.obs_size,
+            camera_resolution=self.render_size,
             target_randomize_colors=False,
         )
 
@@ -132,14 +132,10 @@ class MemoryMazeGymWrapper(gym.Env):
         """Extract egocentric camera for agent and top camera for render."""
         # Agent observation: 'image' (egocentric with target color border)
         agent_obs = obs_dict["image"]
-
-        # Render observation: top camera (upscaled for visibility)
-        top_camera_obs = obs_dict["top_camera"]
-        render_obs = cv2.resize(
-            top_camera_obs, (self.render_size, self.render_size), interpolation=cv2.INTER_LINEAR
+        agent_obs = cv2.resize(
+            agent_obs, (self.obs_size, self.obs_size), interpolation=cv2.INTER_LINEAR
         )
-
-        return agent_obs, render_obs
+        return agent_obs, obs_dict["top_camera"]
 
     def reset(self, seed=None, options=None) -> Tuple[Any, dict]:
         ts = self.env.reset()
