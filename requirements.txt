@@ -17,3 +17,4 @@ minigrid
 peft
 fschat
 sentencepiece
+memory-maze

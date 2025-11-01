@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
             "CarRacing-v3",
             "MiniGrid-Empty-5x5-v0",
             "MiniGrid-MemoryS9-v0",
-            "MiniGrid-MemoryS11-v0",
+            "MemoryMaze-9x9-v0",
         ],
     )
     parser.add_argument(

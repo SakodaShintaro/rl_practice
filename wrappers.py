@@ -3,12 +3,12 @@ import gymnasium as gym
 import minigrid
 import numpy as np
 
+from memory_maze_gym_wrapper import MemoryMazeGymWrapper
+
 REPEAT = 8
 
 
 def make_env(env_id: str) -> gym.Env:
-    env = gym.make(env_id, render_mode="rgb_array")
-
     if env_id == "MiniGrid-MemoryS9-v0":
         env = gym.make(env_id, agent_view_size=3, render_mode="rgb_array")
         env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=32)
@@ -20,22 +20,21 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         return env
 
-    elif env_id == "MiniGrid-MemoryS11-v0":
-        env = minigrid.wrappers.RGBImgPartialObsWrapper(env)
-        env = minigrid.wrappers.ImgObsWrapper(env)
-        env = DiscreteToContinuousWrapper(env)
-        env = ResizeObs(env, shape=(3, 96, 96))
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = TransposeAndNormalizeObs(env)
-        env = ZeroObsOnDoneWrapper(env)
-        return env
-
     elif env_id == "CarRacing-v3":
+        env = gym.make(env_id, render_mode="rgb_array")
         env = env.env  # Unwrap the original TimeLimit wrapper
         env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
         env = CarRacingRewardFixWrapper(env)
         env = ActionRepeatWrapper(env, repeat=REPEAT)
         env = AverageRewardEarlyStopWrapper(env)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        return env
+
+    elif env_id == "MemoryMaze-9x9-v0":
+        env = MemoryMazeGymWrapper(env_id)
+        env = DiscreteToContinuousWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
