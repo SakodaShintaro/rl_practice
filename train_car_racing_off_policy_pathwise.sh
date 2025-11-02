@@ -11,7 +11,6 @@ python3 train.py pathwise$suffix \
   --target_score 800.0 \
   --encoder spatial_temporal \
   --temporal_model_type transformer \
-  --seq_len 8 \
   --num_bins 1 \
   --value_range 60.0 \
   --step_limit 40_000 \
