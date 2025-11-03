@@ -216,13 +216,10 @@ class SpatialTemporalBlock(nn.Module):
         """
         b, t, s, c = x.shape
         x = rearrange(x, "b t s c -> (b s) t c")
-
         x, rnn_state = self.tempo_block(x, attn_mask, rnn_state)
-
         x = rearrange(x, "(b s) t c -> (b t) s c", b=b, s=s, t=t)
         x, _ = self.space_block(x, None, None)
         x = rearrange(x, "(b t) s c -> b t s c", b=b, t=t)
-
         return x, rnn_state
 
 
