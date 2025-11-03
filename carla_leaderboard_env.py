@@ -187,7 +187,24 @@ class CARLALeaderboardEnv(gym.Env):
         self.episode_step += 1
 
         assert self.current_image is not None
-        obs = self.current_image.copy()
+
+        # 観測画像とルート画像を連結
+        camera_img = self.current_image.copy()  # (C, H, W)
+        route_img = self._generate_route_image()  # (H, W, 3)
+
+        # ルート画像をカメラ画像の1/4サイズにリサイズ
+        route_h = self.image_size[1] // 4
+        route_w = self.image_size[0] // 4
+        route_img_resized = cv2.resize(route_img, (route_w, route_h))
+
+        # カメラ画像を(C, H, W) -> (H, W, C)に変換
+        camera_img_hwc = (camera_img.transpose(1, 2, 0) * 255).astype(np.uint8)
+
+        # 右下にルート画像を配置
+        camera_img_hwc[-route_h:, -route_w:] = route_img_resized
+
+        # (H, W, C) -> (C, H, W)に戻して正規化
+        obs = camera_img_hwc.transpose(2, 0, 1).astype(np.float32) / 255.0
 
         info = {
             "route_completion": self.route_completion,
@@ -197,70 +214,58 @@ class CARLALeaderboardEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def render(self) -> np.ndarray | None:
-        """マップ+ルート+車両位置を可視化"""
-        if self.render_mode != "rgb_array":
-            return None
-
-        # マップサイズを計算
+    def _generate_route_image(self) -> np.ndarray:
+        """ルート画像を生成（車両は常に中央上向き）"""
         map_size = 512
         render_img = np.ones((map_size, map_size, 3), dtype=np.uint8) * 200
 
-        # 車両の現在位置
+        # 車両の現在位置と向き
         vehicle_loc = self.vehicle.get_location()
+        vehicle_transform = self.vehicle.get_transform()
+        vehicle_yaw = np.radians(vehicle_transform.rotation.yaw)
 
-        # ルートを描画
+        # ルートを描画（車両座標系に変換して回転）
         for i in range(len(self.route_waypoints) - 1):
             wp1 = self.route_waypoints[i]
             wp2 = self.route_waypoints[i + 1]
 
-            x1, y1 = self._world_to_pixel(wp1.transform.location, vehicle_loc, map_size)
-            x2, y2 = self._world_to_pixel(wp2.transform.location, vehicle_loc, map_size)
+            # ワールド座標を車両座標系に変換
+            x1, y1 = self._world_to_vehicle_coords(
+                wp1.transform.location, vehicle_loc, vehicle_yaw, map_size
+            )
+            x2, y2 = self._world_to_vehicle_coords(
+                wp2.transform.location, vehicle_loc, vehicle_yaw, map_size
+            )
 
-            # ルートを青線で描画
+            # ルートを描画
             color = (255, 0, 0) if i < self.current_waypoint_index else (100, 100, 255)
             cv2.line(render_img, (x1, y1), (x2, y2), color, 2)
 
-        # 車両位置を三角形で描画
+        # 車両を中央上向きの三角形で描画
         center_x, center_y = map_size // 2, map_size // 2
-        vehicle_transform = self.vehicle.get_transform()
-        yaw = np.radians(vehicle_transform.rotation.yaw)
-
-        # 三角形の頂点を計算
         triangle_size = 15
-        front_x = int(center_x + triangle_size * np.cos(yaw))
-        front_y = int(center_y - triangle_size * np.sin(yaw))
-        left_x = int(center_x + triangle_size * 0.5 * np.cos(yaw + np.pi * 2 / 3))
-        left_y = int(center_y - triangle_size * 0.5 * np.sin(yaw + np.pi * 2 / 3))
-        right_x = int(center_x + triangle_size * 0.5 * np.cos(yaw - np.pi * 2 / 3))
-        right_y = int(center_y - triangle_size * 0.5 * np.sin(yaw - np.pi * 2 / 3))
+
+        # 上向き（yaw=0）の三角形
+        front_x = center_x
+        front_y = center_y - triangle_size
+        left_x = int(center_x - triangle_size * 0.5)
+        left_y = int(center_y + triangle_size * 0.5)
+        right_x = int(center_x + triangle_size * 0.5)
+        right_y = int(center_y + triangle_size * 0.5)
 
         triangle_pts = np.array(
             [[front_x, front_y], [left_x, left_y], [right_x, right_y]], np.int32
         )
         cv2.fillPoly(render_img, [triangle_pts], (0, 128, 0))
 
-        # 情報テキスト
-        cv2.putText(
-            render_img,
-            f"RC: {self.route_completion:.2f}",
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 0, 0),
-            2,
-        )
-        cv2.putText(
-            render_img,
-            f"Speed: {self._get_speed():.1f} km/h",
-            (10, 60),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 0, 0),
-            2,
-        )
-
         return render_img
+
+    def render(self) -> np.ndarray | None:
+        """マップ+ルート+車両位置を可視化"""
+        if self.render_mode != "rgb_array":
+            return None
+
+        return self._generate_route_image()
 
     def close(self):
         if self.camera_sensor is not None:
@@ -350,14 +355,32 @@ class CARLALeaderboardEnv(gym.Env):
 
         return reward
 
-    def _world_to_pixel(
-        self, world_loc: carla.Location, center_loc: carla.Location, map_size: int
+    def _world_to_vehicle_coords(
+        self,
+        world_loc: carla.Location,
+        vehicle_loc: carla.Location,
+        vehicle_yaw: float,
+        map_size: int,
     ) -> tuple[int, int]:
-        """ワールド座標をピクセル座標に変換"""
+        """ワールド座標を車両座標系（車両中央上向き）に変換"""
+        # 車両からの相対位置
+        dx = world_loc.x - vehicle_loc.x
+        dy = world_loc.y - vehicle_loc.y
+
+        # 車両の向きに合わせて回転（車両が上向きになるように）
+        # 90度反時計回りを追加
+        adjusted_yaw = -vehicle_yaw + np.pi / 2
+        cos_yaw = np.cos(adjusted_yaw)
+        sin_yaw = np.sin(adjusted_yaw)
+        rotated_x = dx * cos_yaw - dy * sin_yaw
+        rotated_y = dx * sin_yaw + dy * cos_yaw
+
+        # ピクセル座標に変換
         scale = 1.0  # メートル/ピクセル
-        x = int((world_loc.x - center_loc.x) / scale + map_size // 2)
-        y = int(-(world_loc.y - center_loc.y) / scale + map_size // 2)
-        return x, y
+        pixel_x = int(+rotated_x / scale + map_size // 2)
+        pixel_y = int(-rotated_y / scale + map_size // 2)
+
+        return pixel_x, pixel_y
 
     def _process_image(self, image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
