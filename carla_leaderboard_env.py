@@ -67,7 +67,6 @@ class CARLALeaderboardEnv(gym.Env):
         self.lane_invasion_history = []
 
         # ルート情報
-        self.route = []  # List[(carla.Transform, RoadOption)]
         self.route_waypoints = []  # List[carla.Waypoint]
         self.current_waypoint_index = 0
 
@@ -102,13 +101,13 @@ class CARLALeaderboardEnv(gym.Env):
             self.vehicle.destroy()
 
         # ルート生成
-        self.route, self.route_waypoints = self._generate_route()
+        self.route_waypoints = self._generate_route()
 
         # 車両をスポーン（ルートの開始地点）
         blueprint_library = self.world.get_blueprint_library()
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
 
-        spawn_transform = self.route[0][0]
+        spawn_transform = self.route_waypoints[0].transform
         spawn_transform.location.z += 0.5
         self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
 
@@ -267,7 +266,7 @@ class CARLALeaderboardEnv(gym.Env):
             settings.synchronous_mode = False
             self.world.apply_settings(settings)
 
-    def _generate_route(self) -> tuple[list, list]:
+    def _generate_route(self) -> list:
         """ランダムなルートを生成"""
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
@@ -293,10 +292,7 @@ class CARLALeaderboardEnv(gym.Env):
                 curr_loc = current_wp.transform.location
                 distance += prev_loc.distance(curr_loc)
 
-        # Transformのリストに変換
-        route = [(wp.transform, None) for wp in route_waypoints]
-
-        return route, route_waypoints
+        return route_waypoints
 
     def _update_route_progress(self):
         """ルート進行状況を更新"""
