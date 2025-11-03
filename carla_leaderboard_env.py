@@ -188,7 +188,6 @@ class CARLALeaderboardEnv(gym.Env):
             "route_completion": self.route_completion,
             "infractions": self.infractions.copy(),
             "speed": self._get_speed(),
-            "distance_to_route": self._get_distance_to_route(),
         }
 
         return obs, reward, terminated, truncated, info
@@ -315,37 +314,24 @@ class CARLALeaderboardEnv(gym.Env):
     def _compute_reward(self) -> float:
         """
         Leaderboard準拠の報酬計算
-        Driving Score = Route Completion x Infraction Penalty
+        Driving Score = Route Completion × Infraction Penalty
         """
-        # Route Completion報酬
-        rc_reward = self.route_completion * 10.0
+        # Route Completion (0.0 ~ 100.0)
+        route_completion_score = self.route_completion * 100.0
 
-        # Infraction Penalty（Leaderboardのペナルティ値）
-        penalty = 0.0
-        if len(self.collision_history) > 0:
-            penalty += 0.65  # 衝突ペナルティ
-        if len(self.lane_invasion_history) > 0:
-            penalty += 0.1 * len(self.lane_invasion_history)  # 車線逸脱
+        # Infraction Penalty（Leaderboardのペナルティ係数を乗算）
+        infraction_penalty = 1.0
+        if self.infractions["collision_pedestrian"] > 0:
+            infraction_penalty *= 0.50
+        if self.infractions["collision_vehicle"] > 0:
+            infraction_penalty *= 0.60
+        if self.infractions["collision_static"] > 0:
+            infraction_penalty *= 0.65
 
-        # ルートからの距離ペナルティ
-        dist_to_route = self._get_distance_to_route()
-        if dist_to_route > 5.0:  # 5m以上離れたらペナルティ
-            penalty += 0.5
+        # Driving Score
+        driving_score = route_completion_score * infraction_penalty
 
-        # 速度報酬（適度な速度を奨励）
-        speed = self._get_speed()
-        speed_reward = 0.01 if 10.0 < speed < 50.0 else 0.0
-
-        return rc_reward + speed_reward - penalty
-
-    def _get_distance_to_route(self) -> float:
-        """車両とルートの最短距離"""
-        if self.current_waypoint_index >= len(self.route_waypoints):
-            return 0.0
-
-        vehicle_loc = self.vehicle.get_location()
-        wp = self.route_waypoints[self.current_waypoint_index]
-        return vehicle_loc.distance(wp.transform.location)
+        return driving_score
 
     def _world_to_pixel(
         self, world_loc: carla.Location, center_loc: carla.Location, map_size: int
