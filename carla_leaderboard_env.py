@@ -84,9 +84,6 @@ class CARLALeaderboardEnv(gym.Env):
 
         # エピソード情報
         self.episode_step = 0
-        self.total_reward = 0.0
-        self.traveled_distance = 0.0
-        self.prev_location = None
 
     def reset(
         self,
@@ -115,7 +112,6 @@ class CARLALeaderboardEnv(gym.Env):
         spawn_transform = self.route[0][0]
         spawn_transform.location.z += 0.5
         self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
-        self.prev_location = self.vehicle.get_location()
 
         # カメラセンサー
         camera_bp = blueprint_library.find("sensor.camera.rgb")
@@ -144,8 +140,6 @@ class CARLALeaderboardEnv(gym.Env):
 
         # 初期化
         self.episode_step = 0
-        self.total_reward = 0.0
-        self.traveled_distance = 0.0
         self.current_waypoint_index = 0
         self.route_completion = 0.0
         self.collision_history = []
@@ -194,7 +188,6 @@ class CARLALeaderboardEnv(gym.Env):
         truncated = self.episode_step >= self.max_episode_steps
 
         self.episode_step += 1
-        self.total_reward += reward
 
         obs = (
             self.current_image.copy()
@@ -332,11 +325,6 @@ class CARLALeaderboardEnv(gym.Env):
 
         self.current_waypoint_index = closest_idx
         self.route_completion = min(1.0, closest_idx / max(1, len(self.route_waypoints) - 1))
-
-        # 移動距離
-        if self.prev_location is not None:
-            self.traveled_distance += vehicle_loc.distance(self.prev_location)
-        self.prev_location = vehicle_loc
 
     def _compute_reward(self) -> float:
         """
