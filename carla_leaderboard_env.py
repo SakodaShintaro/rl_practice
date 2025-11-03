@@ -7,7 +7,6 @@ sys.path.append(os.path.expanduser("~/work/scenario_runner"))
 sys.path.append(os.path.expanduser("~/work/leaderboard"))
 
 import time
-from typing import Any, Dict, Optional, Tuple
 
 import carla
 import cv2
@@ -87,9 +86,9 @@ class CARLALeaderboardEnv(gym.Env):
 
     def reset(
         self,
-        seed: Optional[int],
-        options: Optional[Dict[str, Any]],
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        seed: int | None,
+        options: dict[str, any] | None,
+    ) -> tuple[np.ndarray, dict[str, any]]:
         super().reset(seed=seed)
 
         # 既存の車両とセンサーを削除
@@ -162,7 +161,7 @@ class CARLALeaderboardEnv(gym.Env):
         info = {}
         return self.current_image.copy(), info
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # 行動を適用
         steer = float(np.clip(action[0], -1.0, 1.0))
         throttle = float(np.clip((action[1] + 1.0) / 2.0, 0.0, 1.0))
@@ -204,7 +203,7 @@ class CARLALeaderboardEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def render(self) -> Optional[np.ndarray]:
+    def render(self) -> np.ndarray | None:
         """マップ+ルート+車両位置を可視化"""
         if self.render_mode != "rgb_array":
             return None
@@ -277,7 +276,7 @@ class CARLALeaderboardEnv(gym.Env):
             settings.synchronous_mode = False
             self.world.apply_settings(settings)
 
-    def _generate_route(self) -> Tuple[list, list]:
+    def _generate_route(self) -> tuple[list, list]:
         """ランダムなルートを生成"""
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
@@ -363,7 +362,7 @@ class CARLALeaderboardEnv(gym.Env):
 
     def _world_to_pixel(
         self, world_loc: carla.Location, center_loc: carla.Location, map_size: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """ワールド座標をピクセル座標に変換"""
         scale = 4.0  # メートル/ピクセル
         x = int((world_loc.x - center_loc.x) / scale + map_size // 2)
