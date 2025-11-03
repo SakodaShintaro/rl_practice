@@ -239,7 +239,7 @@ class CARLALeaderboardEnv(gym.Env):
 
             # ルートを描画
             color = (255, 0, 0) if i < self.current_waypoint_index else (100, 100, 255)
-            cv2.line(render_img, (x1, y1), (x2, y2), color, 2)
+            cv2.line(render_img, (x1, y1), (x2, y2), color, 20)
 
         # 車両を中央上向きの三角形で描画
         center_x, center_y = map_size // 2, map_size // 2
@@ -256,7 +256,7 @@ class CARLALeaderboardEnv(gym.Env):
         triangle_pts = np.array(
             [[front_x, front_y], [left_x, left_y], [right_x, right_y]], np.int32
         )
-        cv2.fillPoly(render_img, [triangle_pts], (0, 128, 0))
+        cv2.fillPoly(render_img, [triangle_pts], (0, 255, 0))
 
         return render_img
 
