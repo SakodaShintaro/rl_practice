@@ -90,6 +90,7 @@ class SpatialTemporalEncoder(nn.Module):
         super().__init__()
 
         self.use_image_only = use_image_only
+        self.n_layer = n_layer
 
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=image_processor_type
@@ -105,11 +106,13 @@ class SpatialTemporalEncoder(nn.Module):
         reward_tokens_num = 1
         register_tokens_num = 1
 
+        self.space_len = (
+            self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
+        )
+
         self.spatial_temporal = SpatialTemporalTransformer(
             n_layer=n_layer,
-            space_len=(
-                self.image_tokens_num + action_tokens_num + reward_tokens_num + register_tokens_num
-            ),
+            space_len=self.space_len,
             tempo_len=seq_len,
             hidden_dim=self.hidden_image_dim,
             n_head=1,
@@ -129,19 +132,20 @@ class SpatialTemporalEncoder(nn.Module):
         self.output_dim = self.hidden_image_dim * token_num
 
     def init_state(self) -> torch.Tensor:
-        return torch.zeros(1, 1, self.output_dim)
+        # [1, 1, n_layer * space_len * hidden_image_dim]
+        return torch.zeros(1, 1, self.n_layer * self.space_len * self.hidden_image_dim)
 
     def forward(
         self,
         images: torch.Tensor,  # (B, T, 3, H, W)
         actions: torch.Tensor,  #  (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,  # None. not used but for compatibility
+        rnn_state: torch.Tensor,  # (1, B, n_layer * space_len * hidden_image_dim)
     ) -> torch.Tensor:
         """
         Returns:
             encoded features: (B, output_dim)
-            rnn_state: None. not used but for compatibility
+            rnn_state: (1, B, n_layer * space_len * hidden_image_dim)
         """
         # Encode all frames with AE but preserve spatial structure
         # images: (B, T, C, H, W) -> encode all frames
@@ -176,7 +180,9 @@ class SpatialTemporalEncoder(nn.Module):
         all_embed = torch.cat([image_embed, action_embed, reward_embed, register_token], dim=2)
 
         # Apply STT to all frames
-        spatial_temporal_output = self.spatial_temporal(all_embed)  # [B, T, S+action_dim+1, C']
+        spatial_temporal_output, rnn_state = self.spatial_temporal(
+            all_embed, rnn_state
+        )  # [B, T, S+action_dim+1, C']
 
         # Use last timestep's image tokens for final representation
         last_frame_emb = spatial_temporal_output[:, -1, :, :]  # [B, S+action_dim+1, C']

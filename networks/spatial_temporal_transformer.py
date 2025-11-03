@@ -121,10 +121,10 @@ class TransformerBlock(nn.Module):
             nn.Dropout(config.res_drop_prob),
         )
 
-    def forward(self, x, attn_mask=None):
+    def forward(self, x, attn_mask, rnn_state):
         x = x + self.attn(self.ln1(x), attn_mask)
         x = x + self.mlp(self.ln2(x))
-        return x
+        return x, rnn_state
 
 
 class MambaBlock(nn.Module):
@@ -152,29 +152,78 @@ class MambaBlock(nn.Module):
             ),
         )
 
-    def forward(self, x, attn_mask=None):
-        return self.block(x)[0]
+    def forward(self, x, attn_mask, rnn_state):
+        return self.block(x)[0], rnn_state
+
+
+class GRUBlock(nn.Module):
+    """
+    GRUブロック（TransformerBlock/MambaBlockと置き換え可能）
+
+    このブロックはインターフェースを統一するため、rnn_stateの形状変換を内部で行います。
+
+    Args:
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_dim = config.hidden_dim
+        # num_layers=1 のGRUを使用
+        self.gru = nn.GRU(config.hidden_dim, config.hidden_dim, num_layers=1, batch_first=True)
+
+    def forward(self, x, attn_mask, rnn_state):
+        """
+        Args:
+            x: [B, T, C]
+            attn_mask: 未使用（インターフェース互換性のため）
+            rnn_state: [1, B, C] GRUの隠れ状態
+
+        Returns:
+            x: [B, T, C]
+            rnn_state: [1, B, C] 更新されたGRUの隠れ状態
+        """
+        x, rnn_state = self.gru(x, rnn_state)
+        return x, rnn_state
 
 
 class SpatialTemporalBlock(nn.Module):
     def __init__(self, config, temporal_model_type):
         super().__init__()
+        self.temporal_model_type = temporal_model_type
+
         if temporal_model_type == "mamba":
             self.tempo_block = MambaBlock(config)
         elif temporal_model_type == "transformer":
             self.tempo_block = TransformerBlock(config)
+        elif temporal_model_type == "gru":
+            self.tempo_block = GRUBlock(config)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = TransformerBlock(config)
 
-    def forward(self, x, attn_mask):
+    def forward(self, x, attn_mask, rnn_state):
+        """
+        Args:
+            x: [B, T, S, C]
+            attn_mask: attention mask for temporal dimension
+            rnn_state: [1, B*S, C] GRU hidden state (only for temporal_model_type=="gru"), or None
+
+        Returns:
+            x: [B, T, S, C]
+            rnn_state: [1, B*S, C] updated GRU hidden state (only for temporal_model_type=="gru"), or None
+        """
         b, t, s, c = x.shape
         x = rearrange(x, "b t s c -> (b s) t c")
-        x = self.tempo_block(x, attn_mask)
+
+        x, rnn_state = self.tempo_block(x, attn_mask, rnn_state)
+
         x = rearrange(x, "(b s) t c -> (b t) s c", b=b, s=s, t=t)
-        x = self.space_block(x)
+        x, _ = self.space_block(x, None, None)
         x = rearrange(x, "(b t) s c -> b t s c", b=b, t=t)
-        return x
+
+        return x, rnn_state
 
 
 class SpatialTemporalTransformer(nn.Module):
@@ -199,14 +248,16 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
+        self.space_len = space_len
+        self.temporal_model_type = temporal_model_type
 
         self.tempo_emb = nn.Parameter(torch.zeros(1, tempo_len, 1, self.hidden_dim))
         nn.init.normal_(self.tempo_emb.data, mean=0, std=0.02)
         self.space_emb = nn.Parameter(torch.zeros(1, 1, space_len, self.hidden_dim))
         nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
-        self.spatial_temporal_blocks = nn.Sequential(
-            *[SpatialTemporalBlock(config, temporal_model_type) for _ in range(self.n_layer)]
+        self.spatial_temporal_blocks = nn.ModuleList(
+            [SpatialTemporalBlock(config, temporal_model_type) for _ in range(self.n_layer)]
         )
 
         self.apply(self._init_weights)
@@ -225,24 +276,52 @@ class SpatialTemporalTransformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, rnn_state: torch.Tensor) -> tuple:
         """
         Forward pass of the SpatialTemporalTransformer.
 
         Args:
             x: [B, T, S, C]
+            rnn_state: [1, B, n_layer * S * C] (for GRU) or [1, B, 1] (for others)
 
         Returns:
-            torch.Tensor: shape [B, T, S, C]
+            out: [B, T, S, C]
+            rnn_state: [1, B, n_layer * S * C] (for GRU) or same as input (for others)
         """
-        _, T, S, _ = x.shape
+        B, T, S, C = x.shape
 
         tempo_emb = torch.repeat_interleave(self.tempo_emb, S, dim=2)
         space_emb = torch.repeat_interleave(self.space_emb, T, dim=1)
 
         out = x + tempo_emb + space_emb
 
-        for i in range(self.n_layer):
-            out = self.spatial_temporal_blocks[i](out, self.mask_time)
+        # rnn_stateを各レイヤーの状態に分割
+        # GRUの場合: [1, B, n_layer * S * C] -> n_layer個の [1, B*S, C]
+        # それ以外: rnn_stateをそのまま使用（各ブロックが無視する）
+        if self.temporal_model_type == "gru":
+            # [1, B, n_layer * S * C] -> [B, n_layer * S * C]
+            rnn_state_squeezed = rnn_state.squeeze(0)
+            # [B, n_layer * S * C] -> [B, n_layer, S, C]
+            layer_states = rnn_state_squeezed.view(B, self.n_layer, S, C)
+            layer_states = [layer_states[:, i, :, :].contiguous() for i in range(self.n_layer)]
+            # 各レイヤーの状態を [1, B*S, C] に変形
+            layer_states = [s.view(1, B * S, C) for s in layer_states]
+        else:
+            layer_states = [None] * self.n_layer
 
-        return out
+        new_layer_states = []
+        for i in range(self.n_layer):
+            out, new_state = self.spatial_temporal_blocks[i](out, self.mask_time, layer_states[i])
+            new_layer_states.append(new_state)
+
+        # 各レイヤーの状態を結合
+        # GRUの場合: n_layer個の [1, B*S, C] -> [1, B, n_layer * S * C]
+        # それ以外: 入力のrnn_stateをそのまま返す
+        if self.temporal_model_type == "gru":
+            new_layer_states = [s.view(B, S, C) for s in new_layer_states]
+            # [B, n_layer, S, C] -> [B, n_layer * S * C] -> [1, B, n_layer * S * C]
+            rnn_state = (
+                torch.stack(new_layer_states, dim=1).view(B, self.n_layer * S * C).unsqueeze(0)
+            )
+
+        return out, rnn_state
