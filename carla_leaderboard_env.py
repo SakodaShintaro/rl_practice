@@ -375,9 +375,9 @@ class CARLALeaderboardEnv(gym.Env):
         rotated_x = dx * cos_yaw - dy * sin_yaw
         rotated_y = dx * sin_yaw + dy * cos_yaw
 
-        # ピクセル座標に変換
+        # ピクセル座標に変換（左右をflip）
         scale = 1.0  # メートル/ピクセル
-        pixel_x = int(+rotated_x / scale + map_size // 2)
+        pixel_x = int(-rotated_x / scale + map_size // 2)
         pixel_y = int(-rotated_y / scale + map_size // 2)
 
         return pixel_x, pixel_y
