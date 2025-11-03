@@ -221,17 +221,24 @@ class CARLALeaderboardEnv(gym.Env):
             color = (255, 0, 0) if i < self.current_waypoint_index else (100, 100, 255)
             cv2.line(render_img, (x1, y1), (x2, y2), color, 2)
 
-        # 車両位置を描画（赤丸）
+        # 車両位置を三角形で描画
         center_x, center_y = map_size // 2, map_size // 2
-        cv2.circle(render_img, (center_x, center_y), 8, (0, 0, 255), -1)
-
-        # 車両の向き（矢印）
         vehicle_transform = self.vehicle.get_transform()
         yaw = np.radians(vehicle_transform.rotation.yaw)
-        arrow_length = 20
-        end_x = int(center_x + arrow_length * np.cos(yaw))
-        end_y = int(center_y - arrow_length * np.sin(yaw))
-        cv2.arrowedLine(render_img, (center_x, center_y), (end_x, end_y), (0, 255, 0), 2)
+
+        # 三角形の頂点を計算
+        triangle_size = 15
+        front_x = int(center_x + triangle_size * np.cos(yaw))
+        front_y = int(center_y - triangle_size * np.sin(yaw))
+        left_x = int(center_x + triangle_size * 0.5 * np.cos(yaw + np.pi * 2 / 3))
+        left_y = int(center_y - triangle_size * 0.5 * np.sin(yaw + np.pi * 2 / 3))
+        right_x = int(center_x + triangle_size * 0.5 * np.cos(yaw - np.pi * 2 / 3))
+        right_y = int(center_y - triangle_size * 0.5 * np.sin(yaw - np.pi * 2 / 3))
+
+        triangle_pts = np.array(
+            [[front_x, front_y], [left_x, left_y], [right_x, right_y]], np.int32
+        )
+        cv2.fillPoly(render_img, [triangle_pts], (0, 128, 0))
 
         # 情報テキスト
         cv2.putText(
