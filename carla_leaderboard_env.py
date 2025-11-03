@@ -63,7 +63,6 @@ class CARLALeaderboardEnv(gym.Env):
 
         # センサーデータ
         self.current_image = None
-        self.collision_history = []
         self.lane_invasion_history = []
 
         # ルート情報
@@ -79,6 +78,7 @@ class CARLALeaderboardEnv(gym.Env):
             "red_light": 0,
             "lane_invasion": 0,
         }
+        self.prev_driving_score = 0.0
 
         # エピソード情報
         self.episode_step = 0
@@ -140,9 +140,9 @@ class CARLALeaderboardEnv(gym.Env):
         self.episode_step = 0
         self.current_waypoint_index = 0
         self.route_completion = 0.0
-        self.collision_history = []
         self.lane_invasion_history = []
         self.infractions = {k: 0 for k in self.infractions}
+        self.prev_driving_score = 0.0
         self.current_image = None
 
         # 最初のフレームを取得
@@ -176,7 +176,12 @@ class CARLALeaderboardEnv(gym.Env):
         reward = self._compute_reward()
 
         # 終了条件
-        terminated = len(self.collision_history) > 0 or self.route_completion >= 1.0
+        has_collision = (
+            self.infractions["collision_pedestrian"] > 0
+            or self.infractions["collision_vehicle"] > 0
+            or self.infractions["collision_static"] > 0
+        )
+        terminated = has_collision or self.route_completion >= 1.0
         truncated = self.episode_step >= self.max_episode_steps
 
         self.episode_step += 1
@@ -315,6 +320,7 @@ class CARLALeaderboardEnv(gym.Env):
         """
         Leaderboard準拠の報酬計算
         Driving Score = Route Completion × Infraction Penalty
+        報酬は前回との差分
         """
         # Route Completion (0.0 ~ 100.0)
         route_completion_score = self.route_completion * 100.0
@@ -331,7 +337,11 @@ class CARLALeaderboardEnv(gym.Env):
         # Driving Score
         driving_score = route_completion_score * infraction_penalty
 
-        return driving_score
+        # 報酬は前回との差分
+        reward = driving_score - self.prev_driving_score
+        self.prev_driving_score = driving_score
+
+        return reward
 
     def _world_to_pixel(
         self, world_loc: carla.Location, center_loc: carla.Location, map_size: int
@@ -350,7 +360,6 @@ class CARLALeaderboardEnv(gym.Env):
         self.current_image = array
 
     def _on_collision(self, event):
-        self.collision_history.append(event)
         other_actor = event.other_actor
         if "vehicle" in other_actor.type_id:
             self.infractions["collision_vehicle"] += 1
