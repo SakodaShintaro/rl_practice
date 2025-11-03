@@ -28,13 +28,9 @@ class CARLALeaderboardEnv(gym.Env):
         super().__init__()
 
         # 設定値
-        self.host = "localhost"
-        self.port = 2000
-        self.town = "Town01"
         self.image_size = (192, 192)  # (width, height)
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
-        self.route_length = 200.0  # ルートの目標長さ（メートル）
 
         # Gymnasium spaces
         self.observation_space = gym.spaces.Box(
@@ -46,9 +42,9 @@ class CARLALeaderboardEnv(gym.Env):
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
 
         # CARLA接続
-        self.client = carla.Client(self.host, self.port)
+        self.client = carla.Client("localhost", 2000)
         self.client.set_timeout(10.0)
-        self.world = self.client.load_world(self.town)
+        self.world = self.client.load_world("Town01")
 
         # 同期モード設定
         settings = self.world.get_settings()
@@ -300,7 +296,7 @@ class CARLALeaderboardEnv(gym.Env):
         current_wp = start_wp
         distance = 0.0
 
-        while distance < self.route_length:
+        while distance < 200.0:
             next_wps = current_wp.next(2.0)
             if not next_wps:
                 break
