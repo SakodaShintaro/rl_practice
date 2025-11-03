@@ -319,7 +319,7 @@ class CARLALeaderboardEnv(gym.Env):
     def _compute_reward(self) -> float:
         """
         Leaderboard準拠の報酬計算
-        Driving Score = Route Completion × Infraction Penalty
+        Driving Score = Route Completion x Infraction Penalty
         報酬は前回との差分
         """
         # Route Completion (0.0 ~ 100.0)
@@ -347,7 +347,7 @@ class CARLALeaderboardEnv(gym.Env):
         self, world_loc: carla.Location, center_loc: carla.Location, map_size: int
     ) -> tuple[int, int]:
         """ワールド座標をピクセル座標に変換"""
-        scale = 4.0  # メートル/ピクセル
+        scale = 1.0  # メートル/ピクセル
         x = int((world_loc.x - center_loc.x) / scale + map_size // 2)
         y = int(-(world_loc.y - center_loc.y) / scale + map_size // 2)
         return x, y
