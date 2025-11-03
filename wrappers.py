@@ -41,14 +41,7 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "CARLA-Leaderboard-v0":
-        env = CARLALeaderboardEnv(
-            host="localhost",
-            port=2000,
-            town="Town01",
-            image_size=(192, 192),
-            max_episode_steps=1000,
-            render_mode="rgb_array",
-        )
+        env = CARLALeaderboardEnv()
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
         return env
