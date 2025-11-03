@@ -182,11 +182,8 @@ class CARLALeaderboardEnv(gym.Env):
 
         self.episode_step += 1
 
-        obs = (
-            self.current_image.copy()
-            if self.current_image is not None
-            else np.zeros((3, self.image_size[1], self.image_size[0]), dtype=np.float32)
-        )
+        assert self.current_image is not None
+        obs = self.current_image.copy()
 
         info = {
             "route_completion": self.route_completion,
