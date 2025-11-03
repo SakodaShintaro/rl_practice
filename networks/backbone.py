@@ -337,7 +337,7 @@ class TemporalOnlyEncoder(nn.Module):
             # Apply Transformer blocks
             current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)
             for block in self.blocks:
-                sequence = block(sequence, current_mask)
+                sequence, _ = block(sequence, current_mask, None)
 
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)
