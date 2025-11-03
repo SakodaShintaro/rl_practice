@@ -55,8 +55,20 @@ class CARLALeaderboardEnv(gym.Env):
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
 
         # CARLA接続
-        self.client = None
-        self.world = None
+        self.client = carla.Client(self.host, self.port)
+        self.client.set_timeout(10.0)
+        self.world = self.client.load_world(self.town)
+
+        # 同期モード設定
+        settings = self.world.get_settings()
+        settings.synchronous_mode = True
+        settings.fixed_delta_seconds = 0.05  # 20 FPS
+        self.world.apply_settings(settings)
+
+        # スポーン地点取得
+        self.spawn_points = self.world.get_map().get_spawn_points()
+
+        # センサーと車両（エピソードごとに再生成）
         self.vehicle = None
         self.camera_sensor = None
         self.collision_sensor = None
@@ -69,7 +81,6 @@ class CARLALeaderboardEnv(gym.Env):
         self.episode_step = 0
         self.total_reward = 0.0
         self.prev_location = None
-        self.spawn_points = None
 
     def reset(
         self,
@@ -77,21 +88,6 @@ class CARLALeaderboardEnv(gym.Env):
         options: Optional[Dict[str, Any]],
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         super().reset(seed=seed)
-
-        # CARLA接続
-        if self.client is None:
-            self.client = carla.Client(self.host, self.port)
-            self.client.set_timeout(10.0)
-            self.world = self.client.load_world(self.town)
-
-            # 同期モード設定
-            settings = self.world.get_settings()
-            settings.synchronous_mode = True
-            settings.fixed_delta_seconds = 0.05  # 20 FPS
-            self.world.apply_settings(settings)
-
-            # スポーン地点取得
-            self.spawn_points = self.world.get_map().get_spawn_points()
 
         # 既存の車両とセンサーを削除
         if self.camera_sensor is not None:
@@ -189,7 +185,6 @@ class CARLALeaderboardEnv(gym.Env):
             "collision": len(self.collision_history) > 0,
             "speed": self._get_speed(),
         }
-
 
         return obs, reward, terminated, truncated, info
 
