@@ -147,19 +147,13 @@ class CARLALeaderboardEnv(gym.Env):
         self.current_image = None
 
         # 最初のフレームを取得
-        for _ in range(5):
+        while True:
             self.world.tick()
             if self.current_image is not None:
                 break
             time.sleep(0.1)
 
-        if self.current_image is None:
-            self.current_image = np.zeros(
-                (3, self.image_size[1], self.image_size[0]), dtype=np.float32
-            )
-
-        info = {}
-        return self.current_image.copy(), info
+        return self.current_image.copy(), {}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # 行動を適用
