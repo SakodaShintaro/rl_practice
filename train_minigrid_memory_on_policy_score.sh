@@ -10,3 +10,4 @@ python3 train.py score$suffix \
   --encoder temporal_only \
   --disable_state_predictor=1 \
   --image_processor_type=simple_cnn \
+  --critic_loss_weight=0.25 \

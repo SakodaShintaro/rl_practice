@@ -25,6 +25,7 @@ class Network(nn.Module):
         self.sparsity = args.sparsity
         self.seq_len = args.seq_len
         self.dacer_loss_weight = args.dacer_loss_weight
+        self.critic_loss_weight = args.critic_loss_weight
 
         self.action_dim = action_dim
         self.predictor_step_num = args.predictor_step_num
@@ -145,7 +146,7 @@ class Network(nn.Module):
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr)
 
-        total_loss = critic_loss + actor_loss + seq_loss
+        total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
         activations_dict = {
             "state": state_curr,

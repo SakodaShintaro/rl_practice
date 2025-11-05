@@ -29,6 +29,7 @@ class Network(nn.Module):
         self.num_bins = args.num_bins
         self.observation_space_shape = observation_space_shape
         self.predictor_step_num = args.predictor_step_num
+        self.critic_loss_weight = args.critic_loss_weight
 
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
@@ -174,7 +175,7 @@ class Network(nn.Module):
             value_loss_clipped = F.mse_loss(value_clipped, curr_target_v)
             value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-        loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
+        loss = action_loss + self.critic_loss_weight * value_loss - 0.02 * entropy.mean()
 
         activations_dict = {
             "state": state_curr,
