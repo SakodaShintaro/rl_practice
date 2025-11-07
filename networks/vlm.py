@@ -79,7 +79,7 @@ class VLMEncoderBase(nn.Module):
 
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
             cache_dir="./cache",
             device_map=device,
@@ -222,7 +222,7 @@ class MMMambaEncoder(nn.Module):
         self.model = mmMambaChatModel.from_pretrained(
             model_id,
             cache_dir="./cache",
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         ).eval()
         self.model = self.model.to(device)
 

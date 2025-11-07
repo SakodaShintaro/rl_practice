@@ -6,7 +6,7 @@ import cv2
 import torch
 from torchvision import transforms
 
-from networks.backbone import (
+from networks.vlm import (
     MMMambaEncoder,
     QwenVLEncoder,
     SmolVLMEncoder,
