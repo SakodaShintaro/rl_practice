@@ -198,7 +198,8 @@ class SmolVLMEncoder(VLMEncoderBase):
 
 class QwenVLEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
-        model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
+        model_id = "Qwen/Qwen3-VL-2B-Instruct"
+        # model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-32B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
