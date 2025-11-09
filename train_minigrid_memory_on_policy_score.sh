@@ -9,5 +9,5 @@ python3 train.py score$suffix \
   --use_action_value=0 \
   --encoder temporal_only \
   --disable_state_predictor=1 \
-  --image_processor_type=simple_cnn \
+  --image_processor_type=ae \
   --critic_loss_weight=0.25 \

@@ -112,13 +112,14 @@ class Network(nn.Module):
 
     def forward(
         self,
-        r_seq: torch.Tensor,  # (B, T, 1)
         s_seq: torch.Tensor,  # (B, T, C, H, W)
+        obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         a_seq: torch.Tensor,  # (B, T, action_dim)
+        r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, hidden_size)
-        action: torch.Tensor | None = None,  # (B, action_dim) or None
+        action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
+        x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         value_dict = self.value_head(x)
 
@@ -136,11 +137,14 @@ class Network(nn.Module):
     def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:
         # Encode state
         obs_curr = data.observations[:, :-1]
+        obs_z_curr = data.obs_z[:, :-1]
         actions_curr = data.actions[:, :-1]
         rewards_curr = data.rewards[:, :-1]
         rnn_state_curr = data.rnn_state[:, 0].permute(1, 0, 2).contiguous()
 
-        state_curr, _ = self.encoder.forward(obs_curr, actions_curr, rewards_curr, rnn_state_curr)
+        state_curr, _ = self.encoder.forward(
+            obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
+        )
 
         # Get policy output
         policy_dict = self.policy_head(state_curr, action=data.actions[:, -1])
