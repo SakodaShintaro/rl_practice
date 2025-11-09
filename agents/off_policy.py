@@ -101,9 +101,8 @@ class OffPolicyAgent:
 
         # add to replay buffer
         obs_tensor = torch.from_numpy(obs).to(self.device)
-        with torch.no_grad():
-            obs_z = self.network.encoder.image_processor.encode(obs_tensor.unsqueeze(0))
-            obs_z = obs_z.squeeze(0)
+        obs_z = self.network.encoder.image_processor.encode(obs_tensor.unsqueeze(0))
+        obs_z = obs_z.squeeze(0)
         self.rb.add(
             obs_tensor,
             obs_z,
