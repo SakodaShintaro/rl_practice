@@ -12,6 +12,7 @@ import carla
 import cv2
 import gymnasium as gym
 import numpy as np
+import scipy
 
 
 class CARLALeaderboardEnv(gym.Env):
@@ -101,13 +102,13 @@ class CARLALeaderboardEnv(gym.Env):
             self.vehicle.destroy()
 
         # ルート生成
-        self.route_waypoints = self._generate_route()
+        self.route_waypoints, start_pose = self._generate_route()
 
         # 車両をスポーン（ルートの開始地点）
         blueprint_library = self.world.get_blueprint_library()
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
 
-        spawn_transform = self.route_waypoints[0].transform
+        spawn_transform = start_pose
         spawn_transform.location.z += 0.5
         self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
 
@@ -230,12 +231,8 @@ class CARLALeaderboardEnv(gym.Env):
             wp2 = self.route_waypoints[i + 1]
 
             # ワールド座標を車両座標系に変換
-            x1, y1 = self._world_to_vehicle_coords(
-                wp1.transform.location, vehicle_loc, vehicle_yaw, map_size
-            )
-            x2, y2 = self._world_to_vehicle_coords(
-                wp2.transform.location, vehicle_loc, vehicle_yaw, map_size
-            )
+            x1, y1 = self._world_to_vehicle_coords(wp1, vehicle_loc, vehicle_yaw, map_size)
+            x2, y2 = self._world_to_vehicle_coords(wp2, vehicle_loc, vehicle_yaw, map_size)
 
             # ルートを描画
             color = (255, 0, 0) if i < self.current_waypoint_index else (100, 100, 255)
@@ -308,7 +305,28 @@ class CARLALeaderboardEnv(gym.Env):
                 curr_loc = current_wp.transform.location
                 distance += prev_loc.distance(curr_loc)
 
-        return route_waypoints
+        start_pose = route_waypoints[0].transform
+
+        # 1000点に補間(scipy.interpolateを使用)
+        num_interp_points = 1000
+        route_locations = np.array(
+            [
+                [wp.transform.location.x, wp.transform.location.y, wp.transform.location.z]
+                for wp in route_waypoints
+            ]
+        )
+        t_original = np.linspace(0, 1, len(route_locations))
+        t_interp = np.linspace(0, 1, num_interp_points)
+
+        interpolator = scipy.interpolate.interp1d(
+            t_original, route_locations, axis=0, kind="linear"
+        )
+        interpolated_locations = interpolator(t_interp)
+        interpolated_waypoints = []
+        for loc in interpolated_locations:
+            interpolated_waypoints.append(carla.Location(*loc))
+
+        return interpolated_waypoints, start_pose
 
     def _update_route_progress(self):
         """ルート進行状況を更新"""
@@ -319,8 +337,7 @@ class CARLALeaderboardEnv(gym.Env):
         closest_idx = self.current_waypoint_index
 
         for i in range(self.current_waypoint_index, len(self.route_waypoints)):
-            wp_loc = self.route_waypoints[i].transform.location
-            dist = vehicle_loc.distance(wp_loc)
+            dist = vehicle_loc.distance(self.route_waypoints[i])
             if dist < min_dist:
                 min_dist = dist
                 closest_idx = i
