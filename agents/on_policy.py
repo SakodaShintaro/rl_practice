@@ -272,10 +272,10 @@ class OnPolicyAgent:
                 data = ReplayBufferData(
                     observations=s[indices],
                     obs_z=s_z[indices],
-                    actions=a[indices],
                     rewards=r[indices],
                     dones=done[indices],
                     rnn_state=rnn_states[indices],
+                    actions=a[indices],
                     log_probs=old_a_logp[indices],
                     values=v[indices],
                 )

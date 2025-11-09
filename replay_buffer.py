@@ -18,10 +18,10 @@ import torch
 class ReplayBufferData:
     observations: torch.Tensor  # (B, T, obs_shape)
     obs_z: torch.Tensor  # (B, T, obs_z_shape) - encoded observations
-    actions: torch.Tensor  # (B, T, action_shape)
     rewards: torch.Tensor  # (B, T)
     dones: torch.Tensor  # (B, T)
     rnn_state: torch.Tensor  # (B, hidden_size)
+    actions: torch.Tensor  # (B, T, action_shape)
     log_probs: torch.Tensor  # (B, T)
     values: torch.Tensor  # (B, T)
 
@@ -78,10 +78,10 @@ class ReplayBuffer:
         return ReplayBufferData(
             self.observations[:curr_size].to(self.output_device, non_blocking=True),
             self.obs_z[:curr_size].to(self.output_device, non_blocking=True),
-            self.actions[:curr_size].to(self.output_device, non_blocking=True),
             self.rewards[:curr_size].to(self.output_device, non_blocking=True),
             self.dones[:curr_size].to(self.output_device, non_blocking=True),
             self.rnn_states[:curr_size].to(self.output_device, non_blocking=True),
+            self.actions[:curr_size].to(self.output_device, non_blocking=True),
             self.log_probs[:curr_size].to(self.output_device, non_blocking=True),
             self.values[:curr_size].to(self.output_device, non_blocking=True),
         )
@@ -137,10 +137,10 @@ class ReplayBuffer:
         return ReplayBufferData(
             observations.to(self.output_device, non_blocking=True),
             obs_z.to(self.output_device, non_blocking=True),
-            actions.to(self.output_device, non_blocking=True),
             rewards.to(self.output_device, non_blocking=True),
             dones.to(self.output_device, non_blocking=True),
             rnn_states.to(self.output_device, non_blocking=True),
+            actions.to(self.output_device, non_blocking=True),
             log_probs.to(self.output_device, non_blocking=True),
             values.to(self.output_device, non_blocking=True),
         )
@@ -164,10 +164,10 @@ class ReplayBuffer:
         return ReplayBufferData(
             observations.unsqueeze(0).to(self.output_device, non_blocking=True),
             obs_z.unsqueeze(0).to(self.output_device, non_blocking=True),
-            actions.unsqueeze(0).to(self.output_device, non_blocking=True),
             rewards.unsqueeze(0).to(self.output_device, non_blocking=True),
             dones.unsqueeze(0).to(self.output_device, non_blocking=True),
             rnn_states.unsqueeze(0).to(self.output_device, non_blocking=True),
+            actions.unsqueeze(0).to(self.output_device, non_blocking=True),
             log_probs.unsqueeze(0).to(self.output_device, non_blocking=True),
             values.unsqueeze(0).to(self.output_device, non_blocking=True),
         )
