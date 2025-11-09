@@ -45,10 +45,12 @@ class OffPolicyAgent:
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 
+        obs_z_shape = tuple(self.network.encoder.image_processor.output_shape)
         self.rb = ReplayBuffer(
             size=args.buffer_size,
             seq_len=self.seq_len + 1,
             obs_shape=observation_space.shape,
+            obs_z_shape=obs_z_shape,
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             output_device=self.device,
@@ -98,8 +100,13 @@ class OffPolicyAgent:
         ).item()
 
         # add to replay buffer
+        obs_tensor = torch.from_numpy(obs).to(self.device)
+        with torch.no_grad():
+            obs_z = self.network.encoder.image_processor.encode(obs_tensor.unsqueeze(0))
+            obs_z = obs_z.squeeze(0)
         self.rb.add(
-            torch.from_numpy(obs).to(self.device),
+            obs_tensor,
+            obs_z,
             reward_with_penalty,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
@@ -111,7 +118,11 @@ class OffPolicyAgent:
         # inference
         latest_data = self.rb.get_latest(self.seq_len)
         output_enc, self.rnn_state = self.network.encoder.forward(
-            latest_data.observations, latest_data.actions, latest_data.rewards, self.rnn_state
+            latest_data.observations,
+            latest_data.obs_z,
+            latest_data.actions,
+            latest_data.rewards,
+            self.rnn_state,
         )
 
         # action

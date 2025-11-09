@@ -80,10 +80,12 @@ class OnPolicyAgent:
                 self.device
             )
         self.rnn_state = self.network.init_state().to(self.device)
+        obs_z_shape = tuple(self.network.encoder.image_processor.output_shape)
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
             seq_len=self.seq_len + 1,
             obs_shape=observation_space.shape,
+            obs_z_shape=obs_z_shape,
             rnn_state_shape=self.rnn_state.squeeze(1).shape,
             action_shape=action_space.shape,
             output_device=self.device,
@@ -139,8 +141,13 @@ class OnPolicyAgent:
         ).item()
 
         # add to replay buffer
+        obs_tensor = torch.from_numpy(obs).to(self.device)
+        with torch.no_grad():
+            obs_z = self.network.encoder.image_processor.encode(obs_tensor.unsqueeze(0))
+            obs_z = obs_z.squeeze(0)
         self.rb.add(
-            torch.from_numpy(obs).to(self.device),
+            obs_tensor,
+            obs_z,
             reward_with_penalty,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
@@ -152,7 +159,12 @@ class OnPolicyAgent:
         # inference
         latest_data = self.rb.get_latest(1)
         result_dict = self.network(
-            latest_data.rewards, latest_data.observations, latest_data.actions, self.rnn_state
+            latest_data.observations,
+            latest_data.obs_z,
+            latest_data.actions,
+            latest_data.rewards,
+            self.rnn_state,
+            None,
         )
         self.rnn_state = result_dict["rnn_state"]
 
@@ -212,6 +224,7 @@ class OnPolicyAgent:
 
         buffer_data = self.rb.get_all_data()
         s = buffer_data.observations
+        s_z = buffer_data.obs_z
         a = buffer_data.actions
         r = buffer_data.rewards.view(-1, 1)
         v = buffer_data.values.view(-1, 1)
@@ -258,10 +271,11 @@ class OnPolicyAgent:
                 indices = np.array(indices, dtype=np.int64)  # [B, T]
                 data = ReplayBufferData(
                     observations=s[indices],
+                    obs_z=s_z[indices],
+                    actions=a[indices],
                     rewards=r[indices],
                     dones=done[indices],
                     rnn_state=rnn_states[indices],
-                    actions=a[indices],
                     log_probs=old_a_logp[indices],
                     values=v[indices],
                 )

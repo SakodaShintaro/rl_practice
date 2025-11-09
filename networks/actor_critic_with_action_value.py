@@ -97,17 +97,18 @@ class Network(nn.Module):
 
     def forward(
         self,
-        r_seq: torch.Tensor,  # (B, T, 1)
         s_seq: torch.Tensor,  # (B, T, C, H, W)
+        obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         a_seq: torch.Tensor,  # (B, T, action_dim)
+        r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, hidden_size)
-        action: torch.Tensor | None = None,  # (B, action_dim) or None
+        action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> dict:
         """Forward pass compatible with actor_critic_with_state_value interface.
 
         This method encodes the sequence and returns action and action-value.
         """
-        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
+        x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         # Get action from policy_head
         if action is None:
@@ -129,13 +130,14 @@ class Network(nn.Module):
 
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
         obs_curr = data.observations[:, :-1]
+        obs_z_curr = data.obs_z[:, :-1]
         actions_curr = data.actions[:, :-1]
         rewards_curr = data.rewards[:, :-1]
         rnn_state_curr = data.rnn_state[:, :-1]  # (B, T, hidden_size)
         rnn_state_curr = rnn_state_curr[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
 
         state_curr, _ = self.encoder.forward(
-            obs_curr, actions_curr, rewards_curr, rnn_state_curr
+            obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
         )  # (B, state_dim)
 
         action_curr = data.actions[:, -1]  # (B, action_dim)
@@ -166,11 +168,14 @@ class Network(nn.Module):
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:
         obs_next = data.observations[:, 1:]
+        obs_z_next = data.obs_z[:, 1:]
         actions_next = data.actions[:, 1:]
         rewards_next = data.rewards[:, 1:]
         rnn_state_next = data.rnn_state[:, 1:]  # (B, T, hidden_size)
         rnn_state_next = rnn_state_next[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
-        state_next, _ = self.encoder.forward(obs_next, actions_next, rewards_next, rnn_state_next)
+        state_next, _ = self.encoder.forward(
+            obs_next, obs_z_next, actions_next, rewards_next, rnn_state_next
+        )
         next_state_actions, _ = self.policy_head.get_action(state_next)
         next_critic_output_dict = self.value_head(state_next, next_state_actions)
         next_critic_value = next_critic_output_dict["output"]
