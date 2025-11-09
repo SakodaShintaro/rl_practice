@@ -29,6 +29,7 @@ class Network(nn.Module):
         self.num_bins = args.num_bins
         self.observation_space_shape = observation_space_shape
         self.predictor_step_num = args.predictor_step_num
+        self.critic_loss_weight = args.critic_loss_weight
 
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
@@ -111,13 +112,14 @@ class Network(nn.Module):
 
     def forward(
         self,
-        r_seq: torch.Tensor,  # (B, T, 1)
         s_seq: torch.Tensor,  # (B, T, C, H, W)
+        obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         a_seq: torch.Tensor,  # (B, T, action_dim)
+        r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, hidden_size)
-        action: torch.Tensor | None = None,  # (B, action_dim) or None
+        action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state = self.encoder(s_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
+        x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         value_dict = self.value_head(x)
 
@@ -135,11 +137,14 @@ class Network(nn.Module):
     def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:
         # Encode state
         obs_curr = data.observations[:, :-1]
+        obs_z_curr = data.obs_z[:, :-1]
         actions_curr = data.actions[:, :-1]
         rewards_curr = data.rewards[:, :-1]
         rnn_state_curr = data.rnn_state[:, 0].permute(1, 0, 2).contiguous()
 
-        state_curr, _ = self.encoder.forward(obs_curr, actions_curr, rewards_curr, rnn_state_curr)
+        state_curr, _ = self.encoder.forward(
+            obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
+        )
 
         # Get policy output
         policy_dict = self.policy_head(state_curr, action=data.actions[:, -1])
@@ -174,7 +179,7 @@ class Network(nn.Module):
             value_loss_clipped = F.mse_loss(value_clipped, curr_target_v)
             value_loss = torch.max(value_loss_unclipped, value_loss_clipped)
 
-        loss = action_loss + 0.25 * value_loss - 0.02 * entropy.mean()
+        loss = action_loss + self.critic_loss_weight * value_loss - 0.02 * entropy.mean()
 
         activations_dict = {
             "state": state_curr,

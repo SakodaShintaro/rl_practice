@@ -138,6 +138,7 @@ class SpatialTemporalEncoder(nn.Module):
     def forward(
         self,
         images: torch.Tensor,  # (B, T, 3, H, W)
+        obs_z: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         actions: torch.Tensor,  #  (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, n_layer * space_len * hidden_image_dim)
@@ -151,18 +152,15 @@ class SpatialTemporalEncoder(nn.Module):
         # images: (B, T, C, H, W) -> encode all frames
         B, T = images.shape[:2]
 
-        # Reshape to process all frames: (B*T, C, H, W)
-        all_frames = images.reshape(-1, *images.shape[2:])
-
+        # Use pre-encoded obs_z if using ae, otherwise encode from images
         if self.freeze_image_processor:
-            with torch.no_grad():
-                # Encode all frames at once
-                all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
+            all_latents = obs_z  # [B, T, C', H', W']
         else:
+            # Reshape to process all frames: (B*T, C, H, W)
+            all_frames = images.reshape(-1, *images.shape[2:])
             # Encode all frames at once
             all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
-
-        all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
+            all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
         image_embed = all_latents.flatten(3).transpose(2, 3)  # [B, T, S(=H'*W'), C']
 
         # [B, T, action_dim] -> [B, T, action_dim, C']
@@ -280,6 +278,7 @@ class TemporalOnlyEncoder(nn.Module):
     def forward(
         self,
         images: torch.Tensor,  # (B, T, 3, H, W)
+        obs_z: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         actions: torch.Tensor,  # (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, hidden_size) for GRU, unused for Transformer
@@ -291,12 +290,12 @@ class TemporalOnlyEncoder(nn.Module):
         """
         B, T = images.shape[:2]
 
-        # 画像を処理
-        all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
+        # Use pre-encoded obs_z if using ae, otherwise encode from images
         if self.freeze_image_processor:
-            with torch.no_grad():
-                image_features = self.image_processor.encode(all_frames)
+            image_features = obs_z.reshape(B * T, *obs_z.shape[2:])  # (B*T, C', H', W')
         else:
+            # 画像を処理
+            all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
             image_features = self.image_processor.encode(all_frames)
 
         # Flatten and linear projection

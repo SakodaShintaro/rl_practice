@@ -79,7 +79,7 @@ class VLMEncoderBase(nn.Module):
 
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
             cache_dir="./cache",
             device_map=device,
@@ -198,7 +198,8 @@ class SmolVLMEncoder(VLMEncoderBase):
 
 class QwenVLEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
-        model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
+        model_id = "Qwen/Qwen3-VL-2B-Instruct"
+        # model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-32B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
@@ -222,7 +223,7 @@ class MMMambaEncoder(nn.Module):
         self.model = mmMambaChatModel.from_pretrained(
             model_id,
             cache_dir="./cache",
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         ).eval()
         self.model = self.model.to(device)
 
