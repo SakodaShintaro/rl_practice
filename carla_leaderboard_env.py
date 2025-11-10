@@ -1,11 +1,3 @@
-import os
-import sys
-
-# Add CARLA PythonAPI to path
-sys.path.append(os.path.expanduser("~/CARLA_0.9.16/PythonAPI/carla"))
-sys.path.append(os.path.expanduser("~/work/scenario_runner"))
-sys.path.append(os.path.expanduser("~/work/leaderboard"))
-
 import time
 
 import carla
