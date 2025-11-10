@@ -77,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--critic_loss_weight", type=float, default=1.0)
     parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
     parser.add_argument("--normalizing_by_return", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--image_save_interval", type=int, default=10)
     parser.add_argument("--debug", action="store_true")
 
     # for off_policy
@@ -146,7 +147,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         result_dir = None
         video_dir = None
         image_dir = None
-    image_save_interval = 500
     log_episode_path = result_dir / "log_episode.tsv" if result_dir is not None else None
     log_episode_file = None
     log_episode_writer = None
@@ -301,7 +301,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                     cv2.imwrite(str(image_path), img)
 
         if (
-            episode_id == 0 or (episode_id + 1) % image_save_interval == 0
+            episode_id == 0 or (episode_id + 1) % args.image_save_interval == 0
         ) and result_dir is not None:
             video_path = video_dir / f"ep_{episode_id + 1:08d}.mp4"
             if bgr_image_list:
