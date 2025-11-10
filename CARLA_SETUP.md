@@ -3,17 +3,11 @@
 ## セットアップ
 
 ```bash
-# 1. リポジトリクローン
-cd ~/work
-git clone -b v0.9.16 https://github.com/carla-simulator/scenario_runner.git
-git clone https://github.com/carla-simulator/leaderboard.git
+# 以下からバイナリダウンロードして$HOMEに展開
+https://github.com/carla-simulator/carla/releases
 
-# 2. 依存関係インストール
-cd ~/work/rl_practice
-source .venv/bin/activate
+# 依存関係インストール
 pip install ~/CARLA_0.9.16/PythonAPI/carla/dist/carla-0.9.16-cp310-cp310-manylinux_2_31_x86_64.whl
-pip install -r ~/work/scenario_runner/requirements.txt
-pip install dictor pygame pexpect transforms3d
 ```
 
 ## 使用方法
@@ -23,12 +17,7 @@ pip install dictor pygame pexpect transforms3d
 cd ~/CARLA_0.9.16
 ./CarlaUE4.sh -quality-level=Low
 
-# ターミナル2: テスト実行
-cd ~/work/rl_practice
-source .venv/bin/activate
-python test_carla_env.py
-
-# 学習実行
+# ターミナル2: 学習実行
 ./train_carla_off_policy.sh
 ```
 
