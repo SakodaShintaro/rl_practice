@@ -12,3 +12,5 @@ python train.py carla_test \
     --agent_type off_policy \
     --encoder spatial_temporal \
     --image_processor_type ae \
+    --step_limit 400_000 \
+    --target_score 100.0 \
