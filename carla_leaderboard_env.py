@@ -83,6 +83,7 @@ class CARLALeaderboardEnv(gym.Env):
 
         # エピソード情報
         self.episode_step = 0
+        self.negative_reward_count = 0  # 負の報酬が続いた回数
 
     def reset(
         self,
@@ -145,6 +146,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.infractions = {k: 0 for k in self.infractions}
         self.prev_driving_score = 0.0
         self.current_image = None
+        self.negative_reward_count = 0
 
         # 最初のフレームを取得
         while True:
@@ -176,6 +178,12 @@ class CARLALeaderboardEnv(gym.Env):
         # 報酬計算（Leaderboard準拠）
         reward = self._compute_reward()
 
+        # 負の報酬カウント
+        if reward < 0:
+            self.negative_reward_count += 1
+        else:
+            self.negative_reward_count = 0
+
         # 終了条件
         has_collision = (
             self.infractions["collision_pedestrian"] > 0
@@ -183,7 +191,7 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_static"] > 0
         )
         terminated = has_collision or self.route_completion >= 1.0
-        truncated = self.episode_step >= self.max_episode_steps
+        truncated = self.episode_step >= self.max_episode_steps or self.negative_reward_count >= 10
 
         self.episode_step += 1
 
@@ -369,6 +377,10 @@ class CARLALeaderboardEnv(gym.Env):
         # 報酬は前回との差分
         reward = driving_score - self.prev_driving_score
         self.prev_driving_score = driving_score
+
+        # 報酬が0.0の場合は-0.1を与える
+        if reward == 0.0:
+            reward = -0.1
 
         return reward
 
