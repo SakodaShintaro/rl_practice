@@ -183,7 +183,7 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_static"] > 0
         )
         terminated = has_collision or self.route_completion >= 1.0
-        truncated = self.episode_step >= self.max_episode_steps or self.negative_reward_count >= 10
+        truncated = self.episode_step >= self.max_episode_steps or self.negative_reward_count >= 100
 
         self.episode_step += 1
 
