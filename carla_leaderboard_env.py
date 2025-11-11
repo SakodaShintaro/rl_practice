@@ -76,6 +76,7 @@ class CARLALeaderboardEnv(gym.Env):
         # エピソード情報
         self.episode_step = 0
         self.negative_reward_count = 0  # 負の報酬が続いた回数
+        self.min_distance_to_route = 0.0  # ルートまでの最短距離
 
     def reset(
         self,
@@ -100,7 +101,6 @@ class CARLALeaderboardEnv(gym.Env):
         # 車両をスポーン（ルートの開始地点）
         blueprint_library = self.world.get_blueprint_library()
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
-
 
         while True:
             try:
@@ -146,6 +146,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.prev_driving_score = 0.0
         self.current_image = None
         self.negative_reward_count = 0
+        self.min_distance_to_route = 0.0
 
         # 最初のフレームを取得
         while True:
@@ -190,7 +191,11 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_static"] > 0
         )
         terminated = has_collision or self.route_completion >= 1.0
-        truncated = self.episode_step >= self.max_episode_steps or self.negative_reward_count >= 100
+        truncated = (
+            self.episode_step >= self.max_episode_steps
+            or self.negative_reward_count >= 100
+            or self.min_distance_to_route >= 30.0
+        )
 
         self.episode_step += 1
 
@@ -351,6 +356,7 @@ class CARLALeaderboardEnv(gym.Env):
 
         self.current_waypoint_index = closest_idx
         self.route_completion = min(1.0, closest_idx / max(1, len(self.route_waypoints) - 1))
+        self.min_distance_to_route = min_dist
 
     def _compute_reward(self) -> float:
         """
