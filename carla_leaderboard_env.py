@@ -101,9 +101,16 @@ class CARLALeaderboardEnv(gym.Env):
         blueprint_library = self.world.get_blueprint_library()
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
 
-        spawn_transform = start_pose
-        spawn_transform.location.z += 0.5
-        self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
+
+        while True:
+            try:
+                spawn_transform = start_pose
+                spawn_transform.location.z += 0.5
+                self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
+                break
+            except RuntimeError:
+                time.sleep(0.1)
+                continue
 
         # カメラセンサー
         camera_bp = blueprint_library.find("sensor.camera.rgb")
