@@ -82,6 +82,8 @@ class CARLALeaderboardEnv(gym.Env):
 
         # ジャーク計算用の変数
         self.prev_acceleration_vector = np.zeros(3)  # 前ステップの加速度ベクトル (m/s^2)
+        # 角加速度計算用の変数
+        self.prev_angular_velocity_vector = np.zeros(3)  # 前ステップの角速度ベクトル (rad/s)
 
     def reset(
         self,
@@ -153,6 +155,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.negative_reward_count = 0
         self.min_distance_to_route = 0.0
         self.prev_acceleration_vector = np.zeros(3)
+        self.prev_angular_velocity_vector = np.zeros(3)
 
         # 最初のフレームを取得
         while True:
@@ -225,21 +228,37 @@ class CARLALeaderboardEnv(gym.Env):
         # (H, W, C) -> (C, H, W)に戻して正規化
         obs = camera_img_hwc.transpose(2, 0, 1).astype(np.float32) / 255.0
 
-        # ジャークと加速度を計算
-        jerk = self._compute_jerk()
-        acceleration = self.vehicle.get_acceleration()
-        acceleration = np.sqrt(acceleration.x**2 + acceleration.y**2 + acceleration.z**2)
-
+        # 各種物理量を計算
         velocity = self.vehicle.get_velocity()
         velocity_kph = 3.6 * np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+
+        acceleration = self.vehicle.get_acceleration()
+        acceleration_vec = np.array([acceleration.x, acceleration.y, acceleration.z])
+        acceleration_magnitude = np.linalg.norm(acceleration_vec)
+
+        jerk_vec = (acceleration_vec - self.prev_acceleration_vector) / self.dt
+        jerk = np.linalg.norm(jerk_vec)
+        self.prev_acceleration_vector = acceleration_vec
+
+        angular_velocity = self.vehicle.get_angular_velocity()
+        angular_velocity_vec = np.array(
+            [angular_velocity.x, angular_velocity.y, angular_velocity.z]
+        )
+        angular_velocity_magnitude = np.linalg.norm(angular_velocity_vec)
+
+        angular_accel_vec = (angular_velocity_vec - self.prev_angular_velocity_vector) / self.dt
+        angular_acceleration = np.linalg.norm(angular_accel_vec)
+        self.prev_angular_velocity_vector = angular_velocity_vec
 
         info = {
             "route_completion": self.route_completion,
             "infractions": self.infractions.copy(),
             "velocity": velocity,
             "velocity_kph": velocity_kph,
-            "acceleration": acceleration,
+            "acceleration": acceleration_magnitude,
             "jerk": jerk,
+            "angular_velocity": angular_velocity_magnitude,
+            "angular_acceleration": angular_acceleration,
         }
 
         return obs, reward, terminated, truncated, info
@@ -453,19 +472,3 @@ class CARLALeaderboardEnv(gym.Env):
     def _on_lane_invasion(self, event):
         self.lane_invasion_history.append(event)
         self.infractions["lane_invasion"] += 1
-
-    def _compute_jerk(self) -> float:
-        """ジャークの大きさを計算（m/s^3）
-
-        各成分を微分してからノルムを取る（正しい方法）
-        """
-        # 加速度ベクトルを取得
-        acceleration = self.vehicle.get_acceleration()
-        current_accel_vec = np.array([acceleration.x, acceleration.y, acceleration.z])
-        # ジャークベクトル = 加速度ベクトルの時間微分
-        jerk_vec = (current_accel_vec - self.prev_acceleration_vector) / self.dt
-        # ジャークの大きさ
-        jerk_magnitude = np.linalg.norm(jerk_vec)
-        # 次のステップのために保存
-        self.prev_acceleration_vector = current_accel_vec
-        return jerk_magnitude
