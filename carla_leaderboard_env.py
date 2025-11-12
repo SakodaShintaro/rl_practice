@@ -85,6 +85,13 @@ class CARLALeaderboardEnv(gym.Env):
         # 角加速度計算用の変数
         self.prev_angular_velocity_vector = np.zeros(3)  # 前ステップの角速度ベクトル (rad/s)
 
+        # 表示用の物理量
+        self.current_velocity_kph = 0.0
+        self.current_acceleration = 0.0
+        self.current_jerk = 0.0
+        self.current_angular_velocity = 0.0
+        self.current_angular_acceleration = 0.0
+
     def reset(
         self,
         seed: int | None,
@@ -156,6 +163,11 @@ class CARLALeaderboardEnv(gym.Env):
         self.min_distance_to_route = 0.0
         self.prev_acceleration_vector = np.zeros(3)
         self.prev_angular_velocity_vector = np.zeros(3)
+        self.current_velocity_kph = 0.0
+        self.current_acceleration = 0.0
+        self.current_jerk = 0.0
+        self.current_angular_velocity = 0.0
+        self.current_angular_acceleration = 0.0
 
         # 最初のフレームを取得
         while True:
@@ -212,7 +224,7 @@ class CARLALeaderboardEnv(gym.Env):
 
         # 観測画像とルート画像を連結
         camera_img = self.current_image.copy()  # (C, H, W)
-        route_img = self._generate_route_image()  # (H, W, 3)
+        route_img = self._generate_route_image(show_text=False)  # (H, W, 3)
 
         # ルート画像をカメラ画像の1/4サイズにリサイズ
         route_h = self.image_size[1] // 4
@@ -250,6 +262,13 @@ class CARLALeaderboardEnv(gym.Env):
         angular_acceleration = np.linalg.norm(angular_accel_vec)
         self.prev_angular_velocity_vector = angular_velocity_vec
 
+        # 表示用に保存
+        self.current_velocity_kph = velocity_kph
+        self.current_acceleration = acceleration_magnitude
+        self.current_jerk = jerk
+        self.current_angular_velocity = angular_velocity_magnitude
+        self.current_angular_acceleration = angular_acceleration
+
         info = {
             "route_completion": self.route_completion,
             "infractions": self.infractions.copy(),
@@ -263,8 +282,12 @@ class CARLALeaderboardEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def _generate_route_image(self) -> np.ndarray:
-        """ルート画像を生成（車両は常に中央上向き）"""
+    def _generate_route_image(self, show_text: bool) -> np.ndarray:
+        """ルート画像を生成（車両は常に中央上向き）
+
+        Args:
+            show_text: Trueの場合、左上に情報をテキスト表示する
+        """
         map_size = 512
         render_img = np.ones((map_size, map_size, 3), dtype=np.uint8) * 200
 
@@ -303,6 +326,37 @@ class CARLALeaderboardEnv(gym.Env):
         )
         cv2.fillPoly(render_img, [triangle_pts], (0, 255, 0))
 
+        # 左上に情報をテキストで表示（show_textがTrueの場合のみ）
+        if show_text:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.5
+            font_thickness = 1
+            text_color = (0, 0, 0)
+            line_height = 20
+            x_offset = 10
+            y_offset = 20
+
+            texts = [
+                f"Route Completion: {self.route_completion * 100:.1f}%",
+                f"Velocity: {self.current_velocity_kph:.1f} km/h",
+                f"Acceleration: {self.current_acceleration:.2f} m/s^2",
+                f"Jerk: {self.current_jerk:.2f} m/s^3",
+                f"Angular Vel: {self.current_angular_velocity:.2f} rad/s",
+                f"Angular Accel: {self.current_angular_acceleration:.2f} rad/s^2",
+            ]
+
+            for i, text in enumerate(texts):
+                y_pos = y_offset + i * line_height
+                cv2.putText(
+                    render_img,
+                    text,
+                    (x_offset, y_pos),
+                    font,
+                    font_scale,
+                    text_color,
+                    font_thickness,
+                )
+
         return render_img
 
     def render(self) -> np.ndarray | None:
@@ -310,7 +364,7 @@ class CARLALeaderboardEnv(gym.Env):
         if self.render_mode != "rgb_array":
             return None
 
-        return self._generate_route_image()
+        return self._generate_route_image(show_text=True)
 
     def close(self):
         if self.camera_sensor is not None:
