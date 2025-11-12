@@ -344,11 +344,12 @@ class CARLALeaderboardEnv(gym.Env):
         """ルート進行状況を更新"""
         vehicle_loc = self.vehicle.get_location()
 
-        # 最も近いwaypointを探す
+        # 最も近いwaypointを探す（現在位置から一定量以内）
         min_dist = float("inf")
         closest_idx = self.current_waypoint_index
 
-        for i in range(self.current_waypoint_index, len(self.route_waypoints)):
+        search_end = min(self.current_waypoint_index + 20, len(self.route_waypoints))
+        for i in range(self.current_waypoint_index, search_end):
             dist = vehicle_loc.distance(self.route_waypoints[i])
             if dist < min_dist:
                 min_dist = dist
