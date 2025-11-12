@@ -1,10 +1,56 @@
 import time
+from dataclasses import dataclass
 
 import carla
 import cv2
 import gymnasium as gym
 import numpy as np
 import scipy
+
+
+@dataclass
+class VehiclePhysics:
+    """車両の物理情報を管理するクラス"""
+
+    acceleration_vector: np.ndarray
+    angular_velocity_vector: np.ndarray
+    velocity: carla.Vector3D
+    velocity_kph: float
+    acceleration: float
+    jerk: float
+    angular_velocity: float
+    angular_acceleration: float
+    dt: float
+
+    def update(self, vehicle):
+        """車両の物理情報を更新"""
+        # 速度を計算
+        self.velocity = vehicle.get_velocity()
+        self.velocity_kph = 3.6 * np.sqrt(
+            self.velocity.x**2 + self.velocity.y**2 + self.velocity.z**2
+        )
+
+        # 加速度を計算
+        acceleration = vehicle.get_acceleration()
+        acceleration_vec = np.array([acceleration.x, acceleration.y, acceleration.z])
+        self.acceleration = np.linalg.norm(acceleration_vec)
+
+        # ジャークを計算
+        jerk_vec = (acceleration_vec - self.acceleration_vector) / self.dt
+        self.jerk = np.linalg.norm(jerk_vec)
+        self.acceleration_vector = acceleration_vec
+
+        # 角速度を計算
+        angular_velocity = vehicle.get_angular_velocity()
+        angular_velocity_vec = np.array(
+            [angular_velocity.x, angular_velocity.y, angular_velocity.z]
+        )
+        self.angular_velocity = np.linalg.norm(angular_velocity_vec)
+
+        # 角加速度を計算
+        angular_accel_vec = (angular_velocity_vec - self.angular_velocity_vector) / self.dt
+        self.angular_acceleration = np.linalg.norm(angular_accel_vec)
+        self.angular_velocity_vector = angular_velocity_vec
 
 
 class CARLALeaderboardEnv(gym.Env):
@@ -80,17 +126,18 @@ class CARLALeaderboardEnv(gym.Env):
         self.negative_reward_count = 0  # 負の報酬が続いた回数
         self.min_distance_to_route = 0.0  # ルートまでの最短距離
 
-        # ジャーク計算用の変数
-        self.prev_acceleration_vector = np.zeros(3)  # 前ステップの加速度ベクトル (m/s^2)
-        # 角加速度計算用の変数
-        self.prev_angular_velocity_vector = np.zeros(3)  # 前ステップの角速度ベクトル (rad/s)
-
-        # 表示用の物理量
-        self.current_velocity_kph = 0.0
-        self.current_acceleration = 0.0
-        self.current_jerk = 0.0
-        self.current_angular_velocity = 0.0
-        self.current_angular_acceleration = 0.0
+        # 車両の物理情報
+        self.vehicle_physics = VehiclePhysics(
+            acceleration_vector=np.zeros(3),
+            angular_velocity_vector=np.zeros(3),
+            velocity=carla.Vector3D(0.0, 0.0, 0.0),
+            velocity_kph=0.0,
+            acceleration=0.0,
+            jerk=0.0,
+            angular_velocity=0.0,
+            angular_acceleration=0.0,
+            dt=self.dt,
+        )
 
     def reset(
         self,
@@ -161,13 +208,17 @@ class CARLALeaderboardEnv(gym.Env):
         self.current_image = None
         self.negative_reward_count = 0
         self.min_distance_to_route = 0.0
-        self.prev_acceleration_vector = np.zeros(3)
-        self.prev_angular_velocity_vector = np.zeros(3)
-        self.current_velocity_kph = 0.0
-        self.current_acceleration = 0.0
-        self.current_jerk = 0.0
-        self.current_angular_velocity = 0.0
-        self.current_angular_acceleration = 0.0
+        self.vehicle_physics = VehiclePhysics(
+            acceleration_vector=np.zeros(3),
+            angular_velocity_vector=np.zeros(3),
+            velocity=carla.Vector3D(0.0, 0.0, 0.0),
+            velocity_kph=0.0,
+            acceleration=0.0,
+            jerk=0.0,
+            angular_velocity=0.0,
+            angular_acceleration=0.0,
+            dt=self.dt,
+        )
 
         # 最初のフレームを取得
         while True:
@@ -240,44 +291,18 @@ class CARLALeaderboardEnv(gym.Env):
         # (H, W, C) -> (C, H, W)に戻して正規化
         obs = camera_img_hwc.transpose(2, 0, 1).astype(np.float32) / 255.0
 
-        # 各種物理量を計算
-        velocity = self.vehicle.get_velocity()
-        velocity_kph = 3.6 * np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-
-        acceleration = self.vehicle.get_acceleration()
-        acceleration_vec = np.array([acceleration.x, acceleration.y, acceleration.z])
-        acceleration_magnitude = np.linalg.norm(acceleration_vec)
-
-        jerk_vec = (acceleration_vec - self.prev_acceleration_vector) / self.dt
-        jerk = np.linalg.norm(jerk_vec)
-        self.prev_acceleration_vector = acceleration_vec
-
-        angular_velocity = self.vehicle.get_angular_velocity()
-        angular_velocity_vec = np.array(
-            [angular_velocity.x, angular_velocity.y, angular_velocity.z]
-        )
-        angular_velocity_magnitude = np.linalg.norm(angular_velocity_vec)
-
-        angular_accel_vec = (angular_velocity_vec - self.prev_angular_velocity_vector) / self.dt
-        angular_acceleration = np.linalg.norm(angular_accel_vec)
-        self.prev_angular_velocity_vector = angular_velocity_vec
-
-        # 表示用に保存
-        self.current_velocity_kph = velocity_kph
-        self.current_acceleration = acceleration_magnitude
-        self.current_jerk = jerk
-        self.current_angular_velocity = angular_velocity_magnitude
-        self.current_angular_acceleration = angular_acceleration
+        # 各種物理量を更新
+        self.vehicle_physics.update(self.vehicle)
 
         info = {
             "route_completion": self.route_completion,
             "infractions": self.infractions.copy(),
-            "velocity": velocity,
-            "velocity_kph": velocity_kph,
-            "acceleration": acceleration_magnitude,
-            "jerk": jerk,
-            "angular_velocity": angular_velocity_magnitude,
-            "angular_acceleration": angular_acceleration,
+            "velocity": self.vehicle_physics.velocity,
+            "velocity_kph": self.vehicle_physics.velocity_kph,
+            "acceleration": self.vehicle_physics.acceleration,
+            "jerk": self.vehicle_physics.jerk,
+            "angular_velocity": self.vehicle_physics.angular_velocity,
+            "angular_acceleration": self.vehicle_physics.angular_acceleration,
         }
 
         return obs, reward, terminated, truncated, info
@@ -338,11 +363,11 @@ class CARLALeaderboardEnv(gym.Env):
 
             texts = [
                 f"Route Completion: {self.route_completion * 100:.1f}%",
-                f"Velocity: {self.current_velocity_kph:.1f} km/h",
-                f"Acceleration: {self.current_acceleration:.2f} m/s^2",
-                f"Jerk: {self.current_jerk:.2f} m/s^3",
-                f"Angular Vel: {self.current_angular_velocity:.2f} rad/s",
-                f"Angular Accel: {self.current_angular_acceleration:.2f} rad/s^2",
+                f"Velocity: {self.vehicle_physics.velocity_kph:.1f} km/h",
+                f"Acceleration: {self.vehicle_physics.acceleration:.2f} m/s^2",
+                f"Jerk: {self.vehicle_physics.jerk:.2f} m/s^3",
+                f"Angular Vel: {self.vehicle_physics.angular_velocity:.2f} rad/s",
+                f"Angular Accel: {self.vehicle_physics.angular_acceleration:.2f} rad/s^2",
             ]
 
             for i, text in enumerate(texts):
