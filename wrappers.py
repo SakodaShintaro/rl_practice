@@ -3,6 +3,7 @@ import gymnasium as gym
 import minigrid
 import numpy as np
 
+from carla_leaderboard_env import CARLALeaderboardEnv
 from memory_maze_gym_wrapper import MemoryMazeGymWrapper
 
 REPEAT = 8
@@ -36,6 +37,12 @@ def make_env(env_id: str) -> gym.Env:
         env = MemoryMazeGymWrapper(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        return env
+
+    elif env_id == "CARLA-Leaderboard-v0":
+        env = CARLALeaderboardEnv()
+        env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
         return env
 

@@ -11,7 +11,7 @@ python3 train.py pathwise$suffix \
   --encoder spatial_temporal \
   --num_bins 1 \
   --value_range 60.0 \
-  --step_limit 40_000 \
+  --step_limit 400_000 \
   --eval_range 20 \
   --image_processor_type=ae \
   --denoising_time 0.8 \
