@@ -119,7 +119,9 @@ class Network(nn.Module):
         rnn_state: torch.Tensor,  # (1, B, hidden_size)
         action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
+        x, rnn_state, action_text = self.encoder(
+            s_seq, obs_z_seq, a_seq, r_seq, rnn_state
+        )  # (B, hidden_dim)
 
         value_dict = self.value_head(x)
 
@@ -142,7 +144,7 @@ class Network(nn.Module):
         rewards_curr = data.rewards[:, :-1]
         rnn_state_curr = data.rnn_state[:, 0].permute(1, 0, 2).contiguous()
 
-        state_curr, _ = self.encoder.forward(
+        state_curr, _, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
         )
 

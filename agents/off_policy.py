@@ -116,7 +116,7 @@ class OffPolicyAgent:
 
         # inference
         latest_data = self.rb.get_latest(self.seq_len)
-        output_enc, self.rnn_state = self.network.encoder.forward(
+        output_enc, self.rnn_state, _ = self.network.encoder.forward(
             latest_data.observations,
             latest_data.obs_z,
             latest_data.actions,

@@ -66,6 +66,13 @@ def parse_action_text(action_text: str) -> np.ndarray:
     return action_array
 
 
+class DummyImageProcessor:
+    """Dummy image processor for VLM encoders to maintain interface compatibility"""
+
+    def __init__(self, output_shape):
+        self.output_shape = output_shape
+
+
 class VLMEncoderBase(nn.Module):
     """Base class for Vision-Language Model encoders"""
 
@@ -89,6 +96,12 @@ class VLMEncoderBase(nn.Module):
         self.device = device
         self.max_frames = 100
         self.frame_buffer = []
+        # Dummy image processor for interface compatibility
+        self.image_processor = DummyImageProcessor((output_dim,))
+
+    def init_state(self) -> torch.Tensor:
+        """Return dummy state for compatibility with standard encoders"""
+        return torch.zeros(1, 1, 1)
 
     def get_stop_tokens(self):
         """Get stop tokens for text generation - to be overridden by subclasses"""
@@ -98,11 +111,25 @@ class VLMEncoderBase(nn.Module):
             self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
         ]
 
-    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, str]:
-        # x : (B, T, C, H, W)
+    def forward(
+        self,
+        images: torch.Tensor,
+        obs_z: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        rnn_state: torch.Tensor,
+    ) -> tuple[torch.Tensor, None, str]:
+        # images: (B, T, C, H, W) or (B, C, H, W) - only use first image
+        # obs_z, actions, rewards, rnn_state are ignored for VLM encoders
 
         # Convert tensor to PIL Image and add to buffer
-        img_tensor = images[0].to(torch.float32)  # (3, H, W) - ensure float32 for PIL conversion
+        # Handle both (B, T, C, H, W) and (B, C, H, W) formats
+        if images.ndim == 5:
+            img_tensor = images[0, -1].to(torch.float32)  # Use last frame from sequence
+        else:
+            img_tensor = images[0].to(
+                torch.float32
+            )  # (C, H, W) - ensure float32 for PIL conversion
         img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
         img_np = (img_np * 255).astype(np.uint8)
         pil_img = Image.fromarray(img_np)
@@ -145,7 +172,7 @@ class VLMEncoderBase(nn.Module):
         # Generate action text using logits from forward pass
         action_text = self._generate_action_text(output.logits, model_inputs)
 
-        return x, action_text
+        return x, None, action_text
 
     def _generate_action_text(self, logits, model_inputs) -> str:
         """Generate action text from logits without using model.generate()"""
@@ -256,8 +283,30 @@ class MMMambaEncoder(nn.Module):
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         self.output_dim = 2048
+        # Dummy image processor for interface compatibility
+        self.image_processor = DummyImageProcessor((self.output_dim,))
 
-    def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, str]:
+    def init_state(self) -> torch.Tensor:
+        """Return dummy state for compatibility with standard encoders"""
+        return torch.zeros(1, 1, 1)
+
+    def forward(
+        self,
+        images: torch.Tensor,
+        obs_z: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        rnn_state: torch.Tensor,
+    ) -> tuple[torch.Tensor, None, str]:
+        # images: (B, T, C, H, W) or (B, C, H, W) - only use first image
+        # obs_z, actions, rewards, rnn_state are ignored for VLM encoders
+
+        # Handle both (B, T, C, H, W) and (B, C, H, W) formats
+        if images.ndim == 5:
+            image = images[0, -1].unsqueeze(0)  # Use last frame from sequence
+        else:
+            image = images
+
         device = image.device
         batch_size = image.shape[0]
         assert batch_size == 1, "Batch size must be 1 for stepwise inference"
@@ -327,4 +376,4 @@ class MMMambaEncoder(nn.Module):
         # Decode generated tokens to action text
         action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
-        return x, action_text
+        return x, None, action_text

@@ -65,7 +65,7 @@ class VLMAgent:
     @torch.inference_mode()
     def select_action(self, obs):
         obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
-        _, action_text = self.encoder(obs_tensor)
+        _, _, action_text = self.encoder(obs_tensor)
         action_array = parse_action_text(action_text)
         return action_array
 
