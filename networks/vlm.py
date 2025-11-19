@@ -145,6 +145,7 @@ class VLMEncoderBase(nn.Module):
             text=texts,
             return_tensors="pt",
             padding=True,
+            size={"longest_edge": 384},
         )
         model_inputs = {
             k: v.to(self.device).to(torch.bfloat16)
