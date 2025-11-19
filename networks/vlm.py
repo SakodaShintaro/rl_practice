@@ -94,8 +94,6 @@ class VLMEncoderBase(nn.Module):
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.output_dim = output_dim
         self.device = device
-        self.max_frames = 100
-        self.frame_buffer = []
         # Dummy image processor for interface compatibility
         self.image_processor = DummyImageProcessor((output_dim,))
 
@@ -119,42 +117,34 @@ class VLMEncoderBase(nn.Module):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, None, str]:
-        # images: (B, T, C, H, W) or (B, C, H, W) - only use first image
+        # images: (B, T, C, H, W)
         # obs_z, actions, rewards, rnn_state are ignored for VLM encoders
 
-        # Convert tensor to PIL Image and add to buffer
-        # Handle both (B, T, C, H, W) and (B, C, H, W) formats
-        if images.ndim == 5:
-            img_tensor = images[0, -1].to(torch.float32)  # Use last frame from sequence
-        else:
-            img_tensor = images[0].to(
-                torch.float32
-            )  # (C, H, W) - ensure float32 for PIL conversion
-        img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
-        img_np = (img_np * 255).astype(np.uint8)
-        pil_img = Image.fromarray(img_np)
+        batch_size = images.shape[0]
+        seq_len = images.shape[1]
 
-        self.frame_buffer.append(pil_img)
+        # Convert all batch samples to PIL images
+        all_frames = []
+        texts = []
+        for b in range(batch_size):
+            batch_frames = []
+            for t in range(seq_len):
+                img_tensor = images[b, t].to(torch.float32)  # (C, H, W)
+                img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+                img_np = (img_np * 255).astype(np.uint8)
+                pil_img = Image.fromarray(img_np)
+                batch_frames.append(pil_img)
+            all_frames.append(batch_frames)
+            # Add image tokens for each frame in the sequence
+            image_tokens = "<image>" * seq_len
+            texts.append(image_tokens + ACTION_PROMPT)
 
-        if len(self.frame_buffer) > self.max_frames:
-            self.frame_buffer.pop(0)
-
-        # Create chat template messages with video frames
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "image", "image": frame} for frame in self.frame_buffer]
-                + [{"type": "text", "text": ACTION_PROMPT}],
-            }
-        ]
-
-        # Prepare model inputs
-        model_inputs = self.processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
+        # Use processor directly to batch process all samples
+        model_inputs = self.processor(
+            images=all_frames,
+            text=texts,
             return_tensors="pt",
+            padding=True,
         )
         model_inputs = {
             k: v.to(self.device).to(torch.bfloat16)
@@ -163,16 +153,53 @@ class VLMEncoderBase(nn.Module):
             for k, v in model_inputs.items()
         }
 
-        # Get hidden state from forward pass
-        input_len = model_inputs["input_ids"].shape[-1]
+        # Get hidden state from forward pass (batch)
         output = self.model.forward(**model_inputs, output_hidden_states=True)
-        hidden = output["hidden_states"][-1]
-        x = hidden[:, input_len - 1].to(torch.float32)
+        hidden = output["hidden_states"][-1]  # (B, seq_len, hidden_dim)
+        # Use the last token's hidden state for each batch
+        x = hidden[:, -1, :].to(torch.float32)  # (B, hidden_dim)
 
-        # Generate action text using logits from forward pass
-        action_text = self._generate_action_text(output.logits, model_inputs)
+        # Generate action text for the first batch only
+        action_text = self._generate_action_text_batch(output.logits, model_inputs)
 
         return x, None, action_text
+
+    def _generate_action_text_batch(self, logits, model_inputs) -> str:
+        """Generate action text from logits for batched input (returns first batch's text)"""
+        generated_ids = []
+        stop_token_ids = self.get_stop_tokens()
+        stop_token_ids = [tid for tid in stop_token_ids if tid is not None]
+
+        # Process only the first batch
+        next_token_logits = logits[0:1, -1, :]
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+
+        input_ids = torch.cat([model_inputs["input_ids"][0:1], next_token], dim=-1)
+
+        for _ in range(50):
+            if next_token.item() in stop_token_ids:
+                break
+            generated_ids.append(next_token.item())
+
+            if "attention_mask" in model_inputs:
+                attention_mask = model_inputs["attention_mask"][0:1]
+                attention_mask = torch.cat(
+                    [attention_mask, torch.ones((1, 1), device=self.device)],
+                    dim=-1,
+                )
+                model_inputs["attention_mask"] = attention_mask
+
+            outputs = self.model.forward(
+                input_ids=input_ids,
+                attention_mask=model_inputs.get("attention_mask"),
+                output_hidden_states=False,
+            )
+            next_token_logits = outputs.logits[:, -1, :]
+            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
+
+        action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
+        return action_text
 
     def _generate_action_text(self, logits, model_inputs) -> str:
         """Generate action text from logits without using model.generate()"""
@@ -298,28 +325,25 @@ class MMMambaEncoder(nn.Module):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, None, str]:
-        # images: (B, T, C, H, W) or (B, C, H, W) - only use first image
+        # images: (B, T, C, H, W)
         # obs_z, actions, rewards, rnn_state are ignored for VLM encoders
 
-        # Handle both (B, T, C, H, W) and (B, C, H, W) formats
-        if images.ndim == 5:
-            image = images[0, -1].unsqueeze(0)  # Use last frame from sequence
-        else:
-            image = images
+        batch_size = images.shape[0]
+        device = images.device
 
-        device = image.device
-        batch_size = image.shape[0]
-        assert batch_size == 1, "Batch size must be 1 for stepwise inference"
-        image = self.transform(image).to(device).to(torch.bfloat16)
-        messages = [
-            {
-                "role": "user",
-                "content": ACTION_PROMPT
-                + " <|im_start|>"
-                + "<IMG_CONTEXT>" * self.image_token_num
-                + "<|im_end|>",
-            }
-        ]
+        # MMMamba processes the last frame from each batch sample
+        # Stack all last frames into a batch: (B, C, H, W)
+        last_frames = images[:, -1, :, :, :]  # (B, C, H, W)
+
+        # Transform all frames at once
+        batch_images = torch.stack([self.transform(last_frames[b]) for b in range(batch_size)])
+        batch_images = batch_images.to(device).to(torch.bfloat16)  # (B, C, H, W)
+
+        # Create tokenized input (same for all batch samples)
+        prompt = (
+            ACTION_PROMPT + " <|im_start|>" + "<IMG_CONTEXT>" * self.image_token_num + "<|im_end|>"
+        )
+        messages = [{"role": "user", "content": prompt}]
 
         model_inputs = self.tokenizer.apply_chat_template(
             messages,
@@ -328,52 +352,67 @@ class MMMambaEncoder(nn.Module):
             return_dict=True,
             return_tensors="pt",
         )
-        input_ids = model_inputs["input_ids"].to(device)
+        # Repeat input_ids for batch
+        input_ids = model_inputs["input_ids"].repeat(batch_size, 1).to(device)
 
-        output_ids = []
         stop_token_ids = [
             self.tokenizer.eos_token_id,
             self.tokenizer.convert_tokens_to_ids("<|im_end|>"),
             self.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
         ]
-        # Remove None values
         stop_token_ids = [tid for tid in stop_token_ids if tid is not None]
 
+        # Note: inference_params with batch > 1 may not be supported
+        # Process first batch only for now due to inference_params limitation
+        self.inference_params.seqlen_offset = 0
+
         outputs = self.model.forward(
-            input_ids=input_ids,
-            pixel_values=image,
+            input_ids=input_ids[0:1],
+            pixel_values=batch_images[0:1],
             inference_params=self.inference_params,
             output_hidden_states=True,
-        )  # CausalLMOutputWithPast (outputs.keys()=odict_keys(['logits', 'hidden_states']))
+        )
 
-        # Get representation from hidden states
-        x = outputs["hidden_states"][-1][:, 0]
-        x = x.to(torch.float32)
+        # Get representation from first batch
+        x_first = outputs["hidden_states"][-1][:, 0].to(torch.float32)
 
-        # Generate action text using multiple tokens
+        # For other batches, process without inference_params
+        batch_outputs = [x_first]
+        for b in range(1, batch_size):
+            outputs_b = self.model.forward(
+                input_ids=input_ids[b : b + 1],
+                pixel_values=batch_images[b : b + 1],
+                inference_params=None,
+                output_hidden_states=True,
+            )
+            x_b = outputs_b["hidden_states"][-1][:, 0].to(torch.float32)
+            batch_outputs.append(x_b)
+
+        batch_output = torch.cat(batch_outputs, dim=0)  # (B, output_dim)
+
+        # Generate action text for first batch only
+        output_ids = []
         logits = outputs["logits"]
-        last_logit = logits[:, -1, :]  # shape: (batch_size, vocab_size)
-        token = torch.argmax(last_logit, dim=-1)  # shape: (batch_size,)
+        last_logit = logits[:, -1, :]
+        token = torch.argmax(last_logit, dim=-1)
 
         self.inference_params.seqlen_offset += input_ids.shape[1]
-        input_ids = token.unsqueeze(1)  # Start with first generated token
+        input_ids_gen = token.unsqueeze(1)
 
-        # Generate more tokens for action text
-        for _ in range(50):  # max_new_tokens
+        for _ in range(50):
             if token.item() in stop_token_ids:
                 break
             output_ids.append(token.item())
 
             outputs = self.model.forward(
-                input_ids=input_ids,
+                input_ids=input_ids_gen,
                 inference_params=self.inference_params,
             )
             logits = outputs["logits"]
             last_logit = logits[:, -1, :]
             token = torch.argmax(last_logit, dim=-1)
-            input_ids = token.unsqueeze(1)
+            input_ids_gen = token.unsqueeze(1)
 
-        # Decode generated tokens to action text
         action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
-        return x, None, action_text
+        return batch_output, None, action_text
