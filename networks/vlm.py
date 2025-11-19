@@ -73,6 +73,16 @@ class DummyImageProcessor:
     def __init__(self, output_shape):
         self.output_shape = output_shape
 
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        """Return zeros with the expected output shape"""
+        batch_size = x.shape[0]
+        device = x.device
+        return torch.zeros(batch_size, *self.output_shape, device=device)
+
+    def decode(self, x: torch.Tensor) -> torch.Tensor:
+        """Dummy decode - not used for VLM encoders"""
+        return x
+
 
 class VLMEncoderBase(nn.Module, ABC):
     """Base class for Vision-Language Model encoders"""
@@ -127,9 +137,10 @@ class VLMEncoderBase(nn.Module, ABC):
         actions: torch.Tensor,
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
-    ) -> tuple[torch.Tensor, None, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, str]:
         # images: (B, T, C, H, W)
-        # obs_z, actions, rewards, rnn_state are ignored for VLM encoders
+        # obs_z, actions, rewards are ignored for VLM encoders
+        # rnn_state is passed through unchanged (VLM encoders are stateless)
 
         batch_size = images.shape[0]
         seq_len = images.shape[1]
@@ -175,9 +186,9 @@ class VLMEncoderBase(nn.Module, ABC):
         x = hidden[:, -1, :].to(torch.float32)  # (B, hidden_dim)
 
         # Generate action text for the first batch only
-        action_text = self._generate_action_text_batch(output.logits, model_inputs)
+        action_text = ""
 
-        return x, None, action_text
+        return x, rnn_state, action_text
 
     def _generate_action_text_batch(self, logits, model_inputs) -> str:
         """Generate action text from logits for batched input (returns first batch's text)"""
@@ -355,9 +366,10 @@ class MMMambaEncoder(nn.Module):
         actions: torch.Tensor,
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
-    ) -> tuple[torch.Tensor, None, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, str]:
         # images: (B, T, C, H, W)
-        # obs_z, actions, rewards, rnn_state are ignored for VLM encoders
+        # obs_z, actions, rewards are ignored for VLM encoders
+        # rnn_state is passed through unchanged (VLM encoders are stateless)
 
         batch_size = images.shape[0]
         device = images.device
@@ -446,4 +458,4 @@ class MMMambaEncoder(nn.Module):
 
         action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
-        return batch_output, None, action_text
+        return batch_output, rnn_state, action_text
