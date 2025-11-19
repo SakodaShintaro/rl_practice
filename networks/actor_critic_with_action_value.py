@@ -13,6 +13,7 @@ from networks.backbone import (
 from networks.policy_head import DiffusionPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.value_head import ActionValueHead
+from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder
 
 
 class Network(nn.Module):
@@ -51,6 +52,12 @@ class Network(nn.Module):
                 image_processor_type=args.image_processor_type,
                 use_image_only=True,
             )
+        elif args.encoder == "smolvlm":
+            self.encoder = SmolVLMEncoder()
+        elif args.encoder == "qwenvl":
+            self.encoder = QwenVLEncoder()
+        elif args.encoder == "mmmamba":
+            self.encoder = MMMambaEncoder()
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
