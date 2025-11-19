@@ -1,4 +1,5 @@
 import re
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
@@ -73,7 +74,7 @@ class DummyImageProcessor:
         self.output_shape = output_shape
 
 
-class VLMEncoderBase(nn.Module):
+class VLMEncoderBase(nn.Module, ABC):
     """Base class for Vision-Language Model encoders"""
 
     def __init__(self, model_id: str, output_dim: int, device=None):
@@ -109,6 +110,16 @@ class VLMEncoderBase(nn.Module):
             self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
         ]
 
+    @abstractmethod
+    def get_processor_kwargs(self):
+        """Get processor kwargs for reducing memory usage - must be implemented by subclasses"""
+        pass
+
+    @abstractmethod
+    def get_image_token(self):
+        """Get image token string - must be implemented by subclasses"""
+        pass
+
     def forward(
         self,
         images: torch.Tensor,
@@ -136,16 +147,19 @@ class VLMEncoderBase(nn.Module):
                 batch_frames.append(pil_img)
             all_frames.append(batch_frames)
             # Add image tokens for each frame in the sequence
-            image_tokens = "<image>" * seq_len
+            image_token = self.get_image_token()
+            image_tokens = image_token * seq_len
             texts.append(image_tokens + ACTION_PROMPT)
 
         # Use processor directly to batch process all samples
+        # Get processor kwargs from subclass (for memory optimization)
+        processor_kwargs = self.get_processor_kwargs()
         model_inputs = self.processor(
             images=all_frames,
             text=texts,
             return_tensors="pt",
             padding=True,
-            size={"longest_edge": 384},
+            **processor_kwargs,
         )
         model_inputs = {
             k: v.to(self.device).to(torch.bfloat16)
@@ -250,6 +264,14 @@ class SmolVLMEncoder(VLMEncoderBase):
         output_dim = 576
         super().__init__(model_id, output_dim, device)
 
+    def get_processor_kwargs(self):
+        """Reduce image size to limit memory usage"""
+        return {"size": {"longest_edge": 384}}
+
+    def get_image_token(self):
+        """SmolVLM uses <image> as image token"""
+        return "<image>"
+
 
 class QwenVLEncoder(VLMEncoderBase):
     def __init__(self, device=None) -> None:
@@ -260,6 +282,14 @@ class QwenVLEncoder(VLMEncoderBase):
         # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
         output_dim = 1536
         super().__init__(model_id, output_dim, device)
+
+    def get_processor_kwargs(self):
+        """Reduce image size to limit memory usage"""
+        return {"size": {"shortest_edge": 256, "longest_edge": 384}}
+
+    def get_image_token(self):
+        """QwenVL uses <|image_pad|> as image token"""
+        return "<|image_pad|>"
 
 
 class MMMambaEncoder(nn.Module):
