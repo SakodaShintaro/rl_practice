@@ -29,40 +29,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def test_encoder(encoder, images_sequence, device, batch_size):
-    """Test any encoder type with unified interface"""
-    print(f"\n{encoder.__class__.__name__}")
-
-    batched_images = images_sequence.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
-    seq_len = images_sequence.shape[0]
-
-    obs_z_shape = encoder.image_processor.output_shape
-    obs_z = torch.zeros(batch_size, seq_len, *obs_z_shape, device=device)
-    rnn_state = encoder.init_state().to(device).repeat(1, batch_size, 1)
-    action_sequence = torch.randn((batch_size, seq_len, 3), device=device)
-    reward_sequence = torch.randn((batch_size, seq_len, 1), device=device)
-
-    start = time.time()
-    representation, rnn_state, action_text = encoder(
-        batched_images, obs_z, action_sequence, reward_sequence, rnn_state
-    )
-    end = time.time()
-    elapsed_msec = (end - start) * 1000
-
-    print(f"  Batch size: {batch_size}")
-    print(f"  Representation shape: {representation.shape}")
-    print(f"  Elapsed time: {elapsed_msec:.1f} ms")
-    print(f"  Action text: '{action_text}'")
-    action_values = parse_action_text(action_text)
-    print(
-        f"  Parsed action: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}"
-    )
-
-
 if __name__ == "__main__":
     args = parse_args()
     images_dir = args.images_dir
     num_images = args.num_images
+    batch_size = args.batch_size
 
     # 画像の前処理用のtransform
     transform = transforms.Compose(
@@ -141,5 +112,29 @@ if __name__ == "__main__":
     elif args.encoder == "qwenvl":
         encoder = QwenVLEncoder(device)
 
-    # 統一されたテスト関数で実行
-    test_encoder(encoder, images_sequence, device, args.batch_size)
+    print(f"\n{encoder.__class__.__name__}")
+
+    batched_images = images_sequence.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
+    seq_len = images_sequence.shape[0]
+
+    obs_z_shape = encoder.image_processor.output_shape
+    obs_z = torch.zeros(batch_size, seq_len, *obs_z_shape, device=device)
+    rnn_state = encoder.init_state().to(device).repeat(1, batch_size, 1)
+    action_sequence = torch.randn((batch_size, seq_len, 3), device=device)
+    reward_sequence = torch.randn((batch_size, seq_len, 1), device=device)
+
+    start = time.time()
+    representation, rnn_state, action_text = encoder(
+        batched_images, obs_z, action_sequence, reward_sequence, rnn_state
+    )
+    end = time.time()
+    elapsed_msec = (end - start) * 1000
+
+    print(f"  Batch size: {batch_size}")
+    print(f"  Representation shape: {representation.shape}")
+    print(f"  Elapsed time: {elapsed_msec:.1f} ms")
+    print(f"  Action text: '{action_text}'")
+    action_values = parse_action_text(action_text)
+    print(
+        f"  Parsed action: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}"
+    )
