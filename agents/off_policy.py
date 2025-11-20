@@ -219,7 +219,7 @@ class OffPolicyAgent:
         for feature_name, feature in activation_dict.items():
             info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
 
-            result_dict = self.metrics_computers[feature_name](feature)
+            result_dict = self.metrics_computers[feature_name](feature.detach())
             for key, value in result_dict.items():
                 info_dict[f"{key}/{feature_name}"] = value
 
