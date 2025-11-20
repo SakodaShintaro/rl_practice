@@ -291,7 +291,7 @@ class QwenVLEncoder(VLMEncoderBase):
         # model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-32B-Instruct"
         # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
-        output_dim = 1536
+        output_dim = 2048
         super().__init__(model_id, output_dim, device)
 
     def get_processor_kwargs(self):
