@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 import torch
 from torchvision import transforms
 
@@ -123,16 +124,28 @@ if __name__ == "__main__":
     action_sequence = torch.randn((batch_size, seq_len, 3), device=device)
     reward_sequence = torch.randn((batch_size, seq_len, 1), device=device)
 
-    start = time.time()
-    representation, rnn_state, action_text = encoder(
-        batched_images, obs_z, action_sequence, reward_sequence, rnn_state
-    )
-    end = time.time()
-    elapsed_msec = (end - start) * 1000
+    time_list = []
+    trial_num = 10
+
+    for _ in range(trial_num):
+        start = time.time()
+        representation, rnn_state, action_text = encoder(
+            batched_images, obs_z, action_sequence, reward_sequence, rnn_state
+        )
+        end = time.time()
+        elapsed_msec = (end - start) * 1000
+        time_list.append(elapsed_msec)
+
+    time_list.sort()
+    print(time_list)
+    remove_num = len(time_list) // 10
+    time_list = time_list[remove_num:-remove_num]
+    mean_time = np.mean(time_list)
+    std_time = np.std(time_list)
 
     print(f"  Batch size: {batch_size}")
     print(f"  Representation shape: {representation.shape}")
-    print(f"  Elapsed time: {elapsed_msec:.1f} ms")
+    print(f"  Elapsed time: {mean_time:.1f} ms (±{std_time:.1f} ms)")
     print(f"  Action text: '{action_text}'")
     action_values = parse_action_text(action_text)
     print(
