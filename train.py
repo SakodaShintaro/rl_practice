@@ -18,6 +18,8 @@ from agents.on_policy import OnPolicyAgent
 from utils import concat_labeled_images, create_reward_image
 from wrappers import make_env
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
