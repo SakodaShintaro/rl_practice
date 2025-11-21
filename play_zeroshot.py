@@ -10,13 +10,13 @@ import imageio
 import numpy as np
 import torch
 
-from networks.backbone import (
+from networks.vlm import (
     MMMambaEncoder,
     QwenVLEncoder,
     SmolVLMEncoder,
     parse_action_text,
 )
-from utils import concat_images
+from utils import concat_images, convert_to_uint8
 from wrappers import make_env
 
 
@@ -64,8 +64,18 @@ class VLMAgent:
 
     @torch.inference_mode()
     def select_action(self, obs):
-        obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
-        _, _, action_text = self.encoder(obs_tensor)
+        # obs: (C, H, W) -> (B=1, T=1, C, H, W)
+        obs_tensor = (
+            torch.tensor(obs, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
+        )
+
+        # Create dummy obs_z, actions, rewards, rnn_state
+        obs_z = torch.zeros(1, 1, 1, device=self.device)  # dummy
+        actions = torch.zeros(1, 1, 3, device=self.device)  # dummy actions
+        rewards = torch.zeros(1, 1, 1, device=self.device)  # dummy rewards
+        rnn_state = self.encoder.init_state().to(self.device)
+
+        _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
         action_array = parse_action_text(action_text)
         return action_array
 
@@ -77,8 +87,8 @@ def run_episode(env, agent, render=False):
     step_count = 0
     bgr_image_list = []
 
-    obs_for_render = obs.copy().transpose(1, 2, 0)
-    bgr_image_list.append(concat_images(env.render(), [obs_for_render]))
+    obs_for_render = convert_to_uint8(obs.copy().transpose(1, 2, 0))
+    bgr_image_list.append(concat_images([env.render(), obs_for_render]))
 
     while True:
         action = agent.select_action(obs)
@@ -87,12 +97,14 @@ def run_episode(env, agent, render=False):
         total_reward += reward
         step_count += 1
 
-        obs_for_render = obs.copy().transpose(1, 2, 0)
-        bgr_image = concat_images(env.render(), [obs_for_render])
+        obs_for_render = convert_to_uint8(obs.copy().transpose(1, 2, 0))
+        bgr_image = concat_images([env.render(), obs_for_render])
         bgr_image_list.append(bgr_image)
 
         if render:
-            bgr_image = concat_images(env.render(), [obs.copy().transpose(1, 2, 0)])
+            bgr_image = concat_images(
+                [env.render(), convert_to_uint8(obs.copy().transpose(1, 2, 0))]
+            )
             cv2.imshow("CarRacing", bgr_image)
             cv2.waitKey(1)
 
