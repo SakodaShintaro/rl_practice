@@ -14,11 +14,7 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = (
-    "You are an AI driving assistant. Analyze the driving scene from the video frames (from oldest to newest) and provide the next action. "
-    "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
-    "gas (0 to 1), braking (0 to 1). "
-    "Stay on the gray road and avoid green areas. "
-    "Respond in format: 'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+    "Please describe the image(s)"
 )
 
 
@@ -145,9 +141,9 @@ class VLMEncoderBase(nn.Module, ABC):
         batch_size = images.shape[0]
         seq_len = images.shape[1]
 
-        # Convert all batch samples to PIL images
-        all_frames = []
-        texts = []
+        # Convert all batch samples to PIL images and build chat conversations
+        conversations = []
+        first_conversation = None
         for b in range(batch_size):
             batch_frames = []
             for t in range(seq_len):
@@ -156,22 +152,33 @@ class VLMEncoderBase(nn.Module, ABC):
                 img_np = (img_np * 255).astype(np.uint8)
                 pil_img = Image.fromarray(img_np)
                 batch_frames.append(pil_img)
-            all_frames.append(batch_frames)
-            # Add image tokens for each frame in the sequence
-            image_token = self.get_image_token()
-            image_tokens = image_token * seq_len
-            texts.append(image_tokens + ACTION_PROMPT)
+
+            content = [{"type": "image", "image": frame} for frame in batch_frames]
+            content.append({"type": "text", "text": ACTION_PROMPT})
+            conversation = [
+                {
+                    "role": "user",
+                    "content": content,
+                }
+            ]
+            conversations.append(conversation)
+            if first_conversation is None:
+                first_conversation = conversation
 
         # Use processor directly to batch process all samples
         # Get processor kwargs from subclass (for memory optimization)
         processor_kwargs = self.get_processor_kwargs()
-        model_inputs = self.processor(
-            images=all_frames,
-            text=texts,
+
+        model_inputs = self.processor.apply_chat_template(
+            conversations,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
             return_tensors="pt",
             padding=True,
             **processor_kwargs,
         )
+        model_inputs.pop("token_type_ids", None)
         model_inputs = {
             k: v.to(self.device).to(torch.bfloat16)
             if v.dtype.is_floating_point
@@ -187,84 +194,48 @@ class VLMEncoderBase(nn.Module, ABC):
 
         # Generate action text for the first batch only
         action_text = ""
+        if first_conversation is not None:
+            action_text = self._generate_action_text(first_conversation)
 
         return x, rnn_state, action_text
 
-    def _generate_action_text_batch(self, logits, model_inputs) -> str:
-        """Generate action text from logits for batched input (returns first batch's text)"""
-        generated_ids = []
-        stop_token_ids = self.get_stop_tokens()
-        stop_token_ids = [tid for tid in stop_token_ids if tid is not None]
+    def _generate_action_text(self, conversation) -> str:
+        """Generate action text from a single conversation using model.generate"""
+        inputs = self.processor.apply_chat_template(
+            [conversation],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        inputs = {
+            k: v.to(self.device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(self.device)
+            for k, v in inputs.items()
+        }
 
-        # Process only the first batch
-        next_token_logits = logits[0:1, -1, :]
-        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+        pad_token_id = self.processor.tokenizer.pad_token_id
+        eos_token_id = self.processor.tokenizer.eos_token_id
+        if pad_token_id is None:
+            pad_token_id = eos_token_id
 
-        input_ids = torch.cat([model_inputs["input_ids"][0:1], next_token], dim=-1)
-
-        for _ in range(50):
-            if next_token.item() in stop_token_ids:
-                break
-            generated_ids.append(next_token.item())
-
-            if "attention_mask" in model_inputs:
-                attention_mask = model_inputs["attention_mask"][0:1]
-                attention_mask = torch.cat(
-                    [attention_mask, torch.ones((1, 1), device=self.device)],
-                    dim=-1,
-                )
-                model_inputs["attention_mask"] = attention_mask
-
-            outputs = self.model.forward(
-                input_ids=input_ids,
-                attention_mask=model_inputs.get("attention_mask"),
-                output_hidden_states=False,
+        with torch.no_grad():
+            generated = self.model.generate(
+                **inputs,
+                max_new_tokens=128,
+                num_beams=1,
+                do_sample=False,
+                eos_token_id=eos_token_id,
+                pad_token_id=pad_token_id,
             )
-            next_token_logits = outputs.logits[:, -1, :]
-            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            input_ids = torch.cat([input_ids, next_token], dim=-1)
 
-        action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
-        return action_text
-
-    def _generate_action_text(self, logits, model_inputs) -> str:
-        """Generate action text from logits without using model.generate()"""
-        generated_ids = []
-        stop_token_ids = self.get_stop_tokens()
-        # Remove None values
-        stop_token_ids = [tid for tid in stop_token_ids if tid is not None]
-
-        # Get the next token from the initial logits
-        next_token_logits = logits[:, -1, :]
-        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-
-        input_ids = torch.cat([model_inputs["input_ids"], next_token], dim=-1)
-
-        for _ in range(50):  # max_new_tokens
-            if next_token.item() in stop_token_ids:
-                break
-            generated_ids.append(next_token.item())
-
-            # Manually update attention mask and position ids if they exist
-            if "attention_mask" in model_inputs:
-                attention_mask = model_inputs["attention_mask"]
-                attention_mask = torch.cat(
-                    [attention_mask, torch.ones((attention_mask.shape[0], 1), device=self.device)],
-                    dim=-1,
-                )
-                model_inputs["attention_mask"] = attention_mask
-
-            outputs = self.model.forward(
-                input_ids=input_ids,
-                attention_mask=model_inputs.get("attention_mask"),
-                output_hidden_states=False,
-            )
-            next_token_logits = outputs.logits[:, -1, :]
-            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            input_ids = torch.cat([input_ids, next_token], dim=-1)
-
-        action_text = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
-        return action_text
+        input_len = inputs["input_ids"].shape[1]
+        new_tokens = generated[:, input_len:]
+        decoded = self.processor.batch_decode(
+            new_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        return decoded[0].strip() if decoded else ""
 
 
 class SmolVLMEncoder(VLMEncoderBase):
@@ -295,8 +266,8 @@ class QwenVLEncoder(VLMEncoderBase):
         super().__init__(model_id, output_dim, device)
 
     def get_processor_kwargs(self):
-        """Reduce image size to limit memory usage"""
-        return {"size": {"shortest_edge": 256, "longest_edge": 384}}
+        """Use default processor resizing/merge behavior (best quality for instructions)"""
+        return {}
 
     def get_image_token(self):
         """QwenVL uses <|image_pad|> as image token"""
