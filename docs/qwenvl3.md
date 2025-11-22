@@ -280,3 +280,13 @@ if __name__ == "__main__":
 
 [1]: https://huggingface.co/Qwen/Qwen3-VL-2B-Thinking-FP8 "Qwen/Qwen3-VL-2B-Thinking-FP8 · Hugging Face"
 [2]: https://huggingface.co/docs/transformers/main/en/model_doc/qwen2_vl "Qwen2-VL"
+
+## その他
+
+<https://github.com/QwenLM/Qwen3-VL/blob/b6b80717cb28887eb80e82fc96239c1c53a84cc6/qwen-vl-utils/README.md>
+
+videoとして与えた方が良いかもしれない。
+
+<https://github.com/huggingface/transformers/blob/bdee0889714e9cb3e53d3b1b2a626919479d356c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py>
+
+<https://github.com/huggingface/transformers/blob/bdee0889714e9cb3e53d3b1b2a626919479d356c/src/transformers/models/qwen3_vl/modular_qwen3_vl.py>
