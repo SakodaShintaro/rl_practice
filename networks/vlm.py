@@ -9,6 +9,7 @@ from PIL import Image
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
+from transformers.video_utils import VideoMetadata
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
@@ -83,7 +84,7 @@ class DummyImageProcessor:
 class VLMEncoderBase(nn.Module, ABC):
     """Base class for Vision-Language Model encoders"""
 
-    def __init__(self, model_id: str, output_dim: int, device=None):
+    def __init__(self, model_id: str, output_dim: int, device=None, video_fps: float | None = None):
         super().__init__()
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
@@ -101,6 +102,7 @@ class VLMEncoderBase(nn.Module, ABC):
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.output_dim = output_dim
         self.device = device
+        self.video_fps = video_fps
         # Dummy image processor for interface compatibility
         self.image_processor = DummyImageProcessor((output_dim,))
 
@@ -256,22 +258,176 @@ class SmolVLMEncoder(VLMEncoderBase):
 
 
 class QwenVLEncoder(VLMEncoderBase):
-    def __init__(self, device=None) -> None:
+    def __init__(self, device=None, video_fps: float = 2.0) -> None:
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-32B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
         output_dim = 2048
-        super().__init__(model_id, output_dim, device)
+        super().__init__(model_id, output_dim, device, video_fps=video_fps)
+        self.video_fps = video_fps
 
     def get_processor_kwargs(self):
-        """Use default processor resizing/merge behavior (best quality for instructions)"""
-        return {}
+        return {
+            "videos_kwargs": {
+                "fps": self.video_fps,
+                "return_metadata": True,
+            }
+        }
 
     def get_image_token(self):
-        """QwenVL uses <|image_pad|> as image token"""
         return "<|image_pad|>"
+
+    def _build_video_inputs(
+        self, images: torch.Tensor
+    ) -> tuple[list[list[dict]], list[np.ndarray], list[VideoMetadata]]:
+        batch_size = images.shape[0]
+        seq_len = images.shape[1]
+
+        conversations = []
+        video_arrays = []
+        metadata = []
+
+        for b in range(batch_size):
+            frames = []
+            for t in range(seq_len):
+                img_tensor = images[b, t].to(torch.float32)
+                img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
+                img_np = (img_np * 255).astype(np.uint8)
+                frames.append(Image.fromarray(img_np))
+
+            content = [
+                {
+                    "type": "video",
+                    "video": frames,
+                }
+            ]
+            content.append({"type": "text", "text": ACTION_PROMPT})
+            conversations.append(
+                [
+                    {
+                        "role": "user",
+                        "content": content,
+                    }
+                ]
+            )
+
+            video_np = np.stack([np.array(frame) for frame in frames])
+            video_arrays.append(video_np)
+            metadata.append(
+                VideoMetadata(
+                    total_num_frames=seq_len,
+                    fps=self.video_fps,
+                    height=video_np.shape[1],
+                    width=video_np.shape[2],
+                    frames_indices=list(range(seq_len)),
+                )
+            )
+
+        return conversations, video_arrays, metadata
+
+    def forward(
+        self,
+        images: torch.Tensor,
+        obs_z: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        rnn_state: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+        conversations, video_arrays, metadata = self._build_video_inputs(images)
+
+        processor_kwargs = self.get_processor_kwargs()
+        videos_kwargs = processor_kwargs.setdefault("videos_kwargs", {})
+        videos_kwargs["video_metadata"] = metadata
+        videos_kwargs.setdefault("do_sample_frames", False)
+        videos_kwargs.setdefault("return_metadata", True)
+
+        text = self.processor.apply_chat_template(
+            conversations,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        model_inputs = self.processor(
+            text=text,
+            videos=video_arrays,
+            return_tensors="pt",
+            padding=True,
+            **processor_kwargs,
+        )
+        model_inputs.pop("token_type_ids", None)
+        model_inputs = {
+            k: v.to(self.device).to(torch.bfloat16)
+            if v.dtype.is_floating_point
+            else v.to(self.device)
+            for k, v in model_inputs.items()
+        }
+
+        output = self.model.forward(**model_inputs, output_hidden_states=True)
+        hidden = output["hidden_states"][-1]
+        x = hidden[:, -1, :].to(torch.float32)
+
+        action_text = ""
+        if conversations:
+            action_text = self._generate_action_text_video(
+                conversations[0],
+                video_arrays[0],
+                metadata[0],
+            )
+
+        return x, rnn_state, action_text
+
+    def _generate_action_text_video(
+        self,
+        conversation,
+        video_array: np.ndarray,
+        metadata_obj: VideoMetadata,
+    ) -> str:
+        text = self.processor.apply_chat_template(
+            [conversation],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        processor_kwargs = self.get_processor_kwargs()
+        videos_kwargs = processor_kwargs.setdefault("videos_kwargs", {})
+        videos_kwargs["video_metadata"] = [metadata_obj]
+        videos_kwargs.setdefault("do_sample_frames", False)
+        videos_kwargs.setdefault("return_metadata", True)
+
+        model_inputs = self.processor(
+            text=text,
+            videos=[video_array],
+            return_tensors="pt",
+            padding=True,
+            **processor_kwargs,
+        )
+        model_inputs.pop("token_type_ids", None)
+        model_inputs = {
+            k: v.to(self.device).to(torch.bfloat16)
+            if v.dtype.is_floating_point
+            else v.to(self.device)
+            for k, v in model_inputs.items()
+        }
+
+        pad_token_id = self.processor.tokenizer.pad_token_id
+        eos_token_id = self.processor.tokenizer.eos_token_id
+        if pad_token_id is None:
+            pad_token_id = eos_token_id
+
+        with torch.no_grad():
+            generated = self.model.generate(
+                **model_inputs,
+                max_new_tokens=128,
+                num_beams=1,
+                do_sample=False,
+                eos_token_id=eos_token_id,
+                pad_token_id=pad_token_id,
+            )
+
+        input_len = model_inputs["input_ids"].shape[1]
+        new_tokens = generated[:, input_len:]
+        decoded = self.processor.batch_decode(
+            new_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        return decoded[0].strip() if decoded else ""
 
 
 class MMMambaEncoder(nn.Module):

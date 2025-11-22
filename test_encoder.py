@@ -1,4 +1,5 @@
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from torchvision import transforms
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 def parse_args():
