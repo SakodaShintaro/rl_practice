@@ -150,11 +150,16 @@ class QwenVLEncoder(nn.Module):
             return_video_metadata=True,
         )
 
-        video_metadata = None
-        if videos is not None:
-            videos, video_metadata = zip(*videos)
-            videos = list(videos)
-            video_metadata = list(video_metadata)
+        processed_videos = []
+        processed_metadata = []
+        for video, meta in (videos or []):
+            processed_videos.append(video)
+            processed_metadata.append({**meta, "fps": self.video_fps})
+        videos = processed_videos or None
+        video_metadata = processed_metadata or None
+
+        video_kwargs.setdefault("videos_kwargs", {})
+        video_kwargs["videos_kwargs"]["fps"] = self.video_fps
 
         inputs = self.processor(
             text=text,
