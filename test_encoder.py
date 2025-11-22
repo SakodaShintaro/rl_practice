@@ -9,7 +9,7 @@ import torch
 from torchvision import transforms
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
+from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -23,7 +23,6 @@ def parse_args():
             "spatial_temporal",
             "temporal_only",
             "mmmamba",
-            "smolvlm",
             "qwenvl",
         ],
     )
@@ -109,9 +108,6 @@ if __name__ == "__main__":
 
     elif args.encoder == "mmmamba":
         encoder = MMMambaEncoder(device)
-
-    elif args.encoder == "smolvlm":
-        encoder = SmolVLMEncoder(device)
 
     elif args.encoder == "qwenvl":
         encoder = QwenVLEncoder(device)

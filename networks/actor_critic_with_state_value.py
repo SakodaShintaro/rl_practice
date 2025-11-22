@@ -12,7 +12,7 @@ from networks.backbone import (
 from networks.policy_head import BetaPolicy, CategoricalPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.value_head import StateValueHead
-from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder
+from networks.vlm import MMMambaEncoder, QwenVLEncoder
 
 
 class Network(nn.Module):
@@ -52,8 +52,6 @@ class Network(nn.Module):
                 image_processor_type=args.image_processor_type,
                 use_image_only=True,
             )
-        elif args.encoder == "smolvlm":
-            self.encoder = SmolVLMEncoder()
         elif args.encoder == "qwenvl":
             self.encoder = QwenVLEncoder()
         elif args.encoder == "mmmamba":

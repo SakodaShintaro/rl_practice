@@ -10,12 +10,7 @@ import imageio
 import numpy as np
 import torch
 
-from networks.vlm import (
-    MMMambaEncoder,
-    QwenVLEncoder,
-    SmolVLMEncoder,
-    parse_action_text,
-)
+from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
 from utils import concat_images, convert_to_uint8
 from wrappers import make_env
 
@@ -32,7 +27,7 @@ def parse_args() -> argparse.Namespace:
         "--agent_type",
         type=str,
         default="random",
-        choices=["random", "single_frame", "smolvlm", "qwenvl", "mmmamba"],
+        choices=["random", "single_frame", "qwenvl", "mmmamba"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -53,9 +48,7 @@ class VLMAgent:
     def __init__(self, encoder_type, device=None):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        if encoder_type == "smolvlm":
-            self.encoder = SmolVLMEncoder(device=self.device)
-        elif encoder_type == "qwenvl":
+        if encoder_type == "qwenvl":
             self.encoder = QwenVLEncoder(device=self.device)
         elif encoder_type == "mmmamba":
             self.encoder = MMMambaEncoder(device=self.device)
