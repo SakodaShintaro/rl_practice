@@ -126,7 +126,7 @@ class Network(nn.Module):
         rnn_state: torch.Tensor,  # (1, B, hidden_size)
         action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state, action_text = self.encoder(
+        x, rnn_state, _ = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
         )  # (B, hidden_dim)
 

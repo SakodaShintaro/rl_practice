@@ -133,7 +133,7 @@ class VLMEncoderBase(nn.Module, ABC):
         actions: torch.Tensor,
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
         # images: (B, T, C, H, W)
         # obs_z, actions, rewards are ignored for VLM encoders
         # rnn_state is passed through unchanged (VLM encoders are stateless)
@@ -143,7 +143,6 @@ class VLMEncoderBase(nn.Module, ABC):
 
         # Convert all batch samples to PIL images and build chat conversations
         conversations = []
-        first_conversation = None
         for b in range(batch_size):
             batch_frames = []
             for t in range(seq_len):
@@ -155,15 +154,13 @@ class VLMEncoderBase(nn.Module, ABC):
 
             content = [{"type": "image", "image": frame} for frame in batch_frames]
             content.append({"type": "text", "text": ACTION_PROMPT})
-            conversation = [
+            conversation: list[dict[str, object]] = [
                 {
                     "role": "user",
                     "content": content,
                 }
             ]
             conversations.append(conversation)
-            if first_conversation is None:
-                first_conversation = conversation
 
         # Use processor directly to batch process all samples
         # Get processor kwargs from subclass (for memory optimization)
@@ -192,14 +189,14 @@ class VLMEncoderBase(nn.Module, ABC):
         # Use the last token's hidden state for each batch
         x = hidden[:, -1, :].to(torch.float32)  # (B, hidden_dim)
 
-        # Generate action text for the first batch only
-        action_text = ""
-        if first_conversation is not None:
-            action_text = self._generate_action_text(first_conversation)
+        # Generate action texts for each batch sample
+        action_texts = [""] * batch_size
+        for idx, conversation in enumerate(conversations):
+            action_texts[idx] = self._generate_action_text(conversation, processor_kwargs)
 
-        return x, rnn_state, action_text
+        return x, rnn_state, action_texts
 
-    def _generate_action_text(self, conversation) -> str:
+    def _generate_action_text(self, conversation, processor_kwargs) -> str:
         """Generate action text from a single conversation using model.generate"""
         inputs = self.processor.apply_chat_template(
             [conversation],
@@ -207,7 +204,9 @@ class VLMEncoderBase(nn.Module, ABC):
             add_generation_prompt=True,
             return_dict=True,
             return_tensors="pt",
+            **processor_kwargs,
         )
+        inputs.pop("token_type_ids", None)
         inputs = {
             k: v.to(self.device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(self.device)
             for k, v in inputs.items()
@@ -337,7 +336,7 @@ class MMMambaEncoder(nn.Module):
         actions: torch.Tensor,
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
         # images: (B, T, C, H, W)
         # obs_z, actions, rewards are ignored for VLM encoders
         # rnn_state is passed through unchanged (VLM encoders are stateless)
@@ -428,5 +427,6 @@ class MMMambaEncoder(nn.Module):
             input_ids_gen = token.unsqueeze(1)
 
         action_text = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+        action_texts = [action_text] + [""] * (batch_size - 1)
 
-        return batch_output, rnn_state, action_text
+        return batch_output, rnn_state, action_texts

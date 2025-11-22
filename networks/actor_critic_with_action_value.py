@@ -115,7 +115,7 @@ class Network(nn.Module):
 
         This method encodes the sequence and returns action and action-value.
         """
-        x, rnn_state, action_text = self.encoder(
+        x, rnn_state, _ = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
         )  # (B, hidden_dim)
 

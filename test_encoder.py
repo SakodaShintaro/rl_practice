@@ -129,7 +129,7 @@ if __name__ == "__main__":
 
     for _ in range(trial_num):
         start = time.time()
-        representation, rnn_state, action_text = encoder(
+        representation, rnn_state, action_texts = encoder(
             batched_images, obs_z, action_sequence, reward_sequence, rnn_state
         )
         end = time.time()
@@ -146,8 +146,9 @@ if __name__ == "__main__":
     print(f"  Batch size: {batch_size}")
     print(f"  Representation shape: {representation.shape}")
     print(f"  Elapsed time: {mean_time:.1f} ms (±{std_time:.1f} ms)")
-    print(f"  Action text: '{action_text}'")
-    action_values = parse_action_text(action_text)
+    print(f"  Action text: {action_texts}")
+    first_action_text = action_texts[0] if action_texts else ""
+    action_values = parse_action_text(first_action_text)
     print(
         f"  Parsed action: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}"
     )

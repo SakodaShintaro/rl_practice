@@ -142,12 +142,12 @@ class SpatialTemporalEncoder(nn.Module):
         actions: torch.Tensor,  #  (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, n_layer * space_len * hidden_image_dim)
-    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
         """
         Returns:
             encoded features: (B, output_dim)
             rnn_state: (1, B, n_layer * space_len * hidden_image_dim)
-            action_text: str (always empty string for non-VLM encoders)
+            action_texts: list[str] (always empty strings for non-VLM encoders)
         """
         # Encode all frames with AE but preserve spatial structure
         # images: (B, T, C, H, W) -> encode all frames
@@ -191,7 +191,8 @@ class SpatialTemporalEncoder(nn.Module):
 
         output = last_frame_emb.flatten(start_dim=1)  # [B, token_num * C']
 
-        return output, rnn_state, ""
+        action_texts = [""] * B
+        return output, rnn_state, action_texts
 
 
 class TemporalOnlyEncoder(nn.Module):
@@ -283,12 +284,12 @@ class TemporalOnlyEncoder(nn.Module):
         actions: torch.Tensor,  # (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # (1, B, hidden_size) for GRU, unused for Transformer
-    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
         """
         Returns:
             encoded features: (B, output_dim)
             rnn_state: (1, B, hidden_size) for GRU, same as input for Transformer
-            action_text: str (always empty string for non-VLM encoders)
+            action_texts: list[str] (always empty strings for non-VLM encoders)
         """
         B, T = images.shape[:2]
 
@@ -343,4 +344,5 @@ class TemporalOnlyEncoder(nn.Module):
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)
 
-        return final_repr, rnn_state, ""
+        action_texts = [""] * B
+        return final_repr, rnn_state, action_texts

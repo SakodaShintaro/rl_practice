@@ -75,7 +75,8 @@ class VLMAgent:
         rewards = torch.zeros(1, 1, 1, device=self.device)  # dummy rewards
         rnn_state = self.encoder.init_state().to(self.device)
 
-        _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
+        _, _, action_texts = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
+        action_text = action_texts[0] if action_texts else ""
         action_array = parse_action_text(action_text)
         return action_array
 
