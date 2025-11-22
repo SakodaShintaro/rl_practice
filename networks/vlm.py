@@ -179,6 +179,7 @@ class QwenVLEncoder(nn.Module):
         }
         return inputs
 
+    @torch.inference_mode()
     def forward(
         self,
         images: torch.Tensor,
@@ -195,8 +196,8 @@ class QwenVLEncoder(nn.Module):
         x = hidden[:, -1, :].to(torch.float32)
 
         action_text = ""
-        if messages:
-            action_text = self._generate_action_text(messages[0])
+        # if messages:
+        #     action_text = self._generate_action_text(messages[0])
 
         return x, rnn_state, action_text
 
