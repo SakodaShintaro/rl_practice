@@ -16,8 +16,8 @@ ACTION_PROMPT = (
     "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
     "Action space: steering [-1, +1] where -1 is full left and +1 is full right; gas [0, 1]; braking [0, 1]. "
     "Pick exactly one High Level Action: 'Turn Left', 'Turn Right', 'Go Straight', or 'Slow Down'. Prefer small steering changes (|steering| <= 0.3) and modest gas; use brake only for sharp turns or when drifting off the road. If unsure, choose 'Slow Down'. "
-    "Typical mappings: Turn Left -> steering=-0.20, gas=0.05, braking=0.00; Turn Right -> steering=0.20, gas=0.05, braking=0.00; Go Straight -> steering=0.00, gas=0.08, braking=0.00; Slow Down -> steering=0.00, gas=0.00, braking=0.15. "
-    "Respond on one line in the exact format: <think>Write your thinking</think>'High Level Action: <command>, Action: steering=X.XX, gas=X.XX, braking=X.XX' using decimal values within range."
+    "Typical mappings: Turn Left -> steering=-0.20, gas=0.00, braking=0.00; Turn Right -> steering=0.20, gas=0.00, braking=0.00; Go Straight -> steering=0.00, gas=0.01, braking=0.00; Slow Down -> steering=0.00, gas=0.00, braking=0.10. "
+    "Respond in the exact format: <think>Write your thinking</think>'High Level Action: <command>, Action: steering=X.XX, gas=X.XX, braking=X.XX' using decimal values within range."
 )
 
 
