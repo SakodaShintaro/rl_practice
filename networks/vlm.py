@@ -126,6 +126,7 @@ class VLMEncoderBase(nn.Module, ABC):
         """Get image token string - must be implemented by subclasses"""
         pass
 
+    @torch.inference_mode
     def forward(
         self,
         images: torch.Tensor,
