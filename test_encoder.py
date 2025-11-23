@@ -27,8 +27,8 @@ def parse_args():
         ],
     )
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
-    parser.add_argument("--num_images", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--num_images", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=1)
     return parser.parse_args()
 
 
