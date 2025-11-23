@@ -53,7 +53,7 @@ class VLMAgent:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 
     @torch.inference_mode()
-    def select_action(self, obs):
+    def select_action(self, obs, prev_reward):
         # obs: (C, H, W) -> (B=1, T=1, C, H, W)
         obs_tensor = (
             torch.tensor(obs, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
@@ -62,7 +62,7 @@ class VLMAgent:
         # Create dummy obs_z, actions, rewards, rnn_state
         obs_z = torch.zeros(1, 1, 1, device=self.device)  # dummy
         actions = torch.zeros(1, 1, 3, device=self.device)  # dummy actions
-        rewards = torch.zeros(1, 1, 1, device=self.device)  # dummy rewards
+        rewards = torch.tensor([[[prev_reward]]], device=self.device)  # use previous reward
         rnn_state = self.encoder.init_state().to(self.device)
 
         _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
@@ -80,10 +80,13 @@ def run_episode(env, agent, render=False):
 
     obs_for_render = convert_to_uint8(obs.copy().transpose(1, 2, 0))
     bgr_image_list.append(concat_images([env.render(), obs_for_render]))
+    prev_reward = 0.0
 
     while True:
-        action = agent.select_action(obs)
+        action = agent.select_action(obs, prev_reward)
         obs, reward, termination, truncation, env_info = env.step(action)
+
+        prev_reward = reward
 
         total_reward += reward
         step_count += 1

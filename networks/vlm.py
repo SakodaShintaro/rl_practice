@@ -18,9 +18,14 @@ ACTION_PROMPT = (
     "You are an AI driving assistant. Analyze the driving scene from the video frames and provide the next action. "
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
     "gas (0 to 1), braking (0 to 1). "
-    "Stay on the gray road and avoid green areas. "
-    "Respond in format: <think>Write your thinking</think>'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+    "High Level Action should be one of: 'Turn Left', 'Turn Right', 'Go Straight'. "
+    "Typically, "
+    "Turn Left: steering=-0.1, gas=0.1, braking=0.0, "
+    "Turn Right: steering=0.1, gas=0.1, braking=0.0, "
+    "Go Straight: steering=0.0, gas=0.1, braking=0.0. "
+    "Respond in format: <think>Write your thinking</think>'High Level Action: <command>, Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
 )
+
 
 def parse_action_text(action_text: str) -> np.ndarray:
     """Parse action text and extract steering, gas, braking values.
@@ -111,7 +116,7 @@ class QwenVLEncoder(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
 
-    def _build_messages(self, images: torch.Tensor) -> list[list[dict]]:
+    def _build_messages(self, images: torch.Tensor, rewards: torch.Tensor) -> list[list[dict]]:
         batch_size = images.shape[0]
         seq_len = images.shape[1]
         messages = []
@@ -125,6 +130,7 @@ class QwenVLEncoder(nn.Module):
                 frames.append(Image.fromarray(img_np))
 
             content = [{"type": "video", "video": frames, "fps": self.video_fps}]
+            content.append({"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."})
             content.append({"type": "text", "text": ACTION_PROMPT})
             messages.append([{"role": "user", "content": content}])
 
@@ -177,7 +183,7 @@ class QwenVLEncoder(nn.Module):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        messages = self._build_messages(images)
+        messages = self._build_messages(images, rewards)
         model_inputs = self._prepare_inputs(messages)
 
         output = self.model.forward(**model_inputs, output_hidden_states=True)
