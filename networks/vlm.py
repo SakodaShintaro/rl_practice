@@ -14,7 +14,13 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = "Please describe the image(s)"
-
+ACTION_PROMPT = (
+    "You are an AI driving assistant. Analyze the driving scene from the video frames and provide the next action. "
+    "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
+    "gas (0 to 1), braking (0 to 1). "
+    "Stay on the gray road and avoid green areas. "
+    "Respond in format: <think>Write your thinking</think>'Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
+)
 
 def parse_action_text(action_text: str) -> np.ndarray:
     """Parse action text and extract steering, gas, braking values.
@@ -132,26 +138,22 @@ class QwenVLEncoder(nn.Module):
 
         images, videos, video_kwargs = process_vision_info(
             messages,
+            image_patch_size=16,
             return_video_kwargs=True,
             return_video_metadata=True,
         )
 
-        processed_videos = []
-        processed_metadata = []
-        for video, meta in videos or []:
-            processed_videos.append(video)
-            processed_metadata.append({**meta, "fps": self.video_fps})
-        videos = processed_videos or None
-        video_metadata = processed_metadata or None
-
-        video_kwargs.setdefault("videos_kwargs", {})
-        video_kwargs["videos_kwargs"]["fps"] = self.video_fps
+        if videos is not None:
+            videos, video_metadatas = zip(*videos)
+            videos, video_metadatas = list(videos), list(video_metadatas)
+        else:
+            video_metadatas = None
 
         inputs = self.processor(
             text=text,
             images=images,
             videos=videos,
-            video_metadata=video_metadata,
+            video_metadata=video_metadatas,
             return_tensors="pt",
             padding=True,
             **video_kwargs,
