@@ -210,7 +210,7 @@ class QwenVLEncoder(nn.Module):
         with torch.no_grad():
             generated = self.model.generate(
                 **model_inputs,
-                max_new_tokens=128,
+                max_new_tokens=512,
                 num_beams=1,
                 do_sample=False,
                 eos_token_id=eos_token_id,
