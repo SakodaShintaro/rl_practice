@@ -191,10 +191,9 @@ if __name__ == "__main__":
         )
 
         # Save episode video
-        if (episode + 1) % 10 == 0:
-            video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
-            rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
-            imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+        video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
+        rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
+        imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
     # Save best episode video
     if best_video:
