@@ -53,7 +53,7 @@ class Network(nn.Module):
                 use_image_only=True,
             )
         elif args.encoder == "qwenvl":
-            self.encoder = QwenVLEncoder()
+            self.encoder = QwenVLEncoder(output_text=False)
         elif args.encoder == "mmmamba":
             self.encoder = MMMambaEncoder()
         else:
