@@ -13,9 +13,7 @@ from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokeniz
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 # Unified action prompt for all VLM encoders
-ACTION_PROMPT = (
-    "Please describe the image(s)"
-)
+ACTION_PROMPT = "Please describe the image(s)"
 
 
 def parse_action_text(action_text: str) -> np.ndarray:
@@ -156,12 +154,7 @@ class VLMEncoderBase(nn.Module, ABC):
 
             content = [{"type": "image", "image": frame} for frame in batch_frames]
             content.append({"type": "text", "text": ACTION_PROMPT})
-            conversation = [
-                {
-                    "role": "user",
-                    "content": content,
-                }
-            ]
+            conversation = [{"role": "user", "content": content}]
             conversations.append(conversation)
             if first_conversation is None:
                 first_conversation = conversation
@@ -210,7 +203,9 @@ class VLMEncoderBase(nn.Module, ABC):
             return_tensors="pt",
         )
         inputs = {
-            k: v.to(self.device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(self.device)
+            k: v.to(self.device).to(torch.bfloat16)
+            if v.dtype.is_floating_point
+            else v.to(self.device)
             for k, v in inputs.items()
         }
 
