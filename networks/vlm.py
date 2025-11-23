@@ -196,8 +196,7 @@ class QwenVLEncoder(nn.Module):
         x = hidden[:, -1, :].to(torch.float32)
 
         action_text = ""
-        # if messages:
-        #     action_text = self._generate_action_text(messages[0])
+        # action_text = self._generate_action_text(messages[0])
 
         return x, rnn_state, action_text
 
