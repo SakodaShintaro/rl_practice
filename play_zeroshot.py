@@ -24,10 +24,7 @@ def parse_args() -> argparse.Namespace:
         choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
     )
     parser.add_argument(
-        "--agent_type",
-        type=str,
-        default="random",
-        choices=["random", "single_frame", "qwenvl", "mmmamba"],
+        "--agent_type", type=str, default="qwenvl", choices=["random", "qwenvl", "mmmamba"]
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -69,6 +66,7 @@ class VLMAgent:
         rnn_state = self.encoder.init_state().to(self.device)
 
         _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
+        print(f"{action_text=}")
         action_array = parse_action_text(action_text)
         return action_array
 
