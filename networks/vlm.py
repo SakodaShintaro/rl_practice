@@ -13,9 +13,7 @@ from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokeniz
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 # Unified action prompt for all VLM encoders
-ACTION_PROMPT = (
-    "Please describe the image(s)"
-)
+ACTION_PROMPT = "Please describe the image(s)"
 
 
 def parse_action_text(action_text: str) -> np.ndarray:
@@ -152,7 +150,7 @@ class QwenVLEncoder(nn.Module):
 
         processed_videos = []
         processed_metadata = []
-        for video, meta in (videos or []):
+        for video, meta in videos or []:
             processed_videos.append(video)
             processed_metadata.append({**meta, "fps": self.video_fps})
         videos = processed_videos or None
