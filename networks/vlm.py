@@ -117,21 +117,9 @@ class QwenVLEncoder(nn.Module):
                 img_np = (img_np * 255).astype(np.uint8)
                 frames.append(Image.fromarray(img_np))
 
-            content = [
-                {
-                    "type": "video",
-                    "video": frames,
-                }
-            ]
+            content = [{"type": "video", "video": frames}]
             content.append({"type": "text", "text": ACTION_PROMPT})
-            messages.append(
-                [
-                    {
-                        "role": "user",
-                        "content": content,
-                    }
-                ]
-            )
+            messages.append([{"role": "user", "content": content}])
 
         return messages
 
