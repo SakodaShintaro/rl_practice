@@ -15,14 +15,15 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 # Unified action prompt for all VLM encoders
 ACTION_PROMPT = "Please describe the image(s)"
 ACTION_PROMPT = (
-    "You are an AI driving assistant. Analyze the driving scene from the video frames and provide the next action. "
+    "You are facing CarRacing-v3 environment, which provides Top-Down view of the car. You (red car) can get a positive reward when you keep the car on the gray road and go along it. "
     "Action space: steering (-1 to +1, where -1 is full left, +1 is full right), "
     "gas (0 to 1), braking (0 to 1). "
-    "High Level Action should be one of: 'Turn Left', 'Turn Right', 'Go Straight'. "
+    "High Level Action should be one of: 'Turn Left', 'Turn Right', 'Go Straight', 'Slow Down'. "
     "Typically, "
-    "Turn Left: steering=-0.1, gas=0.1, braking=0.0, "
-    "Turn Right: steering=0.1, gas=0.1, braking=0.0, "
-    "Go Straight: steering=0.0, gas=0.1, braking=0.0. "
+    "Turn Left: steering=-0.2, gas=0.0, braking=0.0, "
+    "Turn Right: steering=0.2, gas=0.0, braking=0.0, "
+    "Go Straight: steering=0.0, gas=0.05, braking=0.0. "
+    "Slow Down: steering=0.0, gas=0.0, braking=0.1. "
     "Respond in format: <think>Write your thinking</think>'High Level Action: <command>, Action: steering=X.X, gas=X.X, braking=X.X' where X.X are decimal values."
 )
 
