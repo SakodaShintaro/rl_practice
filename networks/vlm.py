@@ -93,6 +93,7 @@ class QwenVLEncoder(nn.Module):
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
+        # model_id = "Qwen/Qwen3-VL-2B-Thinking"
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             dtype=torch.bfloat16,
