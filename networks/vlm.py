@@ -85,7 +85,7 @@ class DummyImageProcessor:
 
 
 class QwenVLEncoder(nn.Module):
-    def __init__(self, device=None, video_fps: float = 2.0) -> None:
+    def __init__(self, device=None) -> None:
         super().__init__()
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
@@ -103,7 +103,7 @@ class QwenVLEncoder(nn.Module):
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.output_dim = 2048
         self.device = device
-        self.video_fps = video_fps
+        self.video_fps = 50 / 8
         self.image_processor = DummyImageProcessor((self.output_dim,))
         self._dummy_state = torch.zeros(1, 1, 1)
 
@@ -123,7 +123,7 @@ class QwenVLEncoder(nn.Module):
                 img_np = (img_np * 255).astype(np.uint8)
                 frames.append(Image.fromarray(img_np))
 
-            content = [{"type": "video", "video": frames}]
+            content = [{"type": "video", "video": frames, "fps": self.video_fps}]
             content.append({"type": "text", "text": ACTION_PROMPT})
             messages.append([{"role": "user", "content": content}])
 
