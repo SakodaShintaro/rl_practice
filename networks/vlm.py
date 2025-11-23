@@ -131,7 +131,10 @@ class QwenVLEncoder(nn.Module):
                 frames.append(Image.fromarray(img_np))
 
             content = [{"type": "video", "video": frames, "fps": self.video_fps}]
-            content.append({"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."})
+            # content = [{"type": "image", "image": frame} for frame in frames]
+            content.append(
+                {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
+            )
             content.append({"type": "text", "text": ACTION_PROMPT})
             messages.append([{"role": "user", "content": content}])
 
