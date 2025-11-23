@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import time
 from datetime import datetime
@@ -13,6 +14,8 @@ import torch
 from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
 from utils import concat_images, convert_to_uint8
 from wrappers import make_env
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def parse_args() -> argparse.Namespace:
