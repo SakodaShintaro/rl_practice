@@ -124,12 +124,12 @@ class QwenVLEncoder(nn.Module):
                 img_np = (img_np * 255).astype(np.uint8)
                 frames.append(Image.fromarray(img_np))
 
-            content = [{"type": "video", "video": frames, "fps": self.video_fps}]
-            # content = [{"type": "image", "image": frame} for frame in frames]
-            content.append(
-                {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
-            )
-            content.append({"type": "text", "text": ACTION_PROMPT})
+            # content = [{"type": "video", "video": frames, "fps": self.video_fps}]
+            content = [{"type": "image", "image": frame} for frame in frames]
+            # content.append(
+            #     {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
+            # )
+            # content.append({"type": "text", "text": ACTION_PROMPT})
             messages.append([{"role": "user", "content": content}])
 
         return messages
@@ -186,7 +186,8 @@ class QwenVLEncoder(nn.Module):
 
         output = self.model.forward(**model_inputs, output_hidden_states=True)
         hidden = output["hidden_states"][-1]
-        x = hidden[:, -1, :].to(torch.float32)
+        # Return full sequence: (B, S, D)
+        x = hidden.to(torch.float32)
 
         action_text = self._generate_action_text(messages[0]) if self.output_text else ""
 
@@ -333,8 +334,8 @@ class MMMambaEncoder(nn.Module):
             output_hidden_states=True,
         )
 
-        # Get representation from first batch
-        x_first = outputs["hidden_states"][-1][:, 0].to(torch.float32)
+        # Get representation from first batch: (1, S, D)
+        x_first = outputs["hidden_states"][-1].to(torch.float32)
 
         # For other batches, process without inference_params
         batch_outputs = [x_first]
@@ -345,10 +346,10 @@ class MMMambaEncoder(nn.Module):
                 inference_params=None,
                 output_hidden_states=True,
             )
-            x_b = outputs_b["hidden_states"][-1][:, 0].to(torch.float32)
+            x_b = outputs_b["hidden_states"][-1].to(torch.float32)  # (1, S, D)
             batch_outputs.append(x_b)
 
-        batch_output = torch.cat(batch_outputs, dim=0)  # (B, output_dim)
+        batch_output = torch.cat(batch_outputs, dim=0)  # (B, S, D)
 
         # Generate action text for first batch only
         output_ids = []

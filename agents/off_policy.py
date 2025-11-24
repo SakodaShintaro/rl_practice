@@ -122,22 +122,24 @@ class OffPolicyAgent:
             latest_data.actions,
             latest_data.rewards,
             self.rnn_state,
-        )
+        )  # (B, S, D)
 
         # action
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
+            # Policy head uses cross attention over sequence
             action, _ = self.network.policy_head.get_action(output_enc)
             action = action[0].cpu().numpy()
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
         self.prev_action = action
 
-        # predict next state
+        # predict next state (uses pooled representation)
+        output_enc_pooled = output_enc.mean(dim=1)  # (B, D)
         action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
         next_image, next_reward = self.network.predict_next_state(
-            output_enc, action_tensor.unsqueeze(0)
+            output_enc_pooled, action_tensor.unsqueeze(0)
         )
         info_dict["next_image"] = next_image
         info_dict["next_reward"] = next_reward

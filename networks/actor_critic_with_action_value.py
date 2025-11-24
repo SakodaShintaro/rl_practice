@@ -59,10 +59,11 @@ class Network(nn.Module):
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
+        state_dim = self.encoder.output_dim
         hidden_image_dim = self.encoder.image_processor.output_shape[0]
 
         self.policy_head = DiffusionPolicy(
-            state_dim=self.encoder.output_dim,
+            state_dim=state_dim,
             action_dim=action_dim,
             hidden_dim=args.actor_hidden_dim,
             block_num=args.actor_block_num,
@@ -70,7 +71,7 @@ class Network(nn.Module):
             sparsity=args.sparsity,
         )
         self.value_head = ActionValueHead(
-            in_channels=self.encoder.output_dim,
+            state_dim=state_dim,
             action_dim=action_dim,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -115,15 +116,14 @@ class Network(nn.Module):
         """
         x, rnn_state, action_text = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
-        )  # (B, hidden_dim)
+        )  # (B, S, D)
 
-        # Get action from policy_head
+        # Policy and value heads use cross attention over sequence
         if action is None:
             action, a_logp = self.policy_head.get_action(x)
         else:
             _, a_logp = self.policy_head.get_action(x)
 
-        # Get action-value from value_head
         q_dict = self.value_head(x, action)
         q_value = q_dict["output"]  # (B, 1) or (B, num_bins)
 
@@ -131,7 +131,7 @@ class Network(nn.Module):
             "action": action,  # (B, action_dim)
             "a_logp": a_logp,  # (B, 1)
             "value": q_value,  # (B, 1) or (B, num_bins)
-            "x": x,  # (B, hidden_dim)
+            "x": x,  # (B, S, D)
             "rnn_state": rnn_state,  # (1, B, hidden_size)
         }
 
@@ -145,7 +145,7 @@ class Network(nn.Module):
 
         state_curr, _, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
-        )  # (B, state_dim)
+        )  # (B, S, D)
 
         action_curr = data.actions[:, -1]  # (B, action_dim)
 
@@ -153,12 +153,15 @@ class Network(nn.Module):
             state_curr, action_curr, target_value
         )
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
-        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr)
+
+        # For state predictor, use pooled representation
+        state_curr_pooled = state_curr.mean(dim=1)  # (B, D)
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr_pooled)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
         activations_dict = {
-            "state": state_curr,
+            "state": state_curr_pooled,
             **critic_activations,
             **actor_activations,
             **seq_activations,
@@ -182,7 +185,9 @@ class Network(nn.Module):
         rnn_state_next = rnn_state_next[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
         state_next, _, _ = self.encoder.forward(
             obs_next, obs_z_next, actions_next, rewards_next, rnn_state_next
-        )
+        )  # (B, S, D)
+
+        # Policy and value heads use cross attention
         next_state_actions, _ = self.policy_head.get_action(state_next)
         next_critic_output_dict = self.value_head(state_next, next_state_actions)
         next_critic_value = next_critic_output_dict["output"]
@@ -228,6 +233,8 @@ class Network(nn.Module):
     def _compute_actor_loss(self, state_curr):
         if self.detach_actor:
             state_curr = state_curr.detach()
+
+        # Policy and value heads use cross attention over sequence
         pi, log_pi = self.policy_head.get_action(state_curr)
 
         for param in self.value_head.parameters():
@@ -330,7 +337,8 @@ class Network(nn.Module):
         # Sample from interpolation path for state
         xt = (1.0 - t) * x0 + t * x1
 
-        # Convert tensors
+        # Convert tensors: state_curr should be (B, D), reshape to (B, -1, C)
+        # Note: This assumes state_curr has already been pooled to (B, D)
         state_curr = state_curr.view(B, -1, C)
 
         # Predict velocity for state

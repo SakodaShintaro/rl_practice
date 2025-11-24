@@ -59,21 +59,21 @@ class Network(nn.Module):
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
-        hidden_dim = self.encoder.output_dim
+        state_dim = self.encoder.output_dim
         hidden_image_dim = self.encoder.image_processor.output_shape[0]
 
         self.value_head = StateValueHead(
-            in_channels=hidden_dim,
-            hidden_dim=hidden_dim,
+            state_dim=state_dim,
+            hidden_dim=state_dim,
             block_num=1,
             num_bins=args.num_bins,
             sparsity=0.0,
         )
 
         if args.policy_type == "Beta":
-            self.policy_head = BetaPolicy(hidden_dim, self.action_dim)
+            self.policy_head = BetaPolicy(state_dim, self.action_dim)
         elif args.policy_type == "Categorical":
-            self.policy_head = CategoricalPolicy(hidden_dim, self.action_dim)
+            self.policy_head = CategoricalPolicy(state_dim, self.action_dim)
         else:
             raise ValueError("Invalid policy type")
 
@@ -126,18 +126,18 @@ class Network(nn.Module):
     ) -> tuple:
         x, rnn_state, action_text = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
-        )  # (B, hidden_dim)
+        )  # (B, S, D)
 
-        value_dict = self.value_head(x)
-
+        # Policy and value heads use cross attention over sequence
         policy_dict = self.policy_head(x, action)
+        value_dict = self.value_head(x)
 
         return {
             "action": policy_dict["action"],  # (B, action_dim)
             "a_logp": policy_dict["a_logp"],  # (B, 1)
             "entropy": policy_dict["entropy"],  # (B, 1)
             "value": value_dict["output"],  # (B, 1)
-            "x": x,  # (B, hidden_dim)
+            "x": x,  # (B, S, D)
             "rnn_state": rnn_state,  # (1, B, hidden_size)
         }
 
@@ -151,15 +151,14 @@ class Network(nn.Module):
 
         state_curr, _, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
-        )
+        )  # (B, S, D)
 
-        # Get policy output
+        # Get policy and value outputs with cross attention
         policy_dict = self.policy_head(state_curr, action=data.actions[:, -1])
         a_logp = policy_dict["a_logp"]
         entropy = policy_dict["entropy"]
         policy_activation = policy_dict["activation"]
 
-        # Get value output
         value_dict = self.value_head(state_curr)
         value = value_dict["output"]
         value_activation = value_dict["activation"]
@@ -188,11 +187,14 @@ class Network(nn.Module):
 
         loss = action_loss + self.critic_loss_weight * value_loss - 0.02 * entropy.mean()
 
+        # For state predictor, use pooled representation
+        state_curr_pooled = state_curr.mean(dim=1)  # (B, D)
+
         activations_dict = {
-            "state": state_curr,
+            "state": state_curr_pooled,
             "actor": policy_activation,
             "critic": value_activation,
-            "state_predictor": state_curr,
+            "state_predictor": state_curr_pooled,
         }
 
         info_dict = {

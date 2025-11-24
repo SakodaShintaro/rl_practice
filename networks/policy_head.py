@@ -62,14 +62,26 @@ class DiffusionPolicy(nn.Module):
     ) -> None:
         super().__init__()
         time_embedding_size = 256
-        self.fc_in = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
-        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
-        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.fc_out = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
+        self.hidden_dim = hidden_dim
         self.step_num = 5
         self.denoising_time = denoising_time
         self.t_embedder = TimestepEmbedder(time_embedding_size)
+
+        # Project action and timestep to hidden_dim
+        self.in_proj = nn.Linear(action_dim + time_embedding_size, hidden_dim)
+
+        # Cross attention: query from action+time, key/value from state sequence
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=8, kdim=state_dim, vdim=state_dim, batch_first=True
+        )
+
+        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+
+        # Project back to action dimension
+        self.out_proj = nn.Linear(hidden_dim, action_dim)
+
         self.sparse_mask = (
             None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
         )
@@ -79,16 +91,22 @@ class DiffusionPolicy(nn.Module):
     ) -> dict[str, torch.Tensor]:
         result_dict = {}
 
-        t = self.t_embedder(t)
-        x = torch.cat([a, t, state], 1)
-        x = self.fc_in(x)
+        # a: (B, action_dim), t: (B,), state: (B, S, D)
+        t_emb = self.t_embedder(t)  # (B, time_embedding_size)
+        query_input = torch.cat([a, t_emb], dim=1)  # (B, action_dim + time_embedding_size)
+        query = self.in_proj(query_input)  # (B, hidden_dim)
+        query = query.unsqueeze(1)  # (B, 1, hidden_dim)
+
+        # Cross attention
+        x, _ = self.cross_attn(query, state, state)  # (B, 1, hidden_dim)
+        x = x.squeeze(1)  # (B, hidden_dim)
 
         x = self.fc_mid(x)
         x = self.norm(x)
 
         result_dict["activation"] = x
 
-        x = self.fc_out(x)
+        x = self.out_proj(x)
         result_dict["output"] = x
         return result_dict
 
@@ -117,17 +135,37 @@ class DiffusionPolicy(nn.Module):
 
 
 class BetaPolicy(nn.Module):
-    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+    def __init__(self, state_dim: int, action_dim: int) -> None:
         super().__init__()
+        self.action_dim = action_dim
+        hidden_dim = 256
+
+        # Learnable query token
+        self.query_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
+
+        # Cross attention: query from learnable token, key/value from state sequence
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=8, kdim=state_dim, vdim=state_dim, batch_first=True
+        )
+
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
         self.alpha_head = nn.Linear(hidden_dim, action_dim)
         self.beta_head = nn.Linear(hidden_dim, action_dim)
-        self.action_dim = action_dim
 
     def forward(
         self, x: torch.Tensor, action: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
-        policy_x = self.policy_enc(x)
+        # x: (B, S, D)
+        bs = x.size(0)
+
+        # Expand query token for batch
+        query = self.query_token.expand(bs, -1, -1)  # (B, 1, hidden_dim)
+
+        # Cross attention
+        policy_x, _ = self.cross_attn(query, x, x)  # (B, 1, hidden_dim)
+        policy_x = policy_x.squeeze(1)  # (B, hidden_dim)
+
+        policy_x = self.policy_enc(policy_x)
         alpha = self.alpha_head(policy_x).exp() + 1
         beta = self.beta_head(policy_x).exp() + 1
 
@@ -152,16 +190,36 @@ class BetaPolicy(nn.Module):
 
 
 class CategoricalPolicy(nn.Module):
-    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+    def __init__(self, state_dim: int, action_dim: int) -> None:
         super().__init__()
+        self.action_dim = action_dim
+        hidden_dim = 256
+
+        # Learnable query token
+        self.query_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
+
+        # Cross attention: query from learnable token, key/value from state sequence
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=8, kdim=state_dim, vdim=state_dim, batch_first=True
+        )
+
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
         self.logits_head = nn.Linear(hidden_dim, action_dim)
-        self.action_dim = action_dim
 
     def forward(
         self, x: torch.Tensor, action: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
-        policy_x = self.policy_enc(x)
+        # x: (B, S, D)
+        bs = x.size(0)
+
+        # Expand query token for batch
+        query = self.query_token.expand(bs, -1, -1)  # (B, 1, hidden_dim)
+
+        # Cross attention
+        policy_x, _ = self.cross_attn(query, x, x)  # (B, 1, hidden_dim)
+        policy_x = policy_x.squeeze(1)  # (B, hidden_dim)
+
+        policy_x = self.policy_enc(policy_x)
         logits = self.logits_head(policy_x)
         dist = Categorical(logits=logits)
 

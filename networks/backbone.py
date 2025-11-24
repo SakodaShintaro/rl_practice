@@ -121,7 +121,7 @@ class SpatialTemporalEncoder(nn.Module):
             temporal_model_type=temporal_model_type,
         )
 
-        token_num = (
+        self.token_num = (
             self.image_tokens_num
             if self.use_image_only
             else (
@@ -129,7 +129,7 @@ class SpatialTemporalEncoder(nn.Module):
             )
         )
 
-        self.output_dim = self.hidden_image_dim * token_num
+        self.output_dim = self.hidden_image_dim
 
     def init_state(self) -> torch.Tensor:
         # [1, 1, n_layer * space_len * hidden_image_dim]
@@ -189,7 +189,8 @@ class SpatialTemporalEncoder(nn.Module):
         if self.use_image_only:
             last_frame_emb = last_frame_emb[:, : self.image_tokens_num, :]  # [B, S, C']
 
-        output = last_frame_emb.flatten(start_dim=1)  # [B, token_num * C']
+        # Return as (B, S, D) instead of flattening
+        output = last_frame_emb  # [B, S, C']
 
         return output, rnn_state, ""
 
@@ -340,7 +341,5 @@ class TemporalOnlyEncoder(nn.Module):
             for block in self.blocks:
                 sequence, _ = block(sequence, current_mask, None)
 
-        # 最後のトークンの表現
-        final_repr = sequence[:, -1, :]  # (B, d_model)
-
-        return final_repr, rnn_state, ""
+        # Return full sequence as (B, S, D)
+        return sequence, rnn_state, ""
