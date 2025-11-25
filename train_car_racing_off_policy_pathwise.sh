@@ -16,3 +16,4 @@ python3 train.py pathwise$suffix \
   --eval_range 20 \
   --image_processor_type=ae \
   --disable_state_predictor 1 \
+  --seq_len 1 \

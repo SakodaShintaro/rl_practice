@@ -102,7 +102,10 @@ class QwenVLEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.output_dim = 2048
+        out_dim = 8
+        self.out_proj = nn.Linear(1536, out_dim)
+        self.output_dim = out_dim * 256
+        # self.output_dim = 2048
         self.device = device
         self.video_fps = 50 / 8
         self.image_processor = DummyImageProcessor((self.output_dim,))
@@ -124,12 +127,12 @@ class QwenVLEncoder(nn.Module):
                 img_np = (img_np * 255).astype(np.uint8)
                 frames.append(Image.fromarray(img_np))
 
-            content = [{"type": "video", "video": frames, "fps": self.video_fps}]
-            # content = [{"type": "image", "image": frame} for frame in frames]
-            content.append(
-                {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
-            )
-            content.append({"type": "text", "text": ACTION_PROMPT})
+            # content = [{"type": "video", "video": frames, "fps": self.video_fps}]
+            content = [{"type": "image", "image": frame} for frame in frames]
+            # content.append(
+            #     {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
+            # )
+            # content.append({"type": "text", "text": ACTION_PROMPT})
             messages.append([{"role": "user", "content": content}])
 
         return messages
@@ -172,7 +175,6 @@ class QwenVLEncoder(nn.Module):
         }
         return inputs
 
-    @torch.inference_mode()
     def forward(
         self,
         images: torch.Tensor,
@@ -181,12 +183,20 @@ class QwenVLEncoder(nn.Module):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        messages = self._build_messages(images, rewards)
-        model_inputs = self._prepare_inputs(messages)
+        with torch.no_grad():
+            messages = self._build_messages(images, rewards)
+            model_inputs = self._prepare_inputs(messages)
 
-        output = self.model.forward(**model_inputs, output_hidden_states=True)
-        hidden = output["hidden_states"][-1]
-        x = hidden[:, -1, :].to(torch.float32)
+            # output = self.model.forward(**model_inputs, output_hidden_states=True)
+            # hidden = output["hidden_states"][-1]
+            # x = hidden[:, -1, :].to(torch.float32)
+            hidden = model_inputs["pixel_values"]
+            B = images.size(0)
+            token_num = hidden.size(0) // B
+            hidden = hidden.view(B, token_num, -1)
+            x = hidden.to(torch.float32)
+        x = self.out_proj(x)
+        x = x.flatten(start_dim=1)
 
         action_text = self._generate_action_text(messages[0]) if self.output_text else ""
 
