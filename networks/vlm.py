@@ -102,7 +102,7 @@ class QwenVLEncoder(nn.Module):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        out_dim = 8
+        out_dim = 4
         self.out_proj = nn.Linear(1536, out_dim)
         self.output_dim = out_dim * 256
         # self.output_dim = 2048
