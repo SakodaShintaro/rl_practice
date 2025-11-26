@@ -17,3 +17,4 @@ python3 train.py pathwise$suffix \
   --image_processor_type=ae \
   --disable_state_predictor 1 \
   --seq_len 1 \
+  --batch_size 16 \

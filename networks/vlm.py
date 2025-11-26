@@ -4,11 +4,17 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 from mamba_ssm.utils.generation import InferenceParams
+from peft import LoraConfig, get_peft_model
 from PIL import Image
 from qwen_vl_utils import process_vision_info
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
-from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
+from transformers import (
+    AutoModelForImageTextToText,
+    AutoProcessor,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+)
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
@@ -94,16 +100,54 @@ class QwenVLEncoder(nn.Module):
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
         # model_id = "Qwen/Qwen3-VL-2B-Thinking"
+
+        # Configure 4-bit quantization
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+
+        # Load model with quantization
+        # Use device_map with explicit device to avoid multi-GPU distribution issues
+        device_map_config = {"": 0} if torch.cuda.is_available() else {"": "cpu"}
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
+            quantization_config=bnb_config,
             dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
             cache_dir="./cache",
-            device_map=device,
+            device_map=device_map_config,
         )
+
+        # Configure LoRA
+        lora_config = LoraConfig(
+            r=8,
+            lora_alpha=8,
+            lora_dropout=0.1,
+            target_modules=[
+                "down_proj",
+                "o_proj",
+                "k_proj",
+                "q_proj",
+                "gate_proj",
+                "up_proj",
+                "v_proj",
+            ],
+            use_dora=True,
+            init_lora_weights="gaussian",
+        )
+
+        # Apply LoRA to the model
+        self.model = get_peft_model(self.model, lora_config)
+
+        # Print trainable parameters
+        self.model.print_trainable_parameters()
+
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
-        self.use_pixel_values = True
+        self.use_pixel_values = False
         if self.use_pixel_values:
             self.out_proj = nn.Linear(1536, out_dim)
             self.output_dim = out_dim * 256
@@ -188,18 +232,17 @@ class QwenVLEncoder(nn.Module):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        with torch.no_grad():
-            messages = self._build_messages(images, rewards)
-            model_inputs = self._prepare_inputs(messages)
+        messages = self._build_messages(images, rewards)
+        model_inputs = self._prepare_inputs(messages)
 
-            if self.use_pixel_values:
-                hidden = model_inputs["pixel_values"]
-                B = images.size(0)
-                token_num = hidden.size(0) // B
-                hidden = hidden.view(B, token_num, -1)
-            else:
-                output = self.model.forward(**model_inputs, output_hidden_states=True)
-                hidden = output["hidden_states"][-1]
+        if self.use_pixel_values:
+            hidden = model_inputs["pixel_values"]
+            B = images.size(0)
+            token_num = hidden.size(0) // B
+            hidden = hidden.view(B, token_num, -1)
+        else:
+            output = self.model.forward(**model_inputs, output_hidden_states=True)
+            hidden = output["hidden_states"][-1]
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
         x = x.flatten(start_dim=1)
