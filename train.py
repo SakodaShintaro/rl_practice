@@ -339,7 +339,6 @@ if __name__ == "__main__":
         args.buffer_capacity = 50
         args.render = 0
         args.step_limit = 100
-        args.seq_len = 8
         args.buffer_size = int(2e4)
 
     if args.off_wandb:
