@@ -1,4 +1,5 @@
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -8,7 +9,9 @@ import torch
 from torchvision import transforms
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from networks.vlm import MMMambaEncoder, QwenVLEncoder, SmolVLMEncoder, parse_action_text
+from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 def parse_args():
@@ -20,13 +23,12 @@ def parse_args():
             "spatial_temporal",
             "temporal_only",
             "mmmamba",
-            "smolvlm",
             "qwenvl",
         ],
     )
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
-    parser.add_argument("--num_images", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--num_images", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=1)
     return parser.parse_args()
 
 
@@ -107,11 +109,8 @@ if __name__ == "__main__":
     elif args.encoder == "mmmamba":
         encoder = MMMambaEncoder(device)
 
-    elif args.encoder == "smolvlm":
-        encoder = SmolVLMEncoder(device)
-
     elif args.encoder == "qwenvl":
-        encoder = QwenVLEncoder(device)
+        encoder = QwenVLEncoder(output_text=True)
 
     print(f"\n{encoder.__class__.__name__}")
 

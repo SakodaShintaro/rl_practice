@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import time
 from datetime import datetime
@@ -10,14 +11,11 @@ import imageio
 import numpy as np
 import torch
 
-from networks.vlm import (
-    MMMambaEncoder,
-    QwenVLEncoder,
-    SmolVLMEncoder,
-    parse_action_text,
-)
+from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
 from utils import concat_images, convert_to_uint8
 from wrappers import make_env
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,10 +27,7 @@ def parse_args() -> argparse.Namespace:
         choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
     )
     parser.add_argument(
-        "--agent_type",
-        type=str,
-        default="random",
-        choices=["random", "single_frame", "smolvlm", "qwenvl", "mmmamba"],
+        "--agent_type", type=str, default="qwenvl", choices=["random", "qwenvl", "mmmamba"]
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -53,17 +48,15 @@ class VLMAgent:
     def __init__(self, encoder_type, device=None):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        if encoder_type == "smolvlm":
-            self.encoder = SmolVLMEncoder(device=self.device)
-        elif encoder_type == "qwenvl":
-            self.encoder = QwenVLEncoder(device=self.device)
+        if encoder_type == "qwenvl":
+            self.encoder = QwenVLEncoder(output_text=True)
         elif encoder_type == "mmmamba":
             self.encoder = MMMambaEncoder(device=self.device)
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 
     @torch.inference_mode()
-    def select_action(self, obs):
+    def select_action(self, obs, prev_reward):
         # obs: (C, H, W) -> (B=1, T=1, C, H, W)
         obs_tensor = (
             torch.tensor(obs, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
@@ -72,10 +65,11 @@ class VLMAgent:
         # Create dummy obs_z, actions, rewards, rnn_state
         obs_z = torch.zeros(1, 1, 1, device=self.device)  # dummy
         actions = torch.zeros(1, 1, 3, device=self.device)  # dummy actions
-        rewards = torch.zeros(1, 1, 1, device=self.device)  # dummy rewards
+        rewards = torch.tensor([[[prev_reward]]], device=self.device)  # use previous reward
         rnn_state = self.encoder.init_state().to(self.device)
 
         _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
+        print(f"{action_text=}")
         action_array = parse_action_text(action_text)
         return action_array
 
@@ -89,10 +83,13 @@ def run_episode(env, agent, render=False):
 
     obs_for_render = convert_to_uint8(obs.copy().transpose(1, 2, 0))
     bgr_image_list.append(concat_images([env.render(), obs_for_render]))
+    prev_reward = 0.0
 
     while True:
-        action = agent.select_action(obs)
+        action = agent.select_action(obs, prev_reward)
         obs, reward, termination, truncation, env_info = env.step(action)
+
+        prev_reward = reward
 
         total_reward += reward
         step_count += 1
@@ -197,10 +194,9 @@ if __name__ == "__main__":
         )
 
         # Save episode video
-        if (episode + 1) % 10 == 0:
-            video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
-            rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
-            imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+        video_path = video_dir / f"ep_{episode + 1:03d}.mp4"
+        rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
+        imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
     # Save best episode video
     if best_video:

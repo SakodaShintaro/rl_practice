@@ -18,3 +18,4 @@ peft
 fschat
 sentencepiece
 memory-maze
+qwen-vl-utils

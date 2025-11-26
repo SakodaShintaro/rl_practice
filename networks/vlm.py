@@ -1,19 +1,24 @@
 import re
-from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
 import torchvision.transforms as T
 from mamba_ssm.utils.generation import InferenceParams
 from PIL import Image
+from qwen_vl_utils import process_vision_info
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
-# Unified action prompt for all VLM encoders
-ACTION_PROMPT = "Please describe the image(s)"
+ACTION_PROMPT = (
+    "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
+    "Action space: steering [-1, +1] where -1 is full left and +1 is full right; gas [0, 1]; braking [0, 1]. "
+    "Pick exactly one High Level Action: 'Turn Left', 'Turn Right', 'Go Straight', or 'Slow Down'. Prefer small steering changes (|steering| <= 0.3) and modest gas; use brake only for sharp turns or when drifting off the road. If unsure, choose 'Slow Down'. "
+    "Typical mappings: Turn Left -> steering=-0.20, gas=0.00, braking=0.00; Turn Right -> steering=0.20, gas=0.00, braking=0.00; Go Straight -> steering=0.00, gas=0.01, braking=0.00; Slow Down -> steering=0.00, gas=0.00, braking=0.10. "
+    "Respond in the exact format: <think>Write your thinking</think>'High Level Action: <command>, Action: steering=X.XX, gas=X.XX, braking=X.XX' using decimal values within range."
+)
 
 
 def parse_action_text(action_text: str) -> np.ndarray:
@@ -78,17 +83,17 @@ class DummyImageProcessor:
         return x
 
 
-class VLMEncoderBase(nn.Module, ABC):
-    """Base class for Vision-Language Model encoders"""
-
-    def __init__(self, model_id: str, output_dim: int, device=None):
+class QwenVLEncoder(nn.Module):
+    def __init__(self, output_text: bool) -> None:
         super().__init__()
 
+        self.output_text = output_text
+
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
+        model_id = "Qwen/Qwen3-VL-2B-Instruct"
+        # model_id = "Qwen/Qwen3-VL-2B-Thinking"
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             dtype=torch.bfloat16,
@@ -97,34 +102,79 @@ class VLMEncoderBase(nn.Module, ABC):
             device_map=device,
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.output_dim = output_dim
+        out_dim = 4
+        self.out_proj = nn.Linear(1536, out_dim)
+        self.output_dim = out_dim * 256
+        # self.output_dim = 2048
         self.device = device
-        # Dummy image processor for interface compatibility
-        self.image_processor = DummyImageProcessor((output_dim,))
+        self.video_fps = 50 / 8
+        self.image_processor = DummyImageProcessor((self.output_dim,))
+        self._dummy_state = torch.zeros(1, 1, 1)
 
     def init_state(self) -> torch.Tensor:
-        """Return dummy state for compatibility with standard encoders"""
-        return torch.zeros(1, 1, 1)
+        return self._dummy_state.clone()
 
-    def get_stop_tokens(self):
-        """Get stop tokens for text generation - to be overridden by subclasses"""
-        return [
-            self.processor.tokenizer.eos_token_id,
-            self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>"),
-            self.processor.tokenizer.convert_tokens_to_ids("<|endoftext|>"),
-        ]
+    def _build_messages(self, images: torch.Tensor, rewards: torch.Tensor) -> list[list[dict]]:
+        batch_size = images.shape[0]
+        seq_len = images.shape[1]
+        messages = []
 
-    @abstractmethod
-    def get_processor_kwargs(self):
-        """Get processor kwargs for reducing memory usage - must be implemented by subclasses"""
-        pass
+        for b in range(batch_size):
+            frames = []
+            for t in range(seq_len):
+                img_tensor = images[b, t].to(torch.float32)
+                img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
+                img_np = (img_np * 255).astype(np.uint8)
+                frames.append(Image.fromarray(img_np))
 
-    @abstractmethod
-    def get_image_token(self):
-        """Get image token string - must be implemented by subclasses"""
-        pass
+            # content = [{"type": "video", "video": frames, "fps": self.video_fps}]
+            content = [{"type": "image", "image": frame} for frame in frames]
+            # content.append(
+            #     {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
+            # )
+            # content.append({"type": "text", "text": ACTION_PROMPT})
+            messages.append([{"role": "user", "content": content}])
 
-    @torch.inference_mode
+        return messages
+
+    def _prepare_inputs(self, messages: list[list[dict]]):
+        text = self.processor.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+        images, videos, video_kwargs = process_vision_info(
+            messages,
+            image_patch_size=16,
+            return_video_kwargs=True,
+            return_video_metadata=True,
+        )
+
+        if videos is not None:
+            videos, video_metadata = zip(*videos)
+            videos, video_metadata = list(videos), list(video_metadata)
+        else:
+            video_metadata = None
+
+        inputs = self.processor(
+            text=text,
+            images=images,
+            videos=videos,
+            video_metadata=video_metadata,
+            return_tensors="pt",
+            padding=True,
+            **video_kwargs,
+        )
+        inputs.pop("token_type_ids", None)
+        inputs = {
+            k: v.to(self.device).to(torch.bfloat16)
+            if v.dtype.is_floating_point
+            else v.to(self.device)
+            for k, v in inputs.items()
+        }
+        return inputs
+
     def forward(
         self,
         images: torch.Tensor,
@@ -133,81 +183,27 @@ class VLMEncoderBase(nn.Module, ABC):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        # images: (B, T, C, H, W)
-        # obs_z, actions, rewards are ignored for VLM encoders
-        # rnn_state is passed through unchanged (VLM encoders are stateless)
+        with torch.no_grad():
+            messages = self._build_messages(images, rewards)
+            model_inputs = self._prepare_inputs(messages)
 
-        batch_size = images.shape[0]
-        seq_len = images.shape[1]
+            # output = self.model.forward(**model_inputs, output_hidden_states=True)
+            # hidden = output["hidden_states"][-1]
+            # x = hidden[:, -1, :].to(torch.float32)
+            hidden = model_inputs["pixel_values"]
+            B = images.size(0)
+            token_num = hidden.size(0) // B
+            hidden = hidden.view(B, token_num, -1)
+            x = hidden.to(torch.float32)
+        x = self.out_proj(x)
+        x = x.flatten(start_dim=1)
 
-        # Convert all batch samples to PIL images and build chat conversations
-        conversations = []
-        first_conversation = None
-        for b in range(batch_size):
-            batch_frames = []
-            for t in range(seq_len):
-                img_tensor = images[b, t].to(torch.float32)  # (C, H, W)
-                img_np = img_tensor.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
-                img_np = (img_np * 255).astype(np.uint8)
-                pil_img = Image.fromarray(img_np)
-                batch_frames.append(pil_img)
-
-            content = [{"type": "image", "image": frame} for frame in batch_frames]
-            content.append({"type": "text", "text": ACTION_PROMPT})
-            conversation = [{"role": "user", "content": content}]
-            conversations.append(conversation)
-            if first_conversation is None:
-                first_conversation = conversation
-
-        # Use processor directly to batch process all samples
-        # Get processor kwargs from subclass (for memory optimization)
-        processor_kwargs = self.get_processor_kwargs()
-
-        model_inputs = self.processor.apply_chat_template(
-            conversations,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-            padding=True,
-            **processor_kwargs,
-        )
-        model_inputs.pop("token_type_ids", None)
-        model_inputs = {
-            k: v.to(self.device).to(torch.bfloat16)
-            if v.dtype.is_floating_point
-            else v.to(self.device)
-            for k, v in model_inputs.items()
-        }
-
-        # Get hidden state from forward pass (batch)
-        output = self.model.forward(**model_inputs, output_hidden_states=True)
-        hidden = output["hidden_states"][-1]  # (B, seq_len, hidden_dim)
-        # Use the last token's hidden state for each batch
-        x = hidden[:, -1, :].to(torch.float32)  # (B, hidden_dim)
-
-        # Generate action text for the first batch only
-        action_text = ""
-        if first_conversation is not None:
-            action_text = self._generate_action_text(first_conversation)
+        action_text = self._generate_action_text(messages[0]) if self.output_text else ""
 
         return x, rnn_state, action_text
 
     def _generate_action_text(self, conversation) -> str:
-        """Generate action text from a single conversation using model.generate"""
-        inputs = self.processor.apply_chat_template(
-            [conversation],
-            tokenize=True,
-            add_generation_prompt=True,
-            return_dict=True,
-            return_tensors="pt",
-        )
-        inputs = {
-            k: v.to(self.device).to(torch.bfloat16)
-            if v.dtype.is_floating_point
-            else v.to(self.device)
-            for k, v in inputs.items()
-        }
+        model_inputs = self._prepare_inputs([conversation])
 
         pad_token_id = self.processor.tokenizer.pad_token_id
         eos_token_id = self.processor.tokenizer.eos_token_id
@@ -216,15 +212,15 @@ class VLMEncoderBase(nn.Module, ABC):
 
         with torch.no_grad():
             generated = self.model.generate(
-                **inputs,
-                max_new_tokens=128,
+                **model_inputs,
+                max_new_tokens=512,
                 num_beams=1,
                 do_sample=False,
                 eos_token_id=eos_token_id,
                 pad_token_id=pad_token_id,
             )
 
-        input_len = inputs["input_ids"].shape[1]
+        input_len = model_inputs["input_ids"].shape[1]
         new_tokens = generated[:, input_len:]
         decoded = self.processor.batch_decode(
             new_tokens,
@@ -232,42 +228,6 @@ class VLMEncoderBase(nn.Module, ABC):
             clean_up_tokenization_spaces=False,
         )
         return decoded[0].strip() if decoded else ""
-
-
-class SmolVLMEncoder(VLMEncoderBase):
-    def __init__(self, device=None) -> None:
-        model_id = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
-        # model_id = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-        # model_id = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
-        output_dim = 576
-        super().__init__(model_id, output_dim, device)
-
-    def get_processor_kwargs(self):
-        """Reduce image size to limit memory usage"""
-        return {"size": {"longest_edge": 384}}
-
-    def get_image_token(self):
-        """SmolVLM uses <image> as image token"""
-        return "<image>"
-
-
-class QwenVLEncoder(VLMEncoderBase):
-    def __init__(self, device=None) -> None:
-        model_id = "Qwen/Qwen3-VL-2B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-32B-Instruct"
-        # model_id = "Qwen/Qwen2.5-VL-72B-Instruct"
-        output_dim = 2048
-        super().__init__(model_id, output_dim, device)
-
-    def get_processor_kwargs(self):
-        """Use default processor resizing/merge behavior (best quality for instructions)"""
-        return {}
-
-    def get_image_token(self):
-        """QwenVL uses <|image_pad|> as image token"""
-        return "<|image_pad|>"
 
 
 class MMMambaEncoder(nn.Module):
