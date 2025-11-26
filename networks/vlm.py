@@ -103,10 +103,15 @@ class QwenVLEncoder(nn.Module):
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
-        self.out_proj = nn.Linear(1536, out_dim)
-        self.output_dim = out_dim * 256
-        # self.output_dim = 2048
+        self.use_pixel_values = True
+        if self.use_pixel_values:
+            self.out_proj = nn.Linear(1536, out_dim)
+            self.output_dim = out_dim * 256
+        else:
+            self.out_proj = nn.Linear(2048, out_dim)
+            self.output_dim = out_dim * 74
         self.device = device
+        self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
         self.image_processor = DummyImageProcessor((self.output_dim,))
         self._dummy_state = torch.zeros(1, 1, 1)
@@ -187,14 +192,15 @@ class QwenVLEncoder(nn.Module):
             messages = self._build_messages(images, rewards)
             model_inputs = self._prepare_inputs(messages)
 
-            # output = self.model.forward(**model_inputs, output_hidden_states=True)
-            # hidden = output["hidden_states"][-1]
-            # x = hidden[:, -1, :].to(torch.float32)
-            hidden = model_inputs["pixel_values"]
-            B = images.size(0)
-            token_num = hidden.size(0) // B
-            hidden = hidden.view(B, token_num, -1)
-            x = hidden.to(torch.float32)
+            if self.use_pixel_values:
+                hidden = model_inputs["pixel_values"]
+                B = images.size(0)
+                token_num = hidden.size(0) // B
+                hidden = hidden.view(B, token_num, -1)
+            else:
+                output = self.model.forward(**model_inputs, output_hidden_states=True)
+                hidden = output["hidden_states"][-1]
+        x = hidden.to(torch.float32)
         x = self.out_proj(x)
         x = x.flatten(start_dim=1)
 
