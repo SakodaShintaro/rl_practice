@@ -90,7 +90,9 @@ class DummyImageProcessor:
 
 
 class QwenVLEncoder(nn.Module):
-    def __init__(self, output_text: bool) -> None:
+    def __init__(
+        self, output_text: bool, use_quantization: bool, use_lora: bool, use_pixel_values: bool
+    ) -> None:
         super().__init__()
 
         self.output_text = output_text
@@ -100,8 +102,6 @@ class QwenVLEncoder(nn.Module):
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
         # model_id = "Qwen/Qwen3-VL-2B-Thinking"
-
-        use_quantization = False
         if use_quantization:
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -120,8 +120,6 @@ class QwenVLEncoder(nn.Module):
             cache_dir="./cache",
             device_map=device,
         )
-
-        use_lora = True
         if use_lora:
             lora_config = LoraConfig(
                 r=8,
@@ -148,7 +146,7 @@ class QwenVLEncoder(nn.Module):
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
-        self.use_pixel_values = False
+        self.use_pixel_values = use_pixel_values
         if self.use_pixel_values:
             self.out_proj = nn.Linear(1536, out_dim)
             self.output_dim = out_dim * 256
