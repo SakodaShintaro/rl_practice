@@ -121,29 +121,30 @@ class QwenVLEncoder(nn.Module):
             device_map=device,
         )
 
-        # Configure LoRA
-        lora_config = LoraConfig(
-            r=8,
-            lora_alpha=8,
-            lora_dropout=0.1,
-            target_modules=[
-                "down_proj",
-                "o_proj",
-                "k_proj",
-                "q_proj",
-                "gate_proj",
-                "up_proj",
-                "v_proj",
-            ],
-            use_dora=True,
-            init_lora_weights="gaussian",
-        )
+        use_lora = True
+        if use_lora:
+            lora_config = LoraConfig(
+                r=8,
+                lora_alpha=8,
+                lora_dropout=0.1,
+                target_modules=[
+                    "down_proj",
+                    "o_proj",
+                    "k_proj",
+                    "q_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "v_proj",
+                ],
+                use_dora=True,
+                init_lora_weights="gaussian",
+            )
 
-        # Apply LoRA to the model
-        self.model = get_peft_model(self.model, lora_config)
+            # Apply LoRA to the model
+            self.model = get_peft_model(self.model, lora_config)
 
-        # Print trainable parameters
-        self.model.print_trainable_parameters()
+            # Print trainable parameters
+            self.model.print_trainable_parameters()
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
