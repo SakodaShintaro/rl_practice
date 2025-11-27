@@ -8,7 +8,12 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from torch import nn
 from torchvision.transforms.functional import InterpolationMode
-from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
+from transformers import (
+    AutoModelForImageTextToText,
+    AutoProcessor,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+)
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
@@ -94,8 +99,21 @@ class QwenVLEncoder(nn.Module):
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
         # model_id = "Qwen/Qwen3-VL-2B-Thinking"
+
+        use_quantization = False
+        if use_quantization:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+        else:
+            bnb_config = None
+
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
+            quantization_config=bnb_config,
             dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
             cache_dir="./cache",
