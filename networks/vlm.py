@@ -101,24 +101,24 @@ class QwenVLEncoder(nn.Module):
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
         # model_id = "Qwen/Qwen3-VL-2B-Thinking"
 
-        # Configure 4-bit quantization
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
+        use_quantization = False
+        if use_quantization:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+        else:
+            bnb_config = None
 
-        # Load model with quantization
-        # Use device_map with explicit device to avoid multi-GPU distribution issues
-        device_map_config = {"": 0} if torch.cuda.is_available() else {"": "cpu"}
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             quantization_config=bnb_config,
             dtype=torch.bfloat16,
             _attn_implementation=attn_impl,
             cache_dir="./cache",
-            device_map=device_map_config,
+            device_map=device,
         )
 
         # Configure LoRA
