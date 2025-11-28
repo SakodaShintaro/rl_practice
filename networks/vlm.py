@@ -120,6 +120,7 @@ class QwenVLEncoder(nn.Module):
             cache_dir="./cache",
             device_map=device,
         )
+        self.use_lora = use_lora
         if use_lora:
             lora_config = LoraConfig(
                 r=8,
@@ -231,17 +232,19 @@ class QwenVLEncoder(nn.Module):
         rewards: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        messages = self._build_messages(images, rewards)
-        model_inputs = self._prepare_inputs(messages)
+        with torch.enable_grad() if self.use_lora else torch.no_grad():
+            messages = self._build_messages(images, rewards)
+            model_inputs = self._prepare_inputs(messages)
 
-        if self.use_pixel_values:
-            hidden = model_inputs["pixel_values"]
-            B = images.size(0)
-            token_num = hidden.size(0) // B
-            hidden = hidden.view(B, token_num, -1)
-        else:
-            output = self.model.forward(**model_inputs, output_hidden_states=True)
-            hidden = output["hidden_states"][-1]
+            if self.use_pixel_values:
+                hidden = model_inputs["pixel_values"]
+                B = images.size(0)
+                token_num = hidden.size(0) // B
+                hidden = hidden.view(B, token_num, -1)
+            else:
+                output = self.model.forward(**model_inputs, output_hidden_states=True)
+                hidden = output["hidden_states"][-1]
+
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
         x = x.flatten(start_dim=1)
@@ -250,6 +253,7 @@ class QwenVLEncoder(nn.Module):
 
         return x, rnn_state, action_text
 
+    @torch.no_grad()
     def _generate_action_text(self, conversation) -> str:
         model_inputs = self._prepare_inputs([conversation])
 
@@ -258,15 +262,14 @@ class QwenVLEncoder(nn.Module):
         if pad_token_id is None:
             pad_token_id = eos_token_id
 
-        with torch.no_grad():
-            generated = self.model.generate(
-                **model_inputs,
-                max_new_tokens=512,
-                num_beams=1,
-                do_sample=False,
-                eos_token_id=eos_token_id,
-                pad_token_id=pad_token_id,
-            )
+        generated = self.model.generate(
+            **model_inputs,
+            max_new_tokens=512,
+            num_beams=1,
+            do_sample=False,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+        )
 
         input_len = model_inputs["input_ids"].shape[1]
         new_tokens = generated[:, input_len:]
