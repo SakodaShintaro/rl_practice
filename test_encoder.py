@@ -110,7 +110,9 @@ if __name__ == "__main__":
         encoder = MMMambaEncoder(device)
 
     elif args.encoder == "qwenvl":
-        encoder = QwenVLEncoder(output_text=True)
+        encoder = QwenVLEncoder(
+            output_text=True, use_quantization=False, use_lora=False, use_pixel_values=False
+        )
 
     print(f"\n{encoder.__class__.__name__}")
 
