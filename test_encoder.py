@@ -111,7 +111,11 @@ if __name__ == "__main__":
 
     elif args.encoder == "qwenvl":
         encoder = QwenVLEncoder(
-            output_text=True, use_quantization=False, use_lora=False, use_pixel_values=False
+            output_text=True,
+            use_quantization=False,
+            use_lora=False,
+            use_pixel_values=False,
+            target_layer_idx=-1,
         )
 
     print(f"\n{encoder.__class__.__name__}")

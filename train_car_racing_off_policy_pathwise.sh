@@ -20,3 +20,4 @@ python3 train.py pathwise$suffix \
   --use_quantization 0 \
   --use_lora 0 \
   --use_pixel_values 0 \
+  --target_layer_idx -1 \

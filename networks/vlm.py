@@ -91,11 +91,17 @@ class DummyImageProcessor:
 
 class QwenVLEncoder(nn.Module):
     def __init__(
-        self, output_text: bool, use_quantization: bool, use_lora: bool, use_pixel_values: bool
+        self,
+        output_text: bool,
+        use_quantization: bool,
+        use_lora: bool,
+        use_pixel_values: bool,
+        target_layer_idx: int,
     ) -> None:
         super().__init__()
 
         self.output_text = output_text
+        self.target_layer_idx = target_layer_idx
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -243,7 +249,7 @@ class QwenVLEncoder(nn.Module):
                 hidden = hidden.view(B, token_num, -1)
             else:
                 output = self.model.forward(**model_inputs, output_hidden_states=True)
-                hidden = output["hidden_states"][-1]
+                hidden = output["hidden_states"][self.target_layer_idx]
 
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
