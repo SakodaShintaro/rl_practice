@@ -10,7 +10,13 @@ export TOKENIZERS_PARALLELISM=false
 python train.py carla_test \
     --env_id CARLA-Leaderboard-v0 \
     --agent_type off_policy \
-    --encoder spatial_temporal \
+    --encoder qwenvl \
     --image_processor_type ae \
     --step_limit 400_000 \
     --target_score 100.0 \
+    --disable_state_predictor 1 \
+    --seq_len 1 \
+    --use_quantization 0 \
+    --use_lora 0 \
+    --use_pixel_values 1 \
+    --target_layer_idx -1 \
