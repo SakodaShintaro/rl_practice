@@ -66,7 +66,7 @@ class CARLALeaderboardEnv(gym.Env):
         super().__init__()
 
         # 設定値
-        self.image_size = (192, 192)  # (width, height)
+        self.image_size = (256, 256)  # (width, height)
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
         self.fps = 20  # シミュレーションのFPS
