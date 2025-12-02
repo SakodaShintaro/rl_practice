@@ -97,11 +97,13 @@ class QwenVLEncoder(nn.Module):
         use_lora: bool,
         use_pixel_values: bool,
         target_layer_idx: int,
+        seq_len: int,
     ) -> None:
         super().__init__()
 
         self.output_text = output_text
         self.target_layer_idx = target_layer_idx
+        self.seq_len = seq_len
 
         attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -153,14 +155,13 @@ class QwenVLEncoder(nn.Module):
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
-        seq_len = 2
         self.use_pixel_values = use_pixel_values
         if self.use_pixel_values:
             self.out_proj = nn.Linear(1536, out_dim)
-            self.output_dim = out_dim * seq_len * 256
+            self.output_dim = out_dim * self.seq_len * 256
         else:
             self.out_proj = nn.Linear(2048, out_dim)
-            self.output_dim = out_dim * (seq_len * 66 + 8)
+            self.output_dim = out_dim * (self.seq_len * 66 + 8)
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8

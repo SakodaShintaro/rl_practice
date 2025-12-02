@@ -116,6 +116,7 @@ if __name__ == "__main__":
             use_lora=False,
             use_pixel_values=False,
             target_layer_idx=-1,
+            seq_len=seq_len,
         )
 
     print(f"\n{encoder.__class__.__name__}")

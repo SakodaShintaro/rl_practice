@@ -59,6 +59,7 @@ class Network(nn.Module):
                 use_lora=args.use_lora,
                 use_pixel_values=args.use_pixel_values,
                 target_layer_idx=args.target_layer_idx,
+                seq_len=args.seq_len,
             )
         elif args.encoder == "mmmamba":
             self.encoder = MMMambaEncoder()
