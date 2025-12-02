@@ -153,13 +153,14 @@ class QwenVLEncoder(nn.Module):
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
+        seq_len = 2
         self.use_pixel_values = use_pixel_values
         if self.use_pixel_values:
             self.out_proj = nn.Linear(1536, out_dim)
-            self.output_dim = out_dim * 256
+            self.output_dim = out_dim * seq_len * 256
         else:
             self.out_proj = nn.Linear(2048, out_dim)
-            self.output_dim = out_dim * 74
+            self.output_dim = out_dim * (seq_len * 66 + 8)
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
