@@ -12,12 +12,14 @@ python3 train.py pathwise$suffix \
   --encoder qwenvl \
   --num_bins 1 \
   --value_range 200.0 \
-  --step_limit 40_000 \
+  --step_limit 400_000 \
   --eval_range 20 \
   --image_processor_type=ae \
   --disable_state_predictor 1 \
   --seq_len 1 \
-  --use_quantization 0 \
+  --use_quantization 1 \
   --use_lora 0 \
-  --use_pixel_values 0 \
-  --target_layer_idx -1 \
+  --use_pixel_values 1 \
+  --target_layer_idx 2 \
+  --batch_size 1 \
+  --learning_rate 1e-5 \
