@@ -16,6 +16,7 @@ from transformers import (
     BitsAndBytesConfig,
 )
 
+from .backbone import ImageProcessor
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 ACTION_PROMPT = (
@@ -72,26 +73,10 @@ def parse_action_text(action_text: str) -> np.ndarray:
     return action_array
 
 
-class DummyImageProcessor:
-    """Dummy image processor for VLM encoders to maintain interface compatibility"""
-
-    def __init__(self, output_shape):
-        self.output_shape = output_shape
-
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """Return zeros with the expected output shape"""
-        batch_size = x.shape[0]
-        device = x.device
-        return torch.zeros(batch_size, *self.output_shape, device=device)
-
-    def decode(self, x: torch.Tensor) -> torch.Tensor:
-        """Dummy decode - not used for VLM encoders"""
-        return x
-
-
 class QwenVLEncoder(nn.Module):
     def __init__(
         self,
+        observation_space_shape: tuple[int],
         output_text: bool,
         use_quantization: bool,
         use_lora: bool,
@@ -165,7 +150,7 @@ class QwenVLEncoder(nn.Module):
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
-        self.image_processor = DummyImageProcessor((self.output_dim,))
+        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
         self._dummy_state = torch.zeros(1, 1, 1)
 
     def init_state(self) -> torch.Tensor:
@@ -294,7 +279,7 @@ class MMMambaEncoder(nn.Module):
     https://huggingface.co/hustvl/mmMamba-linear/blob/main/modeling_mmMamba_chat.py
     """
 
-    def __init__(self, device=None) -> None:
+    def __init__(self, observation_space_shape, device=None) -> None:
         super().__init__()
 
         if device is None:
@@ -338,8 +323,7 @@ class MMMambaEncoder(nn.Module):
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         self.output_dim = 2048
-        # Dummy image processor for interface compatibility
-        self.image_processor = DummyImageProcessor((self.output_dim,))
+        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
 
     def init_state(self) -> torch.Tensor:
         """Return dummy state for compatibility with standard encoders"""

@@ -15,7 +15,7 @@ python3 train.py pathwise$suffix \
   --step_limit 400_000 \
   --eval_range 20 \
   --image_processor_type=ae \
-  --disable_state_predictor 1 \
+  --disable_state_predictor 0 \
   --seq_len 1 \
   --use_quantization 1 \
   --use_lora 0 \

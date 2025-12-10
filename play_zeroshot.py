@@ -45,13 +45,17 @@ class RandomAgent:
 
 
 class VLMAgent:
-    def __init__(self, encoder_type, device=None):
+    def __init__(self, encoder_type, observation_space_shape, device=None):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if encoder_type == "qwenvl":
-            self.encoder = QwenVLEncoder(output_text=True)
+            self.encoder = QwenVLEncoder(
+                observation_space_shape=observation_space_shape, output_text=True
+            )
         elif encoder_type == "mmmamba":
-            self.encoder = MMMambaEncoder(device=self.device)
+            self.encoder = MMMambaEncoder(
+                observation_space_shape=observation_space_shape, device=self.device
+            )
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 
@@ -147,7 +151,7 @@ if __name__ == "__main__":
     if args.agent_type == "random":
         agent = RandomAgent(env.action_space)
     else:
-        agent = VLMAgent(args.agent_type)
+        agent = VLMAgent(args.agent_type, env.observation_space.shape)
 
     print(f"Running {args.num_episodes} episodes with {args.agent_type} agent...")
 

@@ -107,10 +107,11 @@ if __name__ == "__main__":
         encoder = encoder.to(device)
 
     elif args.encoder == "mmmamba":
-        encoder = MMMambaEncoder(device)
+        encoder = MMMambaEncoder(observation_space_shape=observation_space_shape, device=device)
 
     elif args.encoder == "qwenvl":
         encoder = QwenVLEncoder(
+            observation_space_shape=observation_space_shape,
             output_text=True,
             use_quantization=False,
             use_lora=False,
