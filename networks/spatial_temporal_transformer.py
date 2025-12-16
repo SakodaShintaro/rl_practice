@@ -205,7 +205,11 @@ class GdnBlock(nn.Module):
         self.num_heads = num_heads
         self.layer_idx = layer_idx
         self.gdn = GatedDeltaNet(
-            hidden_size=hidden_dim, num_heads=num_heads, mode="chunk", layer_idx=layer_idx
+            hidden_size=hidden_dim,
+            head_dim=64,
+            num_heads=num_heads,
+            mode="chunk",
+            layer_idx=layer_idx,
         )
 
         # cache のサイズを推定（GatedDeltaNet の実装から）
@@ -472,15 +476,21 @@ class SpatialTemporalTransformer(nn.Module):
             # 各レイヤーの状態を [1, B*S, C] に変形
             layer_states = [s.view(1, B * S, C) for s in layer_states]
         elif self.temporal_model_type == "gdn":
-            # GDN の cache サイズを取得（最初のブロックから）
-            cache_size = self.spatial_temporal_blocks[0].tempo_block.cache_size
-            # [1, B, n_layer * cache_size] -> [B, n_layer * cache_size]
+            # cache size は GDN の実行後に確定するため、テンソルの実サイズから求める
             rnn_state_squeezed = rnn_state.squeeze(0)
+            total_cache_size = rnn_state_squeezed.shape[-1]
+            cache_size = total_cache_size // self.n_layer
+            if cache_size * self.n_layer != total_cache_size:
+                raise ValueError(
+                    f"GDN rnn_state size {total_cache_size} is not divisible by n_layer={self.n_layer}"
+                )
             # [B, n_layer * cache_size] -> [B, n_layer, cache_size]
             layer_states = rnn_state_squeezed.view(B, self.n_layer, cache_size)
             layer_states = [layer_states[:, i, :].contiguous() for i in range(self.n_layer)]
             # 各レイヤーの状態を [1, B*S, cache_size] に変形（S 次元分を展開）
-            layer_states = [s.unsqueeze(0).expand(1, B * S, -1) for s in layer_states]
+            layer_states = [
+                s.unsqueeze(1).expand(B, S, -1).reshape(1, B * S, -1) for s in layer_states
+            ]
         else:
             layer_states = [None] * self.n_layer
 
