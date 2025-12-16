@@ -196,30 +196,162 @@ class GdnBlock(nn.Module):
     Args:
         hidden_dim: 隠れ次元数
         num_heads: アテンションヘッド数
+        layer_idx: レイヤーインデックス（cacheの管理に使用）
     """
 
-    def __init__(self, hidden_dim, num_heads):
+    def __init__(self, hidden_dim, num_heads, layer_idx):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.gdn = GatedDeltaNet(hidden_size=hidden_dim, num_heads=num_heads, mode="chunk")
+        self.num_heads = num_heads
+        self.layer_idx = layer_idx
+        self.gdn = GatedDeltaNet(
+            hidden_size=hidden_dim, num_heads=num_heads, mode="chunk", layer_idx=layer_idx
+        )
+
+        # cache のサイズを推定（GatedDeltaNet の実装から）
+        # recurrent_state: [1, num_heads, hidden_dim, hidden_dim*2]
+        self.recurrent_state_size = num_heads * hidden_dim * hidden_dim * 2
+
+        # conv_state: GatedDeltaNet の内部実装から推定
+        # q_proj: hidden_dim -> hidden_dim * num_heads (expand_ratio=1.0)
+        # k_proj: hidden_dim -> hidden_dim * num_heads * 0.5 (expand_k=0.5)
+        # v_proj: hidden_dim -> hidden_dim * num_heads * 2.0 (expand_v=2.0)
+        # それぞれ [1, expanded_dim, 4] の形状
+        self.conv_state_sizes = [
+            hidden_dim * num_heads * 4,  # q: [1, hidden_dim*num_heads, 4]
+            hidden_dim * num_heads * 4,  # k: [1, hidden_dim*num_heads, 4]
+            hidden_dim * num_heads * 2 * 4,  # v: [1, hidden_dim*num_heads*2, 4]
+        ]
+        self.conv_state_shapes = [
+            (1, hidden_dim * num_heads, 4),
+            (1, hidden_dim * num_heads, 4),
+            (1, hidden_dim * num_heads * 2, 4),
+        ]
+        self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
+        self._initialized = False
+
+    def _flatten_cache(self, cache_dict):
+        """FLACache から取得した辞書を1次元テンソルにフラット化"""
+        if cache_dict is None:
+            return None
+
+        # 初回実行時に cache のサイズを取得
+        if not self._initialized:
+            self.recurrent_state_size = cache_dict["recurrent_state"].numel()
+            self.conv_state_sizes = [c.numel() for c in cache_dict["conv_state"]]
+            self.conv_state_shapes = [c.shape for c in cache_dict["conv_state"]]
+            self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
+            self._initialized = True
+
+        recurrent_state = cache_dict["recurrent_state"]  # [1, num_heads, hidden_dim, hidden_dim*2]
+        conv_state = cache_dict["conv_state"]  # tuple of 3 tensors
+
+        # recurrent_state をフラット化（float32のまま）
+        recurrent_flat = recurrent_state.flatten()  # [recurrent_state_size]
+
+        # conv_state をフラット化（bfloat16のまま）
+        conv_flat = torch.cat([c.flatten() for c in conv_state])  # [conv_state_size]
+
+        # 両方を結合（型を揃える必要があるので、float32に統一）
+        conv_flat_f32 = conv_flat.float()
+        cache_flat = torch.cat([recurrent_flat, conv_flat_f32])  # [cache_size]
+
+        return cache_flat.unsqueeze(0)  # [1, cache_size]
+
+    def _unflatten_cache(self, cache_flat, batch_size, device, dtype):
+        """1次元テンソルを FLACache 用の辞書に復元"""
+        if cache_flat is None:
+            return None
+
+        from fla.models.utils import FLACache
+
+        # cache_flat: [1, B, cache_size] or [1, cache_size]
+        if cache_flat.dim() == 3:
+            cache_flat = cache_flat.squeeze(0)  # [B, cache_size]
+            # 最初のバッチのみを使用（全バッチで同じ cache を使うと仮定）
+            cache_flat = cache_flat[0]  # [cache_size]
+        elif cache_flat.dim() == 2:
+            cache_flat = cache_flat.squeeze(0)  # [cache_size]
+
+        # ゼロ tensor かチェック（初期状態）
+        if torch.all(cache_flat == 0):
+            return None
+
+        # recurrent_state を復元
+        recurrent_flat = cache_flat[: self.recurrent_state_size]
+        recurrent_state = recurrent_flat.view(
+            1, self.num_heads, self.hidden_dim, self.hidden_dim * 2
+        )
+
+        # conv_state を復元
+        conv_flat = cache_flat[self.recurrent_state_size :]
+        conv_tensors = []
+        offset = 0
+        for i, (size, shape) in enumerate(zip(self.conv_state_sizes, self.conv_state_shapes)):
+            conv_tensor = conv_flat[offset : offset + size].view(shape)
+            conv_tensors.append(conv_tensor.to(dtype))
+            offset += size
+
+        cache_dict = {
+            "recurrent_state": recurrent_state,
+            "attn_state": None,
+            "conv_state": tuple(conv_tensors),
+            "ffn_state": None,
+        }
+
+        # FLACache を作成
+        fla_cache = FLACache()
+        fla_cache.update(cache_dict, self.layer_idx)
+
+        return fla_cache
 
     def forward(self, x, attn_mask, rnn_state):
         """
         Args:
             x: [B, T, C]
             attn_mask: 未使用（インターフェース互換性のため）
-            rnn_state: 未使用（インターフェース互換性のため）
+            rnn_state: [1, B, cache_size] フラット化された cache
 
         Returns:
             x: [B, T, C]
-            rnn_state: 入力のrnn_stateをそのまま返す
+            rnn_state: [1, B, cache_size] 更新されたフラット化された cache
         """
-        x, _, _ = self.gdn(x)
-        return x, rnn_state
+        B, T, C = x.shape
+
+        # GatedDeltaNetはtraining時にseq_len <= 64だとfused_recurrentモードになりエラーが出るため、
+        # 必要に応じてパディングして65以上にする
+        if T <= 64:
+            padding = torch.zeros(B, 65 - T, C, device=x.device, dtype=x.dtype)
+            x_padded = torch.cat([x, padding], dim=1)
+            need_unpad = True
+        else:
+            x_padded = x
+            need_unpad = False
+
+        # rnn_state をデフラット化して FLACache を作成
+        past_key_values = self._unflatten_cache(rnn_state, B, x.device, x.dtype)
+
+        # GatedDeltaNet を実行
+        output, _, new_cache = self.gdn(x_padded, past_key_values=past_key_values, use_cache=True)
+
+        # パディングを除去
+        if need_unpad:
+            output = output[:, :T, :]
+
+        # 新しい cache をフラット化
+        if new_cache is not None and len(new_cache) > 0:
+            new_cache_dict = new_cache[self.layer_idx]
+            new_rnn_state = self._flatten_cache(new_cache_dict)
+            # [1, cache_size] -> [1, B, cache_size]
+            new_rnn_state = new_rnn_state.unsqueeze(1).expand(1, B, -1)
+        else:
+            new_rnn_state = rnn_state
+
+        return output, new_rnn_state
 
 
 class SpatialTemporalBlock(nn.Module):
-    def __init__(self, config, temporal_model_type):
+    def __init__(self, config, temporal_model_type, layer_idx):
         super().__init__()
         self.temporal_model_type = temporal_model_type
 
@@ -230,7 +362,7 @@ class SpatialTemporalBlock(nn.Module):
         elif temporal_model_type == "gru":
             self.tempo_block = GRUBlock(config)
         elif temporal_model_type == "gdn":
-            self.tempo_block = GdnBlock(config.hidden_dim, config.n_head)
+            self.tempo_block = GdnBlock(config.hidden_dim, config.n_head, layer_idx)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = TransformerBlock(config)
@@ -286,7 +418,10 @@ class SpatialTemporalTransformer(nn.Module):
         nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
         self.spatial_temporal_blocks = nn.ModuleList(
-            [SpatialTemporalBlock(config, temporal_model_type) for _ in range(self.n_layer)]
+            [
+                SpatialTemporalBlock(config, temporal_model_type, layer_idx=i)
+                for i in range(self.n_layer)
+            ]
         )
 
         self.apply(self._init_weights)
@@ -326,6 +461,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         # rnn_stateを各レイヤーの状態に分割
         # GRUの場合: [1, B, n_layer * S * C] -> n_layer個の [1, B*S, C]
+        # GDNの場合: [1, B, n_layer * cache_size] -> n_layer個の [1, B*S, cache_size]
         # それ以外: rnn_stateをそのまま使用（各ブロックが無視する）
         if self.temporal_model_type == "gru":
             # [1, B, n_layer * S * C] -> [B, n_layer * S * C]
@@ -335,6 +471,16 @@ class SpatialTemporalTransformer(nn.Module):
             layer_states = [layer_states[:, i, :, :].contiguous() for i in range(self.n_layer)]
             # 各レイヤーの状態を [1, B*S, C] に変形
             layer_states = [s.view(1, B * S, C) for s in layer_states]
+        elif self.temporal_model_type == "gdn":
+            # GDN の cache サイズを取得（最初のブロックから）
+            cache_size = self.spatial_temporal_blocks[0].tempo_block.cache_size
+            # [1, B, n_layer * cache_size] -> [B, n_layer * cache_size]
+            rnn_state_squeezed = rnn_state.squeeze(0)
+            # [B, n_layer * cache_size] -> [B, n_layer, cache_size]
+            layer_states = rnn_state_squeezed.view(B, self.n_layer, cache_size)
+            layer_states = [layer_states[:, i, :].contiguous() for i in range(self.n_layer)]
+            # 各レイヤーの状態を [1, B*S, cache_size] に変形（S 次元分を展開）
+            layer_states = [s.unsqueeze(0).expand(1, B * S, -1) for s in layer_states]
         else:
             layer_states = [None] * self.n_layer
 
@@ -345,12 +491,21 @@ class SpatialTemporalTransformer(nn.Module):
 
         # 各レイヤーの状態を結合
         # GRUの場合: n_layer個の [1, B*S, C] -> [1, B, n_layer * S * C]
+        # GDNの場合: n_layer個の [1, B*S, cache_size] -> [1, B, n_layer * cache_size]
         # それ以外: 入力のrnn_stateをそのまま返す
         if self.temporal_model_type == "gru":
             new_layer_states = [s.view(B, S, C) for s in new_layer_states]
             # [B, n_layer, S, C] -> [B, n_layer * S * C] -> [1, B, n_layer * S * C]
             rnn_state = (
                 torch.stack(new_layer_states, dim=1).view(B, self.n_layer * S * C).unsqueeze(0)
+            )
+        elif self.temporal_model_type == "gdn":
+            # [1, B*S, cache_size] -> [B, cache_size] (最初の B 個を取る)
+            new_layer_states = [s.squeeze(0)[:B, :] for s in new_layer_states]
+            # [B, n_layer, cache_size] -> [B, n_layer * cache_size] -> [1, B, n_layer * cache_size]
+            cache_size = new_layer_states[0].shape[-1]
+            rnn_state = (
+                torch.stack(new_layer_states, dim=1).view(B, self.n_layer * cache_size).unsqueeze(0)
             )
 
         return out, rnn_state
