@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from fla.layers import GatedDeltaNet
 from mamba_ssm.modules.block import Block
 from mamba_ssm.modules.mamba2 import Mamba2
 from mamba_ssm.ops.triton.layer_norm import RMSNorm
@@ -188,6 +189,35 @@ class GRUBlock(nn.Module):
         return x, rnn_state
 
 
+class GdnBlock(nn.Module):
+    """
+    GatedDeltaNetブロック（TransformerBlock/MambaBlock/GRUBlockと置き換え可能）
+
+    Args:
+        hidden_dim: 隠れ次元数
+        num_heads: アテンションヘッド数
+    """
+
+    def __init__(self, hidden_dim, num_heads):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.gdn = GatedDeltaNet(hidden_size=hidden_dim, num_heads=num_heads, mode="chunk")
+
+    def forward(self, x, attn_mask, rnn_state):
+        """
+        Args:
+            x: [B, T, C]
+            attn_mask: 未使用（インターフェース互換性のため）
+            rnn_state: 未使用（インターフェース互換性のため）
+
+        Returns:
+            x: [B, T, C]
+            rnn_state: 入力のrnn_stateをそのまま返す
+        """
+        x, _, _ = self.gdn(x)
+        return x, rnn_state
+
+
 class SpatialTemporalBlock(nn.Module):
     def __init__(self, config, temporal_model_type):
         super().__init__()
@@ -199,6 +229,8 @@ class SpatialTemporalBlock(nn.Module):
             self.tempo_block = TransformerBlock(config)
         elif temporal_model_type == "gru":
             self.tempo_block = GRUBlock(config)
+        elif temporal_model_type == "gdn":
+            self.tempo_block = GdnBlock(config.hidden_dim, config.n_head)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = TransformerBlock(config)

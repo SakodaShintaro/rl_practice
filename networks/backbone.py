@@ -6,6 +6,7 @@ from torch.nn import functional as F
 
 from .spatial_temporal_transformer import (
     Config,
+    GdnBlock,
     SpatialTemporalTransformer,
     TransformerBlock,
     get_fourier_embeds_from_coordinates,
@@ -270,6 +271,11 @@ class TemporalOnlyEncoder(nn.Module):
             self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
             self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
 
+        elif temporal_model_type == "gdn":
+            self.gdn_blocks = nn.ModuleList(
+                [GdnBlock(self.output_dim, n_heads=8) for _ in range(n_layer)]
+            )
+
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
@@ -339,6 +345,10 @@ class TemporalOnlyEncoder(nn.Module):
             current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)
             for block in self.blocks:
                 sequence, _ = block(sequence, current_mask, None)
+
+        elif self.temporal_model_type == "gdn":
+            for gdn_block in self.gdn_blocks:
+                sequence, _ = gdn_block(sequence, None, None)
 
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)
