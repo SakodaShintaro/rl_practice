@@ -4,16 +4,17 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-python3 train.py pathwise$suffix \
+python3 train.py baseline$suffix \
   --env_id CarRacing-v3 \
-  --agent_type on_policy \
-  --use_action_value=1 \
+  --agent_type off_policy \
   --action_norm_penalty 1.0 \
   --target_score 800.0 \
   --encoder spatial_temporal \
   --num_bins 1 \
-  --value_range 60.0 \
-  --step_limit 200_000 \
+  --value_range 200.0 \
+  --step_limit 40_000 \
   --eval_range 20 \
-  --max_grad_norm 1.0 \
-  --image_processor_type=ae \
+  --image_processor_type ae \
+  --seq_len 8 \
+  --batch_size 32 \
+  --learning_rate 1e-4 \
