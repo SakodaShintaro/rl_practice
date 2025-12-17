@@ -67,7 +67,7 @@ class Config:
 
 
 class SelfAttention(nn.Module):
-    def __init__(self, config, max_position_embeddings):
+    def __init__(self, config, max_position_embeddings, use_rope):
         super().__init__()
         assert config.hidden_dim % config.n_head == 0
         self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
@@ -79,6 +79,7 @@ class SelfAttention(nn.Module):
         self.n_head = config.n_head
         self.head_dim = config.hidden_dim // config.n_head
         self.qk_norm = True
+        self.use_rope = use_rope
 
         if self.qk_norm:
             self.q_norm = nn.LayerNorm(config.hidden_dim)
@@ -86,14 +87,15 @@ class SelfAttention(nn.Module):
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
-        # LlamaRotaryEmbeddingを使用（LlamaConfig経由）
-        rope_config = LlamaConfig(
-            hidden_size=config.hidden_dim,
-            num_attention_heads=config.n_head,
-            max_position_embeddings=max_position_embeddings,
-            head_dim=self.head_dim,
-        )
-        self.rotary_emb = LlamaRotaryEmbedding(rope_config)
+        # RoPEを使用する場合のみLlamaRotaryEmbeddingを初期化
+        if self.use_rope:
+            rope_config = LlamaConfig(
+                hidden_size=config.hidden_dim,
+                num_attention_heads=config.n_head,
+                max_position_embeddings=max_position_embeddings,
+                head_dim=self.head_dim,
+            )
+            self.rotary_emb = LlamaRotaryEmbedding(rope_config)
 
     def forward(self, x, attn_mask=None):
         B, T, C = x.size()
@@ -108,11 +110,11 @@ class SelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
-        # LlamaRotaryEmbeddingでRoPEを適用
-        # position_ids: [0, 1, 2, ..., T-1]
-        position_ids = torch.arange(T, device=x.device).unsqueeze(0)
-        cos, sin = self.rotary_emb(v, position_ids)
-        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        # use_ropeがTrueの場合のみRoPEを適用
+        if self.use_rope:
+            position_ids = torch.arange(T, device=x.device).unsqueeze(0)
+            cos, sin = self.rotary_emb(v, position_ids)
+            q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
         if attn_mask is not None:
             attn_mask = attn_mask.to(q.dtype)
@@ -129,12 +131,14 @@ class SelfAttention(nn.Module):
         return y
 
 
-class TransformerBlock(nn.Module):
+class SpatialTransformerBlock(nn.Module):
+    """空間的なTransformerブロック（RoPEなし、maskなし）"""
+
     def __init__(self, config, max_position_embeddings):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.hidden_dim)
         self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = SelfAttention(config, max_position_embeddings)
+        self.attn = SelfAttention(config, max_position_embeddings, use_rope=False)
         self.mlp = nn.Sequential(
             nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
@@ -142,8 +146,38 @@ class TransformerBlock(nn.Module):
             nn.Dropout(config.res_drop_prob),
         )
 
-    def forward(self, x, attn_mask, rnn_state):
-        x = x + self.attn(self.ln1(x), attn_mask)
+    def forward(self, x):
+        x = x + self.attn(self.ln1(x), attn_mask=None)
+        x = x + self.mlp(self.ln2(x))
+        return x
+
+
+class CausalTransformerBlock(nn.Module):
+    """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
+
+    def __init__(self, config, max_position_embeddings):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(config.hidden_dim)
+        self.ln2 = nn.LayerNorm(config.hidden_dim)
+        self.attn = SelfAttention(config, max_position_embeddings, use_rope=True)
+        self.mlp = nn.Sequential(
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
+            nn.GELU(),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
+            nn.Dropout(config.res_drop_prob),
+        )
+
+        # Causal maskを登録
+        matrix = torch.tril(torch.ones(max_position_embeddings, max_position_embeddings))
+        causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
+        causal_mask = torch.where(matrix == 1, 0, causal_mask)
+        self.register_buffer("causal_mask", causal_mask.contiguous())
+
+    def forward(self, x, rnn_state):
+        B, T, C = x.size()
+        # 現在のシーケンス長に合わせてmaskを切り出す
+        current_mask = self.causal_mask[:T, :T]
+        x = x + self.attn(self.ln1(x), attn_mask=current_mask)
         x = x + self.mlp(self.ln2(x))
         return x, rnn_state
 
@@ -370,20 +404,19 @@ class SpatialTemporalBlock(nn.Module):
         if temporal_model_type == "mamba":
             self.tempo_block = MambaBlock(config)
         elif temporal_model_type == "transformer":
-            self.tempo_block = TransformerBlock(config, tempo_len)
+            self.tempo_block = CausalTransformerBlock(config, tempo_len)
         elif temporal_model_type == "gru":
             self.tempo_block = GRUBlock(config)
         elif temporal_model_type == "gdn":
             self.tempo_block = GdnBlock(config.hidden_dim, config.n_head, layer_idx)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
-        self.space_block = TransformerBlock(config, space_len)
+        self.space_block = SpatialTransformerBlock(config, space_len)
 
-    def forward(self, x, attn_mask, rnn_state):
+    def forward(self, x, rnn_state):
         """
         Args:
             x: [B, T, S, C]
-            attn_mask: attention mask for temporal dimension
             rnn_state: [1, B*S, C] GRU hidden state (only for temporal_model_type=="gru"), or None
 
         Returns:
@@ -392,9 +425,9 @@ class SpatialTemporalBlock(nn.Module):
         """
         b, t, s, c = x.shape
         x = rearrange(x, "b t s c -> (b s) t c")
-        x, rnn_state = self.tempo_block(x, attn_mask, rnn_state)
+        x, rnn_state = self.tempo_block(x, rnn_state)
         x = rearrange(x, "(b s) t c -> (b t) s c", b=b, s=s, t=t)
-        x, _ = self.space_block(x, None, None)
+        x = self.space_block(x)
         x = rearrange(x, "(b t) s c -> b t s c", b=b, t=t)
         return x, rnn_state
 
@@ -509,7 +542,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         new_layer_states = []
         for i in range(self.n_layer):
-            out, new_state = self.spatial_temporal_blocks[i](out, self.mask_time, layer_states[i])
+            out, new_state = self.spatial_temporal_blocks[i](out, layer_states[i])
             new_layer_states.append(new_state)
 
         # 各レイヤーの状態を結合

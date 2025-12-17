@@ -5,10 +5,10 @@ from torch import nn
 from torch.nn import functional as F
 
 from .spatial_temporal_transformer import (
+    CausalTransformerBlock,
     Config,
     GdnBlock,
     SpatialTemporalTransformer,
-    TransformerBlock,
     get_fourier_embeds_from_coordinates,
 )
 
@@ -269,7 +269,6 @@ class TemporalOnlyEncoder(nn.Module):
 
             n_heads = 8
 
-
             # TransformerBlocks
             config = Config(
                 hidden_dim=self.output_dim,
@@ -278,13 +277,8 @@ class TemporalOnlyEncoder(nn.Module):
                 res_drop_prob=0.0,
             )
             self.blocks = nn.ModuleList(
-                [TransformerBlock(config, max_seq_len) for _ in range(n_layer)]
+                [CausalTransformerBlock(config, max_seq_len) for _ in range(n_layer)]
             )
-
-            # Causal mask
-            matrix = torch.tril(torch.ones(max_seq_len, max_seq_len))
-            self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
-            self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
 
         elif temporal_model_type == "gdn":
             self.gdn_blocks = nn.ModuleList(
@@ -360,12 +354,8 @@ class TemporalOnlyEncoder(nn.Module):
             )  # (B, T, hidden_size), (1, B, hidden_size)
 
         elif self.temporal_model_type == "transformer":
-            actual_seq_len = sequence.size(1)
-
-            # Apply Transformer blocks
-            current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)
             for block in self.blocks:
-                sequence, _ = block(sequence, current_mask, None)
+                sequence, _ = block(sequence, None)
 
         elif self.temporal_model_type == "gdn":
             for gdn_block in self.gdn_blocks:
