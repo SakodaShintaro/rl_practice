@@ -66,7 +66,7 @@ class MambaBlock(nn.Module):
             ),
         )
 
-    def forward(self, x, attn_mask, rnn_state):
+    def forward(self, x, rnn_state):
         return self.block(x)[0], rnn_state
 
 
@@ -87,11 +87,10 @@ class GRUBlock(nn.Module):
         # num_layers=1 のGRUを使用
         self.gru = nn.GRU(config.hidden_dim, config.hidden_dim, num_layers=1, batch_first=True)
 
-    def forward(self, x, attn_mask, rnn_state):
+    def forward(self, x, rnn_state):
         """
         Args:
             x: [B, T, C]
-            attn_mask: 未使用（インターフェース互換性のため）
             rnn_state: [1, B, C] GRUの隠れ状態
 
         Returns:
@@ -201,9 +200,9 @@ class GdnBlock(nn.Module):
 
         cache_dict = {
             "recurrent_state": recurrent_state,
-            "attn_state": None,
+            "attn_state": (),
             "conv_state": tuple(conv_tensors),
-            "ffn_state": None,
+            "ffn_state": (),
         }
 
         # FLACache を作成
@@ -212,11 +211,10 @@ class GdnBlock(nn.Module):
 
         return fla_cache
 
-    def forward(self, x, attn_mask, rnn_state):
+    def forward(self, x, rnn_state):
         """
         Args:
             x: [B, T, C]
-            attn_mask: 未使用（インターフェース互換性のため）
             rnn_state: [1, B, cache_size] フラット化された cache
 
         Returns:
@@ -253,3 +251,47 @@ class GdnBlock(nn.Module):
             new_rnn_state = rnn_state
 
         return output, new_rnn_state
+
+
+if __name__ == "__main__":
+    # 動作確認
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    B, T, C = 2, 10, 16
+    x = torch.randn(B, T, C, device=device)
+    rnn_state = torch.randn(1, B, C, device=device)
+
+    config = Config(hidden_dim=C, n_head=4, attn_drop_prob=0.1, res_drop_prob=0.1)
+
+    # CausalTransformerBlock
+    print("\n=== CausalTransformerBlock ===")
+    block = CausalTransformerBlock(config, max_position_embeddings=512).to(device)
+    out, new_rnn_state = block(x, rnn_state)
+    print(f"output shape: {out.shape}")
+    print(f"new_rnn_state shape: {new_rnn_state.shape}")
+
+    # GRUBlock
+    print("\n=== GRUBlock ===")
+    gru_block = GRUBlock(config).to(device)
+    out, new_rnn_state = gru_block(x, rnn_state)
+    print(f"output shape: {out.shape}")
+    print(f"new_rnn_state shape: {new_rnn_state.shape}")
+
+    # MambaBlock
+    print("\n=== MambaBlock ===")
+    mamba_block = MambaBlock(config).to(device)
+    out, new_rnn_state = mamba_block(x, rnn_state)
+    print(f"output shape: {out.shape}")
+    print(f"new_rnn_state shape: {new_rnn_state.shape}")
+
+    # GdnBlock
+    print("\n=== GdnBlock ===")
+    gdn_block = GdnBlock(hidden_dim=C, num_heads=4, layer_idx=0).to(device)
+    # ゼロ初期化された状態を使用（初回実行時を想定）
+    flat_rnn_state = torch.zeros(1, B, gdn_block.cache_size, device=device)
+    out, new_flat_rnn_state = gdn_block(x, flat_rnn_state)
+    print(f"output shape: {out.shape}")
+    print(f"new_flat_rnn_state shape: {new_flat_rnn_state.shape}")
+
+    print("\nAll tests passed!")

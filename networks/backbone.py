@@ -359,7 +359,7 @@ class TemporalOnlyEncoder(nn.Module):
 
         elif self.temporal_model_type == "gdn":
             for gdn_block in self.gdn_blocks:
-                sequence, _ = gdn_block(sequence, None, None)
+                sequence, _ = gdn_block(sequence, None)
 
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)
