@@ -15,9 +15,8 @@ from .temporal_block import (
 
 
 class SpatialTemporalBlock(nn.Module):
-    def __init__(self, config, temporal_model_type, layer_idx, tempo_len, space_len):
+    def __init__(self, config, temporal_model_type, tempo_len, space_len):
         super().__init__()
-        self.temporal_model_type = temporal_model_type
 
         if temporal_model_type == "mamba":
             self.tempo_block = MambaBlock(config)
@@ -35,11 +34,11 @@ class SpatialTemporalBlock(nn.Module):
         """
         Args:
             x: [B, T, S, C]
-            rnn_state: [1, B*S, C] GRU hidden state (only for temporal_model_type=="gru"), or None
+            rnn_state: [1, B*S, C] temporal block state
 
         Returns:
             x: [B, T, S, C]
-            rnn_state: [1, B*S, C] updated GRU hidden state (only for temporal_model_type=="gru"), or None
+            rnn_state: [1, B*S, C] updated temporal block state
         """
         b, t, s, c = x.shape
         x = rearrange(x, "b t s c -> (b s) t c")
@@ -84,11 +83,10 @@ class SpatialTemporalTransformer(nn.Module):
                 SpatialTemporalBlock(
                     config,
                     temporal_model_type,
-                    layer_idx=i,
                     tempo_len=tempo_len,
                     space_len=space_len,
                 )
-                for i in range(self.n_layer)
+                for _ in range(self.n_layer)
             ]
         )
 
