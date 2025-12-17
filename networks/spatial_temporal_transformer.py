@@ -269,13 +269,10 @@ class GdnBlock(nn.Module):
 
         from fla.models.utils import FLACache
 
-        # cache_flat: [1, B, cache_size] or [1, cache_size]
-        if cache_flat.dim() == 3:
-            cache_flat = cache_flat.squeeze(0)  # [B, cache_size]
-            # 最初のバッチのみを使用（全バッチで同じ cache を使うと仮定）
-            cache_flat = cache_flat[0]  # [cache_size]
-        elif cache_flat.dim() == 2:
-            cache_flat = cache_flat.squeeze(0)  # [cache_size]
+        # cache_flat: [1, B, cache_size]
+        cache_flat = cache_flat.squeeze(0)  # [B, cache_size]
+        # 最初のバッチのみを使用（全バッチで同じ cache を使うと仮定）
+        cache_flat = cache_flat[0]  # [cache_size]
 
         # ゼロ tensor かチェック（初期状態）
         if torch.all(cache_flat == 0):
