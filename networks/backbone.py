@@ -269,8 +269,6 @@ class TemporalOnlyEncoder(nn.Module):
 
             n_heads = 8
 
-            # Positional encoding
-            self.pos_encoding = nn.Parameter(torch.randn(max_seq_len, self.output_dim))
 
             # TransformerBlocks
             config = Config(
@@ -279,7 +277,9 @@ class TemporalOnlyEncoder(nn.Module):
                 attn_drop_prob=0.0,
                 res_drop_prob=0.0,
             )
-            self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(n_layer)])
+            self.blocks = nn.ModuleList(
+                [TransformerBlock(config, max_seq_len) for _ in range(n_layer)]
+            )
 
             # Causal mask
             matrix = torch.tril(torch.ones(max_seq_len, max_seq_len))
@@ -360,9 +360,7 @@ class TemporalOnlyEncoder(nn.Module):
             )  # (B, T, hidden_size), (1, B, hidden_size)
 
         elif self.temporal_model_type == "transformer":
-            # Positional encoding
             actual_seq_len = sequence.size(1)
-            sequence = sequence + self.pos_encoding[:actual_seq_len].unsqueeze(0)
 
             # Apply Transformer blocks
             current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)

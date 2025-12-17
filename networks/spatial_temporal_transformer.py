@@ -11,6 +11,8 @@ from fla.models.utils import FLACache
 from mamba_ssm.modules.block import Block
 from mamba_ssm.modules.mamba2 import Mamba2
 from mamba_ssm.ops.triton.layer_norm import RMSNorm
+from transformers.models.llama.configuration_llama import LlamaConfig
+from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding, apply_rotary_pos_emb
 
 
 def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) -> torch.Tensor:
@@ -65,7 +67,7 @@ class Config:
 
 
 class SelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, max_position_embeddings):
         super().__init__()
         assert config.hidden_dim % config.n_head == 0
         self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
@@ -75,6 +77,7 @@ class SelfAttention(nn.Module):
         self.attn_dropout_rate = config.attn_drop_prob
         self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
         self.n_head = config.n_head
+        self.head_dim = config.hidden_dim // config.n_head
         self.qk_norm = True
 
         if self.qk_norm:
@@ -83,18 +86,33 @@ class SelfAttention(nn.Module):
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
+        # LlamaRotaryEmbeddingを使用（LlamaConfig経由）
+        rope_config = LlamaConfig(
+            hidden_size=config.hidden_dim,
+            num_attention_heads=config.n_head,
+            max_position_embeddings=max_position_embeddings,
+            head_dim=self.head_dim,
+        )
+        self.rotary_emb = LlamaRotaryEmbedding(rope_config)
+
     def forward(self, x, attn_mask=None):
         B, T, C = x.size()
 
         k = self.key(x)
         q = self.query(x)
-        v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = self.value(x).view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+
+        # LlamaRotaryEmbeddingでRoPEを適用
+        # position_ids: [0, 1, 2, ..., T-1]
+        position_ids = torch.arange(T, device=x.device).unsqueeze(0)
+        cos, sin = self.rotary_emb(v, position_ids)
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
         if attn_mask is not None:
             attn_mask = attn_mask.to(q.dtype)
@@ -112,11 +130,11 @@ class SelfAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, max_position_embeddings):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.hidden_dim)
         self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = SelfAttention(config)
+        self.attn = SelfAttention(config, max_position_embeddings)
         self.mlp = nn.Sequential(
             nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
@@ -345,21 +363,21 @@ class GdnBlock(nn.Module):
 
 
 class SpatialTemporalBlock(nn.Module):
-    def __init__(self, config, temporal_model_type, layer_idx):
+    def __init__(self, config, temporal_model_type, layer_idx, tempo_len, space_len):
         super().__init__()
         self.temporal_model_type = temporal_model_type
 
         if temporal_model_type == "mamba":
             self.tempo_block = MambaBlock(config)
         elif temporal_model_type == "transformer":
-            self.tempo_block = TransformerBlock(config)
+            self.tempo_block = TransformerBlock(config, tempo_len)
         elif temporal_model_type == "gru":
             self.tempo_block = GRUBlock(config)
         elif temporal_model_type == "gdn":
             self.tempo_block = GdnBlock(config.hidden_dim, config.n_head, layer_idx)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
-        self.space_block = TransformerBlock(config)
+        self.space_block = TransformerBlock(config, space_len)
 
     def forward(self, x, attn_mask, rnn_state):
         """
@@ -406,14 +424,19 @@ class SpatialTemporalTransformer(nn.Module):
         self.space_len = space_len
         self.temporal_model_type = temporal_model_type
 
-        self.tempo_emb = nn.Parameter(torch.zeros(1, tempo_len, 1, self.hidden_dim))
-        nn.init.normal_(self.tempo_emb.data, mean=0, std=0.02)
+        # tempo_emb削除、space_embのみ保持
         self.space_emb = nn.Parameter(torch.zeros(1, 1, space_len, self.hidden_dim))
         nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
         self.spatial_temporal_blocks = nn.ModuleList(
             [
-                SpatialTemporalBlock(config, temporal_model_type, layer_idx=i)
+                SpatialTemporalBlock(
+                    config,
+                    temporal_model_type,
+                    layer_idx=i,
+                    tempo_len=tempo_len,
+                    space_len=space_len,
+                )
                 for i in range(self.n_layer)
             ]
         )
@@ -449,10 +472,9 @@ class SpatialTemporalTransformer(nn.Module):
         """
         B, T, S, C = x.shape
 
-        tempo_emb = torch.repeat_interleave(self.tempo_emb, S, dim=2)
         space_emb = torch.repeat_interleave(self.space_emb, T, dim=1)
 
-        out = x + tempo_emb + space_emb
+        out = x + space_emb
 
         # rnn_stateを各レイヤーの状態に分割
         # GRUの場合: [1, B, n_layer * S * C] -> n_layer個の [1, B*S, C]
