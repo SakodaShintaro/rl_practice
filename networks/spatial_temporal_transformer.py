@@ -26,7 +26,7 @@ class SpatialTemporalBlock(nn.Module):
         elif temporal_model_type == "gru":
             self.tempo_block = GRUBlock(config)
         elif temporal_model_type == "gdn":
-            self.tempo_block = GdnBlock(config.hidden_dim, config.n_head, layer_idx)
+            self.tempo_block = GdnBlock(config)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = SpatialTransformerBlock(config, space_len)

@@ -5,12 +5,8 @@ from torch import nn
 from torch.nn import functional as F
 
 from .self_attention import get_fourier_embeds_from_coordinates
-from .spatial_temporal_transformer import (
-    CausalTransformerBlock,
-    Config,
-    GdnBlock,
-    SpatialTemporalTransformer,
-)
+from .spatial_temporal_transformer import SpatialTemporalTransformer
+from .temporal_block import CausalTransformerBlock, Config, GdnBlock, GRUBlock, MambaBlock
 
 
 def init_weights(m):
@@ -255,36 +251,27 @@ class TemporalOnlyEncoder(nn.Module):
         # image_processor後の共通線形層
         self.lin_hidden_in = nn.Linear(image_feature_dim, self.output_dim)
 
-        # 時系列モデルのタイプによって構造を変える
+        # 時系列ブロックのリストを作成
+        max_seq_len = seq_len if use_image_only else seq_len * 3
+        n_heads = 8
+
+        config = Config(
+            hidden_dim=self.output_dim,
+            n_head=n_heads,
+            attn_drop_prob=0.0,
+            res_drop_prob=0.0,
+        )
+
         if temporal_model_type == "gru":
-            # GRUベースの実装
-            self.recurrent_layer = nn.GRU(
-                self.output_dim, self.output_dim, num_layers=n_layer, batch_first=True
-            )
-
+            self.blocks = nn.ModuleList([GRUBlock(config) for _ in range(n_layer)])
         elif temporal_model_type == "transformer":
-            # Transformerベースの実装 (SimpleTransformerEncoderと同様)
-            # シーケンス長の計算 (action, rewardを含む場合は3倍)
-            max_seq_len = seq_len if use_image_only else seq_len * 3
-
-            n_heads = 8
-
-            # TransformerBlocks
-            config = Config(
-                hidden_dim=self.output_dim,
-                n_head=n_heads,
-                attn_drop_prob=0.0,
-                res_drop_prob=0.0,
-            )
             self.blocks = nn.ModuleList(
                 [CausalTransformerBlock(config, max_seq_len) for _ in range(n_layer)]
             )
-
         elif temporal_model_type == "gdn":
-            self.gdn_blocks = nn.ModuleList(
-                [GdnBlock(self.output_dim, num_heads=8, layer_idx=i) for i in range(n_layer)]
-            )
-
+            self.blocks = nn.ModuleList([GdnBlock(config) for _ in range(n_layer)])
+        elif temporal_model_type == "mamba":
+            self.blocks = nn.ModuleList([MambaBlock(config) for _ in range(n_layer)])
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
@@ -347,19 +334,8 @@ class TemporalOnlyEncoder(nn.Module):
             sequence = torch.stack([h, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
             sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
 
-        # 時系列モデルによって処理を分岐
-        if self.temporal_model_type == "gru":
-            sequence, rnn_state = self.recurrent_layer(
-                sequence, rnn_state
-            )  # (B, T, hidden_size), (1, B, hidden_size)
-
-        elif self.temporal_model_type == "transformer":
-            for block in self.blocks:
-                sequence, _ = block(sequence, None)
-
-        elif self.temporal_model_type == "gdn":
-            for gdn_block in self.gdn_blocks:
-                sequence, _ = gdn_block(sequence, None)
+        for block in self.blocks:
+            sequence, rnn_state = block(sequence, rnn_state)
 
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)

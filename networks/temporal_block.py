@@ -16,6 +16,7 @@ class CausalTransformerBlock(nn.Module):
 
     def __init__(self, config: Config, max_position_embeddings):
         super().__init__()
+        self.hidden_dim = config.hidden_dim
         self.ln1 = nn.LayerNorm(config.hidden_dim)
         self.ln2 = nn.LayerNorm(config.hidden_dim)
         self.attn = SelfAttention(config, max_position_embeddings, use_rope=True)
@@ -32,6 +33,10 @@ class CausalTransformerBlock(nn.Module):
         causal_mask = torch.where(matrix == 1, 0, causal_mask)
         self.register_buffer("causal_mask", causal_mask.contiguous())
 
+    def get_rnn_state_size(self):
+        """rnn_stateのサイズを返す (Transformerは状態を使わないので hidden_dim を返す)"""
+        return self.hidden_dim
+
     def forward(self, x, rnn_state):
         B, T, C = x.size()
         # 現在のシーケンス長に合わせてmaskを切り出す
@@ -43,7 +48,7 @@ class CausalTransformerBlock(nn.Module):
 
 class MambaBlock(nn.Module):
     """
-    Mamba状態空間モデルブロック（TransformerBlockと置き換え可能）
+    Mamba状態空間モデルブロック
 
     Args:
         config: Configオブジェクト。必要な属性：
@@ -53,6 +58,7 @@ class MambaBlock(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.hidden_dim = config.hidden_dim
         d_ssm = 2 * config.hidden_dim
         self.block = Block(
             dim=config.hidden_dim,
@@ -66,13 +72,17 @@ class MambaBlock(nn.Module):
             ),
         )
 
+    def get_rnn_state_size(self):
+        """rnn_stateのサイズを返す (Mambaは状態を使わないので hidden_dim を返す)"""
+        return self.hidden_dim
+
     def forward(self, x, rnn_state):
         return self.block(x)[0], rnn_state
 
 
 class GRUBlock(nn.Module):
     """
-    GRUブロック（TransformerBlock/MambaBlockと置き換え可能）
+    GRUブロック
 
     このブロックはインターフェースを統一するため、rnn_stateの形状変換を内部で行います。
 
@@ -86,6 +96,10 @@ class GRUBlock(nn.Module):
         self.hidden_dim = config.hidden_dim
         # num_layers=1 のGRUを使用
         self.gru = nn.GRU(config.hidden_dim, config.hidden_dim, num_layers=1, batch_first=True)
+
+    def get_rnn_state_size(self):
+        """rnn_stateのサイズを返す"""
+        return self.hidden_dim
 
     def forward(self, x, rnn_state):
         """
@@ -103,38 +117,42 @@ class GRUBlock(nn.Module):
 
 class GdnBlock(nn.Module):
     """
-    GatedDeltaNetブロック（TransformerBlock/MambaBlock/GRUBlockと置き換え可能）
+    GatedDeltaNetブロック
 
     Args:
-        hidden_dim: 隠れ次元数
-        num_heads: アテンションヘッド数
-        layer_idx: レイヤーインデックス（cacheの管理に使用）
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+            - n_head: アテンションヘッド数
     """
 
-    def __init__(self, hidden_dim, num_heads, layer_idx):
+    def __init__(self, config):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        self.layer_idx = layer_idx
+        self.hidden_dim = config.hidden_dim
+        self.num_heads = config.n_head
+        # GdnBlockは単一レイヤーとして動作するので、常にlayer_idx=0を使用
         self.gdn = GatedDeltaNet(
-            hidden_size=hidden_dim,
+            hidden_size=config.hidden_dim,
             head_dim=64,
-            num_heads=num_heads,
+            num_heads=config.n_head,
             mode="chunk",
-            layer_idx=layer_idx,
+            layer_idx=0,
         )
 
         # per-sample cache size estimates (overridden after first cache update)
-        self.recurrent_state_shape = (num_heads, hidden_dim, hidden_dim * 2)
+        self.recurrent_state_shape = (self.num_heads, self.hidden_dim, self.hidden_dim * 2)
         self.recurrent_state_size = math.prod(self.recurrent_state_shape)
         self.conv_state_shapes = [
-            (hidden_dim * num_heads, 4),
-            (hidden_dim * num_heads, 4),
-            (hidden_dim * num_heads * 2, 4),
+            (self.hidden_dim * self.num_heads, 4),
+            (self.hidden_dim * self.num_heads, 4),
+            (self.hidden_dim * self.num_heads * 2, 4),
         ]
         self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
         self._initialized = False
+
+    def get_rnn_state_size(self):
+        """rnn_stateのサイズを返す"""
+        return self.cache_size
 
     def _flatten_cache(self, cache_dict):
         """FLACache から取得した辞書を1次元テンソルにフラット化"""
@@ -205,9 +223,9 @@ class GdnBlock(nn.Module):
             "ffn_state": (),
         }
 
-        # FLACache を作成
+        # FLACache を作成（単一レイヤーとして常にlayer_idx=0を使用）
         fla_cache = FLACache()
-        fla_cache.update(cache_dict, self.layer_idx)
+        fla_cache.update(cache_dict, 0)
 
         return fla_cache
 
@@ -243,9 +261,9 @@ class GdnBlock(nn.Module):
         if need_unpad:
             output = output[:, :T, :]
 
-        # 新しい cache をフラット化
+        # 新しい cache をフラット化（単一レイヤーとして常にlayer_idx=0を使用）
         if new_cache is not None and len(new_cache) > 0:
-            new_cache_dict = new_cache[self.layer_idx]
+            new_cache_dict = new_cache[0]
             new_rnn_state = self._flatten_cache(new_cache_dict)
         else:
             new_rnn_state = rnn_state
@@ -254,44 +272,62 @@ class GdnBlock(nn.Module):
 
 
 if __name__ == "__main__":
+    # networksディレクトリで直接実行できるようにimportパスを調整
+    import sys
+    from pathlib import Path
+
+    # 親ディレクトリ（rl_practice）をsys.pathに追加
+    current_dir = Path(__file__).parent
+    parent_dir = current_dir.parent
+    sys.path.insert(0, str(parent_dir))
+
+    # 相対importではなく絶対importで再読み込み
+    from networks.self_attention import Config, SelfAttention
+
     # 動作確認
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     B, T, C = 2, 10, 16
     x = torch.randn(B, T, C, device=device)
-    rnn_state = torch.randn(1, B, C, device=device)
 
     config = Config(hidden_dim=C, n_head=4, attn_drop_prob=0.1, res_drop_prob=0.1)
 
     # CausalTransformerBlock
     print("\n=== CausalTransformerBlock ===")
     block = CausalTransformerBlock(config, max_position_embeddings=512).to(device)
+    rnn_state = torch.zeros(1, B, block.get_rnn_state_size(), device=device)
     out, new_rnn_state = block(x, rnn_state)
     print(f"output shape: {out.shape}")
     print(f"new_rnn_state shape: {new_rnn_state.shape}")
+    print(f"rnn_state_size: {block.get_rnn_state_size()}")
 
     # GRUBlock
     print("\n=== GRUBlock ===")
     gru_block = GRUBlock(config).to(device)
+    rnn_state = torch.zeros(1, B, gru_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = gru_block(x, rnn_state)
     print(f"output shape: {out.shape}")
     print(f"new_rnn_state shape: {new_rnn_state.shape}")
+    print(f"rnn_state_size: {gru_block.get_rnn_state_size()}")
 
     # MambaBlock
     print("\n=== MambaBlock ===")
     mamba_block = MambaBlock(config).to(device)
+    rnn_state = torch.zeros(1, B, mamba_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = mamba_block(x, rnn_state)
     print(f"output shape: {out.shape}")
     print(f"new_rnn_state shape: {new_rnn_state.shape}")
+    print(f"rnn_state_size: {mamba_block.get_rnn_state_size()}")
 
     # GdnBlock
     print("\n=== GdnBlock ===")
-    gdn_block = GdnBlock(hidden_dim=C, num_heads=4, layer_idx=0).to(device)
+    gdn_block = GdnBlock(config).to(device)
     # ゼロ初期化された状態を使用（初回実行時を想定）
-    flat_rnn_state = torch.zeros(1, B, gdn_block.cache_size, device=device)
-    out, new_flat_rnn_state = gdn_block(x, flat_rnn_state)
+    rnn_state = torch.zeros(1, B, gdn_block.get_rnn_state_size(), device=device)
+    out, new_rnn_state = gdn_block(x, rnn_state)
     print(f"output shape: {out.shape}")
-    print(f"new_flat_rnn_state shape: {new_flat_rnn_state.shape}")
+    print(f"new_rnn_state shape: {new_rnn_state.shape}")
+    print(f"rnn_state_size: {gdn_block.get_rnn_state_size()}")
 
     print("\nAll tests passed!")
