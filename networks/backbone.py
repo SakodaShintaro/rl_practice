@@ -6,6 +6,7 @@ from torch.nn import functional as F
 
 from .spatial_temporal_transformer import (
     Config,
+    GdnBlock,
     SpatialTemporalTransformer,
     TransformerBlock,
     get_fourier_embeds_from_coordinates,
@@ -91,6 +92,7 @@ class SpatialTemporalEncoder(nn.Module):
 
         self.use_image_only = use_image_only
         self.n_layer = n_layer
+        self.temporal_model_type = temporal_model_type
 
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=image_processor_type
@@ -132,8 +134,22 @@ class SpatialTemporalEncoder(nn.Module):
         self.output_dim = self.hidden_image_dim * token_num
 
     def init_state(self) -> torch.Tensor:
-        # [1, 1, n_layer * space_len * hidden_image_dim]
-        return torch.zeros(1, 1, self.n_layer * self.space_len * self.hidden_image_dim)
+        if self.temporal_model_type == "gdn":
+            # GDN の cache サイズ: recurrent_state + conv_state
+            # recurrent_state: [num_heads, hidden_dim, hidden_dim*2] (per spatial token)
+            # conv_state: 3 * [hidden_dim, 4]
+            # これが n_layer * space_len 分必要
+            num_heads = 1
+            cache_size_per_block = (
+                num_heads * self.hidden_image_dim * self.hidden_image_dim * 2
+                + 3 * self.hidden_image_dim * 4
+            )
+            total_cache_size = self.n_layer * self.space_len * cache_size_per_block
+            # [1, 1, total_cache_size]
+            return torch.zeros(1, 1, total_cache_size)
+        else:
+            # [1, 1, n_layer * space_len * hidden_image_dim]
+            return torch.zeros(1, 1, self.n_layer * self.space_len * self.hidden_image_dim)
 
     def forward(
         self,
@@ -270,11 +286,24 @@ class TemporalOnlyEncoder(nn.Module):
             self.causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
             self.causal_mask = torch.where(matrix == 1, 0, self.causal_mask)
 
+        elif temporal_model_type == "gdn":
+            self.gdn_blocks = nn.ModuleList(
+                [GdnBlock(self.output_dim, num_heads=8, layer_idx=i) for i in range(n_layer)]
+            )
+
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
     def init_state(self) -> torch.Tensor:
-        return torch.zeros(1, 1, self.output_dim)
+        if self.temporal_model_type == "gdn":
+            # GDN の cache サイズ: recurrent_state + conv_state
+            # recurrent_state: [num_heads, hidden_dim, hidden_dim*2]
+            # conv_state: 3 * [hidden_dim, 4]
+            num_heads = 8
+            cache_size = num_heads * self.output_dim * self.output_dim * 2 + 3 * self.output_dim * 4
+            return torch.zeros(1, 1, cache_size)
+        else:
+            return torch.zeros(1, 1, self.output_dim)
 
     def forward(
         self,
@@ -339,6 +368,10 @@ class TemporalOnlyEncoder(nn.Module):
             current_mask = self.causal_mask[:actual_seq_len, :actual_seq_len].to(sequence.device)
             for block in self.blocks:
                 sequence, _ = block(sequence, current_mask, None)
+
+        elif self.temporal_model_type == "gdn":
+            for gdn_block in self.gdn_blocks:
+                sequence, _ = gdn_block(sequence, None, None)
 
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)
