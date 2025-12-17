@@ -1,4 +1,5 @@
 # ref. https://github.com/Kevin-thu/Epona/blob/main/models/stt.py
+import math
 from dataclasses import dataclass
 
 import torch
@@ -6,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from fla.layers import GatedDeltaNet
+from fla.models.utils import FLACache
 from mamba_ssm.modules.block import Block
 from mamba_ssm.modules.mamba2 import Mamba2
 from mamba_ssm.ops.triton.layer_norm import RMSNorm
@@ -212,25 +214,15 @@ class GdnBlock(nn.Module):
             layer_idx=layer_idx,
         )
 
-        # cache のサイズを推定（GatedDeltaNet の実装から）
-        # recurrent_state: [1, num_heads, hidden_dim, hidden_dim*2]
-        self.recurrent_state_size = num_heads * hidden_dim * hidden_dim * 2
-
-        # conv_state: GatedDeltaNet の内部実装から推定
-        # q_proj: hidden_dim -> hidden_dim * num_heads (expand_ratio=1.0)
-        # k_proj: hidden_dim -> hidden_dim * num_heads * 0.5 (expand_k=0.5)
-        # v_proj: hidden_dim -> hidden_dim * num_heads * 2.0 (expand_v=2.0)
-        # それぞれ [1, expanded_dim, 4] の形状
-        self.conv_state_sizes = [
-            hidden_dim * num_heads * 4,  # q: [1, hidden_dim*num_heads, 4]
-            hidden_dim * num_heads * 4,  # k: [1, hidden_dim*num_heads, 4]
-            hidden_dim * num_heads * 2 * 4,  # v: [1, hidden_dim*num_heads*2, 4]
-        ]
+        # per-sample cache size estimates (overridden after first cache update)
+        self.recurrent_state_shape = (num_heads, hidden_dim, hidden_dim * 2)
+        self.recurrent_state_size = math.prod(self.recurrent_state_shape)
         self.conv_state_shapes = [
-            (1, hidden_dim * num_heads, 4),
-            (1, hidden_dim * num_heads, 4),
-            (1, hidden_dim * num_heads * 2, 4),
+            (hidden_dim * num_heads, 4),
+            (hidden_dim * num_heads, 4),
+            (hidden_dim * num_heads * 2, 4),
         ]
+        self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
         self._initialized = False
 
@@ -239,58 +231,63 @@ class GdnBlock(nn.Module):
         if cache_dict is None:
             return None
 
-        # 初回実行時に cache のサイズを取得
+        recurrent_state = cache_dict["recurrent_state"]  # [B, ...]
+        conv_state = cache_dict["conv_state"]  # tuple of 3 tensors
+        batch_size = recurrent_state.shape[0]
+
+        # 初回実行時に cache のサイズ/形状を取得
         if not self._initialized:
-            self.recurrent_state_size = cache_dict["recurrent_state"].numel()
-            self.conv_state_sizes = [c.numel() for c in cache_dict["conv_state"]]
-            self.conv_state_shapes = [c.shape for c in cache_dict["conv_state"]]
+            self.recurrent_state_shape = tuple(recurrent_state.shape[1:])
+            self.recurrent_state_size = math.prod(self.recurrent_state_shape)
+            self.conv_state_shapes = [tuple(c.shape[1:]) for c in conv_state]
+            self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
             self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
             self._initialized = True
 
-        recurrent_state = cache_dict["recurrent_state"]  # [1, num_heads, hidden_dim, hidden_dim*2]
-        conv_state = cache_dict["conv_state"]  # tuple of 3 tensors
+        # recurrent_state/conv_state をバッチ毎にフラット化
+        recurrent_flat = recurrent_state.reshape(batch_size, -1).to(torch.float32)
+        conv_flat = torch.cat(
+            [c.reshape(batch_size, -1).to(torch.float32) for c in conv_state], dim=-1
+        )
 
-        # recurrent_state をフラット化（float32のまま）
-        recurrent_flat = recurrent_state.flatten()  # [recurrent_state_size]
-
-        # conv_state をフラット化（bfloat16のまま）
-        conv_flat = torch.cat([c.flatten() for c in conv_state])  # [conv_state_size]
-
-        # 両方を結合（型を揃える必要があるので、float32に統一）
-        conv_flat_f32 = conv_flat.float()
-        cache_flat = torch.cat([recurrent_flat, conv_flat_f32])  # [cache_size]
-
-        return cache_flat.unsqueeze(0)  # [1, cache_size]
+        cache_flat = torch.cat([recurrent_flat, conv_flat], dim=-1)  # [B, cache_size]
+        return cache_flat.unsqueeze(0)  # [1, B, cache_size]
 
     def _unflatten_cache(self, cache_flat, batch_size, device, dtype):
         """1次元テンソルを FLACache 用の辞書に復元"""
         if cache_flat is None:
             return None
 
-        from fla.models.utils import FLACache
-
         # cache_flat: [1, B, cache_size]
         cache_flat = cache_flat.squeeze(0)  # [B, cache_size]
-        # 最初のバッチのみを使用（全バッチで同じ cache を使うと仮定）
-        cache_flat = cache_flat[0]  # [cache_size]
+        if cache_flat.dim() == 1:
+            cache_flat = cache_flat.unsqueeze(0)
+
+        current_batch = cache_flat.size(0)
+        if current_batch != batch_size:
+            if current_batch == 1:
+                cache_flat = cache_flat.expand(batch_size, -1)
+            elif current_batch > batch_size:
+                cache_flat = cache_flat[:batch_size]
+            else:
+                repeat = math.ceil(batch_size / current_batch)
+                cache_flat = cache_flat.repeat(repeat, 1)[:batch_size]
 
         # ゼロ tensor かチェック（初期状態）
         if torch.all(cache_flat == 0):
             return None
 
         # recurrent_state を復元
-        recurrent_flat = cache_flat[: self.recurrent_state_size]
-        recurrent_state = recurrent_flat.view(
-            1, self.num_heads, self.hidden_dim, self.hidden_dim * 2
-        )
+        recurrent_flat = cache_flat[:, : self.recurrent_state_size]
+        recurrent_state = recurrent_flat.view(batch_size, *self.recurrent_state_shape).to(dtype)
 
         # conv_state を復元
-        conv_flat = cache_flat[self.recurrent_state_size :]
+        conv_flat = cache_flat[:, self.recurrent_state_size :]
         conv_tensors = []
         offset = 0
         for i, (size, shape) in enumerate(zip(self.conv_state_sizes, self.conv_state_shapes)):
-            conv_tensor = conv_flat[offset : offset + size].view(shape)
-            conv_tensors.append(conv_tensor.to(dtype))
+            conv_tensor = conv_flat[:, offset : offset + size].view(batch_size, *shape).to(dtype)
+            conv_tensors.append(conv_tensor)
             offset += size
 
         cache_dict = {
@@ -343,8 +340,6 @@ class GdnBlock(nn.Module):
         if new_cache is not None and len(new_cache) > 0:
             new_cache_dict = new_cache[self.layer_idx]
             new_rnn_state = self._flatten_cache(new_cache_dict)
-            # [1, cache_size] -> [1, B, cache_size]
-            new_rnn_state = new_rnn_state.unsqueeze(1).expand(1, B, -1)
         else:
             new_rnn_state = rnn_state
 
@@ -447,7 +442,8 @@ class SpatialTemporalTransformer(nn.Module):
 
         Args:
             x: [B, T, S, C]
-            rnn_state: [1, B, n_layer * S * C] (for GRU) or [1, B, 1] (for others)
+            rnn_state: [1, B, n_layer * S * C] (for GRU),
+                [1, B, n_layer * S * cache_size] (for GDN) or [1, B, 1] (others)
 
         Returns:
             out: [B, T, S, C]
@@ -462,7 +458,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         # rnn_stateを各レイヤーの状態に分割
         # GRUの場合: [1, B, n_layer * S * C] -> n_layer個の [1, B*S, C]
-        # GDNの場合: [1, B, n_layer * cache_size] -> n_layer個の [1, B*S, cache_size]
+        # GDNの場合: [1, B, n_layer * S * cache_size] -> n_layer個の [1, B*S, cache_size]
         # それ以外: rnn_stateをそのまま使用（各ブロックが無視する）
         if self.temporal_model_type == "gru":
             # [1, B, n_layer * S * C] -> [B, n_layer * S * C]
@@ -476,17 +472,17 @@ class SpatialTemporalTransformer(nn.Module):
             # cache size は GDN の実行後に確定するため、テンソルの実サイズから求める
             rnn_state_squeezed = rnn_state.squeeze(0)
             total_cache_size = rnn_state_squeezed.shape[-1]
-            cache_size = total_cache_size // self.n_layer
-            if cache_size * self.n_layer != total_cache_size:
+            denom = self.n_layer * S
+            cache_size = total_cache_size // denom
+            if cache_size * denom != total_cache_size:
                 raise ValueError(
-                    f"GDN rnn_state size {total_cache_size} is not divisible by n_layer={self.n_layer}"
+                    "GDN rnn_state size "
+                    f"{total_cache_size} is not divisible by n_layer * space_len={denom}"
                 )
-            # [B, n_layer * cache_size] -> [B, n_layer, cache_size]
-            layer_states = rnn_state_squeezed.view(B, self.n_layer, cache_size)
-            layer_states = [layer_states[:, i, :].contiguous() for i in range(self.n_layer)]
-            # 各レイヤーの状態を [1, B*S, cache_size] に変形（S 次元分を展開）
+            # [B, n_layer * S * cache_size] -> [B, n_layer, S, cache_size]
+            layer_states = rnn_state_squeezed.view(B, self.n_layer, S, cache_size)
             layer_states = [
-                s.unsqueeze(1).expand(B, S, -1).reshape(1, B * S, -1) for s in layer_states
+                layer_states[:, i, :, :].reshape(1, B * S, cache_size) for i in range(self.n_layer)
             ]
         else:
             layer_states = [None] * self.n_layer
@@ -498,7 +494,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         # 各レイヤーの状態を結合
         # GRUの場合: n_layer個の [1, B*S, C] -> [1, B, n_layer * S * C]
-        # GDNの場合: n_layer個の [1, B*S, cache_size] -> [1, B, n_layer * cache_size]
+        # GDNの場合: n_layer個の [1, B*S, cache_size] -> [1, B, n_layer * S * cache_size]
         # それ以外: 入力のrnn_stateをそのまま返す
         if self.temporal_model_type == "gru":
             new_layer_states = [s.view(B, S, C) for s in new_layer_states]
@@ -507,12 +503,14 @@ class SpatialTemporalTransformer(nn.Module):
                 torch.stack(new_layer_states, dim=1).view(B, self.n_layer * S * C).unsqueeze(0)
             )
         elif self.temporal_model_type == "gdn":
-            # [1, B*S, cache_size] -> [B, cache_size] (最初の B 個を取る)
-            new_layer_states = [s.squeeze(0)[:B, :] for s in new_layer_states]
-            # [B, n_layer, cache_size] -> [B, n_layer * cache_size] -> [1, B, n_layer * cache_size]
+            # [1, B*S, cache_size] -> [B, S, cache_size]
             cache_size = new_layer_states[0].shape[-1]
+            new_layer_states = [s.squeeze(0).view(B, S, cache_size) for s in new_layer_states]
+            # [B, n_layer, S, cache_size] -> [1, B, n_layer * S * cache_size]
             rnn_state = (
-                torch.stack(new_layer_states, dim=1).view(B, self.n_layer * cache_size).unsqueeze(0)
+                torch.stack(new_layer_states, dim=1)
+                .reshape(B, self.n_layer * S * cache_size)
+                .unsqueeze(0)
             )
 
         return out, rnn_state

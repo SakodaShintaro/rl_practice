@@ -136,7 +136,7 @@ class SpatialTemporalEncoder(nn.Module):
     def init_state(self) -> torch.Tensor:
         if self.temporal_model_type == "gdn":
             # GDN の cache サイズ: recurrent_state + conv_state
-            # recurrent_state: [num_heads, hidden_dim, hidden_dim*2] (n_head=1 in SpatialTemporalEncoder)
+            # recurrent_state: [num_heads, hidden_dim, hidden_dim*2] (per spatial token)
             # conv_state: 3 * [hidden_dim, 4]
             # これが n_layer * space_len 分必要
             num_heads = 1
@@ -144,7 +144,7 @@ class SpatialTemporalEncoder(nn.Module):
                 num_heads * self.hidden_image_dim * self.hidden_image_dim * 2
                 + 3 * self.hidden_image_dim * 4
             )
-            total_cache_size = self.n_layer * cache_size_per_block
+            total_cache_size = self.n_layer * self.space_len * cache_size_per_block
             # [1, 1, total_cache_size]
             return torch.zeros(1, 1, total_cache_size)
         else:
