@@ -9,8 +9,8 @@ from .spatial_temporal_transformer import (
     Config,
     GdnBlock,
     SpatialTemporalTransformer,
-    get_fourier_embeds_from_coordinates,
 )
+from .temporal_block import get_fourier_embeds_from_coordinates
 
 
 def init_weights(m):
