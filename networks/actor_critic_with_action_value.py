@@ -114,7 +114,7 @@ class Network(nn.Module):
         obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,  # (B, ...)
+        rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
         action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> dict:
         """Forward pass compatible with actor_critic_with_state_value interface.
