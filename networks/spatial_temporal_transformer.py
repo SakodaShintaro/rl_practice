@@ -260,8 +260,6 @@ class GdnBlock(nn.Module):
 
         # cache_flat: [1, B, cache_size]
         cache_flat = cache_flat.squeeze(0)  # [B, cache_size]
-        if cache_flat.dim() == 1:
-            cache_flat = cache_flat.unsqueeze(0)
 
         current_batch = cache_flat.size(0)
         if current_batch != batch_size:
