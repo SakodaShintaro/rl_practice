@@ -4,13 +4,13 @@ from diffusers.models import AutoencoderTiny
 from torch import nn
 from torch.nn import functional as F
 
+from .self_attention import get_fourier_embeds_from_coordinates
 from .spatial_temporal_transformer import (
     CausalTransformerBlock,
     Config,
     GdnBlock,
     SpatialTemporalTransformer,
 )
-from .temporal_block import get_fourier_embeds_from_coordinates
 
 
 def init_weights(m):

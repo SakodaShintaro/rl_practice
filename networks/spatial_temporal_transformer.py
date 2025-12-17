@@ -4,13 +4,13 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
+from .self_attention import SpatialTransformerBlock
 from .temporal_block import (
     CausalTransformerBlock,
     Config,
     GdnBlock,
     GRUBlock,
     MambaBlock,
-    SpatialTransformerBlock,
 )
 
 
