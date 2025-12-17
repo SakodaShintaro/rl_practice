@@ -130,22 +130,12 @@ class SpatialTemporalEncoder(nn.Module):
         self.output_dim = self.hidden_image_dim * token_num
 
     def init_state(self) -> torch.Tensor:
-        if self.temporal_model_type == "gdn":
-            # GDN の cache サイズ: recurrent_state + conv_state
-            # recurrent_state: [num_heads, hidden_dim, hidden_dim*2] (per spatial token)
-            # conv_state: 3 * [hidden_dim, 4]
-            # これが n_layer * space_len 分必要
-            num_heads = 1
-            cache_size_per_block = (
-                num_heads * self.hidden_image_dim * self.hidden_image_dim * 2
-                + 3 * self.hidden_image_dim * 4
-            )
-            total_cache_size = self.n_layer * self.space_len * cache_size_per_block
-            # [1, 1, total_cache_size]
-            return torch.zeros(1, 1, total_cache_size)
-        else:
-            # [1, 1, n_layer * space_len * hidden_image_dim]
-            return torch.zeros(1, 1, self.n_layer * self.space_len * self.hidden_image_dim)
+        # ブロックのget_rnn_state_size()を使用してstate_sizeを取得
+        state_size = self.spatial_temporal.spatial_temporal_blocks[
+            0
+        ].tempo_block.get_rnn_state_size()
+        # [1, space_len, state_size, n_layer] (バッチサイズ1)
+        return torch.zeros(1, self.space_len, state_size, self.n_layer)
 
     def forward(
         self,
@@ -153,17 +143,20 @@ class SpatialTemporalEncoder(nn.Module):
         obs_z: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         actions: torch.Tensor,  #  (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,  # (1, B, n_layer * space_len * hidden_image_dim)
+        rnn_state: torch.Tensor,  # (B, space_len, state_size, n_layer)
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         """
         Returns:
             encoded features: (B, output_dim)
-            rnn_state: (1, B, n_layer * space_len * hidden_image_dim)
+            rnn_state: (B, space_len, state_size, n_layer)
             action_text: str (always empty string for non-VLM encoders)
         """
         # Encode all frames with AE but preserve spatial structure
         # images: (B, T, C, H, W) -> encode all frames
         B, T = images.shape[:2]
+
+        # 外部形式 [B, space_len, state_size, n_layer] -> 内部形式 [1, B*space_len, state_size, n_layer]
+        rnn_state_internal = rnn_state.reshape(1, B * self.space_len, -1, self.n_layer)
 
         # Use pre-encoded obs_z if using ae, otherwise encode from images
         if self.freeze_image_processor:
@@ -191,9 +184,12 @@ class SpatialTemporalEncoder(nn.Module):
         all_embed = torch.cat([image_embed, action_embed, reward_embed, register_token], dim=2)
 
         # Apply STT to all frames
-        spatial_temporal_output, rnn_state = self.spatial_temporal(
-            all_embed, rnn_state
-        )  # [B, T, S+action_dim+1, C']
+        spatial_temporal_output, rnn_state_internal = self.spatial_temporal(
+            all_embed, rnn_state_internal
+        )  # [B, T, S+action_dim+1, C'], [1, B*space_len, state_size, n_layer]
+
+        # 内部形式 [1, B*space_len, state_size, n_layer] -> 外部形式 [B, space_len, state_size, n_layer]
+        rnn_state = rnn_state_internal.reshape(B, self.space_len, -1, self.n_layer)
 
         # Use last timestep's image tokens for final representation
         last_frame_emb = spatial_temporal_output[:, -1, :, :]  # [B, S+action_dim+1, C']
@@ -233,6 +229,7 @@ class TemporalOnlyEncoder(nn.Module):
     ):
         super().__init__()
 
+        self.n_layer = n_layer
         self.temporal_model_type = temporal_model_type
         self.freeze_image_processor = image_processor_type == "ae"
         self.use_image_only = use_image_only
@@ -276,15 +273,10 @@ class TemporalOnlyEncoder(nn.Module):
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
     def init_state(self) -> torch.Tensor:
-        if self.temporal_model_type == "gdn":
-            # GDN の cache サイズ: recurrent_state + conv_state
-            # recurrent_state: [num_heads, hidden_dim, hidden_dim*2]
-            # conv_state: 3 * [hidden_dim, 4]
-            num_heads = 8
-            cache_size = num_heads * self.output_dim * self.output_dim * 2 + 3 * self.output_dim * 4
-            return torch.zeros(1, 1, cache_size)
-        else:
-            return torch.zeros(1, 1, self.output_dim)
+        # ブロックのget_rnn_state_size()を使用してstate_sizeを取得
+        state_size = self.blocks[0].get_rnn_state_size()
+        # [1, state_size, n_layer]を返す（バッチサイズ1）
+        return torch.zeros(1, state_size, self.n_layer)
 
     def forward(
         self,
@@ -292,12 +284,12 @@ class TemporalOnlyEncoder(nn.Module):
         obs_z: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         actions: torch.Tensor,  # (B, T, action_dim)
         rewards: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,  # (1, B, hidden_size) for GRU, unused for Transformer
+        rnn_state: torch.Tensor,  # (B, state_size, n_layer)
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         """
         Returns:
             encoded features: (B, output_dim)
-            rnn_state: (1, B, hidden_size) for GRU, same as input for Transformer
+            rnn_state: (B, state_size, n_layer)
             action_text: str (always empty string for non-VLM encoders)
         """
         B, T = images.shape[:2]
@@ -334,8 +326,19 @@ class TemporalOnlyEncoder(nn.Module):
             sequence = torch.stack([h, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
             sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
 
-        for block in self.blocks:
-            sequence, rnn_state = block(sequence, rnn_state)
+        # 各レイヤーの状態を分割: [B, state_size, n_layer] -> n_layer個の [B, state_size]
+        layer_states = [rnn_state[:, :, i] for i in range(self.n_layer)]
+
+        new_layer_states = []
+        for i, block in enumerate(self.blocks):
+            # 外部形式 [B, state_size] -> 内部形式 [1, B, state_size]
+            layer_state_internal = layer_states[i].unsqueeze(0)
+            sequence, layer_state_internal = block(sequence, layer_state_internal)
+            # 内部形式 [1, B, state_size] -> 外部形式 [B, state_size]
+            new_layer_states.append(layer_state_internal.squeeze(0))
+
+        # 各レイヤーの状態を結合: n_layer個の [B, state_size] -> [B, state_size, n_layer]
+        rnn_state = torch.stack(new_layer_states, dim=-1)
 
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)

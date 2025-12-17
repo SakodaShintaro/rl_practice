@@ -92,11 +92,6 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.apply(self._init_weights)
 
-        matrix = torch.tril(torch.ones(tempo_len, tempo_len))
-        time_causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
-        time_causal_mask = torch.where(matrix == 1, 0, time_causal_mask)
-        self.register_buffer("mask_time", time_causal_mask.contiguous())
-
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean=0.0, std=0.02)
@@ -112,12 +107,12 @@ class SpatialTemporalTransformer(nn.Module):
 
         Args:
             x: [B, T, S, C]
-            rnn_state: [1, B, n_layer * S * C] (for GRU),
-                [1, B, n_layer * S * cache_size] (for GDN) or [1, B, 1] (others)
+            rnn_state: [1, B*S, state_size, n_layer]
+                state_size depends on temporal_model_type (C for GRU/Transformer/Mamba, cache_size for GDN)
 
         Returns:
             out: [B, T, S, C]
-            rnn_state: [1, B, n_layer * S * C] (for GRU) or same as input (for others)
+            rnn_state: [1, B*S, state_size, n_layer]
         """
         B, T, S, C = x.shape
 
@@ -125,61 +120,15 @@ class SpatialTemporalTransformer(nn.Module):
 
         out = x + space_emb
 
-        # rnn_stateを各レイヤーの状態に分割
-        # GRUの場合: [1, B, n_layer * S * C] -> n_layer個の [1, B*S, C]
-        # GDNの場合: [1, B, n_layer * S * cache_size] -> n_layer個の [1, B*S, cache_size]
-        # それ以外: rnn_stateをそのまま使用（各ブロックが無視する）
-        if self.temporal_model_type == "gru":
-            # [1, B, n_layer * S * C] -> [B, n_layer * S * C]
-            rnn_state_squeezed = rnn_state.squeeze(0)
-            # [B, n_layer * S * C] -> [B, n_layer, S, C]
-            layer_states = rnn_state_squeezed.view(B, self.n_layer, S, C)
-            layer_states = [layer_states[:, i, :, :].contiguous() for i in range(self.n_layer)]
-            # 各レイヤーの状態を [1, B*S, C] に変形
-            layer_states = [s.view(1, B * S, C) for s in layer_states]
-        elif self.temporal_model_type == "gdn":
-            # cache size は GDN の実行後に確定するため、テンソルの実サイズから求める
-            rnn_state_squeezed = rnn_state.squeeze(0)
-            total_cache_size = rnn_state_squeezed.shape[-1]
-            denom = self.n_layer * S
-            cache_size = total_cache_size // denom
-            if cache_size * denom != total_cache_size:
-                raise ValueError(
-                    "GDN rnn_state size "
-                    f"{total_cache_size} is not divisible by n_layer * space_len={denom}"
-                )
-            # [B, n_layer * S * cache_size] -> [B, n_layer, S, cache_size]
-            layer_states = rnn_state_squeezed.view(B, self.n_layer, S, cache_size)
-            layer_states = [
-                layer_states[:, i, :, :].reshape(1, B * S, cache_size) for i in range(self.n_layer)
-            ]
-        else:
-            layer_states = [None] * self.n_layer
+        # rnn_stateを各レイヤーの状態に分割: [1, B*S, state_size, n_layer] -> n_layer個の [1, B*S, state_size]
+        layer_states = [rnn_state[:, :, :, i] for i in range(self.n_layer)]
 
         new_layer_states = []
         for i in range(self.n_layer):
             out, new_state = self.spatial_temporal_blocks[i](out, layer_states[i])
             new_layer_states.append(new_state)
 
-        # 各レイヤーの状態を結合
-        # GRUの場合: n_layer個の [1, B*S, C] -> [1, B, n_layer * S * C]
-        # GDNの場合: n_layer個の [1, B*S, cache_size] -> [1, B, n_layer * S * cache_size]
-        # それ以外: 入力のrnn_stateをそのまま返す
-        if self.temporal_model_type == "gru":
-            new_layer_states = [s.view(B, S, C) for s in new_layer_states]
-            # [B, n_layer, S, C] -> [B, n_layer * S * C] -> [1, B, n_layer * S * C]
-            rnn_state = (
-                torch.stack(new_layer_states, dim=1).view(B, self.n_layer * S * C).unsqueeze(0)
-            )
-        elif self.temporal_model_type == "gdn":
-            # [1, B*S, cache_size] -> [B, S, cache_size]
-            cache_size = new_layer_states[0].shape[-1]
-            new_layer_states = [s.squeeze(0).view(B, S, cache_size) for s in new_layer_states]
-            # [B, n_layer, S, cache_size] -> [1, B, n_layer * S * cache_size]
-            rnn_state = (
-                torch.stack(new_layer_states, dim=1)
-                .reshape(B, self.n_layer * S * cache_size)
-                .unsqueeze(0)
-            )
+        # 各レイヤーの状態を結合: n_layer個の [1, B*S, state_size] -> [1, B*S, state_size, n_layer]
+        rnn_state = torch.stack(new_layer_states, dim=-1)
 
         return out, rnn_state

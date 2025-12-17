@@ -114,7 +114,7 @@ class Network(nn.Module):
         obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,  # (1, B, hidden_size)
+        rnn_state: torch.Tensor,  # (B, ...)
         action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> dict:
         """Forward pass compatible with actor_critic_with_state_value interface.
@@ -140,7 +140,7 @@ class Network(nn.Module):
             "a_logp": a_logp,  # (B, 1)
             "value": q_value,  # (B, 1) or (B, num_bins)
             "x": x,  # (B, hidden_dim)
-            "rnn_state": rnn_state,  # (1, B, hidden_size)
+            "rnn_state": rnn_state,  # (B, ...)
         }
 
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
@@ -148,8 +148,8 @@ class Network(nn.Module):
         obs_z_curr = data.obs_z[:, :-1]
         actions_curr = data.actions[:, :-1]
         rewards_curr = data.rewards[:, :-1]
-        rnn_state_curr = data.rnn_state[:, :-1]  # (B, T, hidden_size)
-        rnn_state_curr = rnn_state_curr[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
+        rnn_state_curr = data.rnn_state[:, :-1]  # (B, T-1, ...)
+        rnn_state_curr = rnn_state_curr[:, 0]  # (B, ...)
 
         state_curr, _, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
@@ -186,8 +186,8 @@ class Network(nn.Module):
         obs_z_next = data.obs_z[:, 1:]
         actions_next = data.actions[:, 1:]
         rewards_next = data.rewards[:, 1:]
-        rnn_state_next = data.rnn_state[:, 1:]  # (B, T, hidden_size)
-        rnn_state_next = rnn_state_next[:, 0].permute(1, 0, 2).contiguous()  # (1, B, hidden_size)
+        rnn_state_next = data.rnn_state[:, 1:]  # (B, T-1, ...)
+        rnn_state_next = rnn_state_next[:, 0]  # (B, ...)
         state_next, _, _ = self.encoder.forward(
             obs_next, obs_z_next, actions_next, rewards_next, rnn_state_next
         )

@@ -86,7 +86,7 @@ class OnPolicyAgent:
             seq_len=self.seq_len + 1,
             obs_shape=observation_space.shape,
             obs_z_shape=obs_z_shape,
-            rnn_state_shape=self.rnn_state.squeeze(1).shape,
+            rnn_state_shape=self.rnn_state.squeeze(0).shape,
             action_shape=action_space.shape,
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
@@ -229,7 +229,7 @@ class OnPolicyAgent:
         v = buffer_data.values.view(-1, 1)
         old_a_logp = buffer_data.log_probs.view(-1, 1)
         done = buffer_data.dones.view(-1, 1)
-        rnn_states = buffer_data.rnn_state.view(-1, 1, self.network.encoder.output_dim)
+        rnn_states = buffer_data.rnn_state
 
         bias = torch.tensor(self.action_bias, device=self.device).view(1, -1)
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)

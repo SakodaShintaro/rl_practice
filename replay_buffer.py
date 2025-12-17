@@ -20,7 +20,7 @@ class ReplayBufferData:
     obs_z: torch.Tensor  # (B, T, obs_z_shape) - encoded observations
     rewards: torch.Tensor  # (B, T)
     dones: torch.Tensor  # (B, T)
-    rnn_state: torch.Tensor  # (B, hidden_size)
+    rnn_state: torch.Tensor  # (..., *rnn_state_shape)
     actions: torch.Tensor  # (B, T, action_shape)
     log_probs: torch.Tensor  # (B, T)
     values: torch.Tensor  # (B, T)

@@ -127,7 +127,8 @@ if __name__ == "__main__":
 
     obs_z_shape = encoder.image_processor.output_shape
     obs_z = torch.zeros(batch_size, seq_len, *obs_z_shape, device=device)
-    rnn_state = encoder.init_state().to(device).repeat(1, batch_size, 1)
+    rnn_state = encoder.init_state().to(device)
+    rnn_state = rnn_state.repeat(batch_size, *([1] * (rnn_state.dim() - 1)))
     action_sequence = torch.randn((batch_size, seq_len, 3), device=device)
     reward_sequence = torch.randn((batch_size, seq_len, 1), device=device)
 

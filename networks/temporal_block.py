@@ -111,6 +111,8 @@ class GRUBlock(nn.Module):
             x: [B, T, C]
             rnn_state: [1, B, C] 更新されたGRUの隠れ状態
         """
+        # repeat/reshapeで非連続になるケースに備えて contiguous を取る
+        rnn_state = rnn_state.contiguous()
         x, rnn_state = self.gru(x, rnn_state)
         return x, rnn_state
 

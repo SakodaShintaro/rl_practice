@@ -51,7 +51,7 @@ class OffPolicyAgent:
             seq_len=self.seq_len + 1,
             obs_shape=observation_space.shape,
             obs_z_shape=obs_z_shape,
-            rnn_state_shape=self.rnn_state.squeeze(1).shape,
+            rnn_state_shape=self.rnn_state.squeeze(0).shape,
             action_shape=action_space.shape,
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
