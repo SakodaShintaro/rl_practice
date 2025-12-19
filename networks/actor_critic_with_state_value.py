@@ -5,10 +5,8 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
-from networks.backbone import (
-    SpatialTemporalEncoder,
-    TemporalOnlyEncoder,
-)
+from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from networks.image_processor import ImageProcessor
 from networks.policy_head import BetaPolicy, CategoricalPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.value_head import StateValueHead
@@ -32,29 +30,31 @@ class Network(nn.Module):
         self.predictor_step_num = args.predictor_step_num
         self.critic_loss_weight = args.critic_loss_weight
 
+        self.image_processor = ImageProcessor(
+            observation_space_shape, processor_type=args.image_processor_type
+        )
+
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
-                observation_space_shape,
+                image_processor=self.image_processor,
                 seq_len=args.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
-                image_processor_type=args.image_processor_type,
                 use_image_only=True,
             )
         elif args.encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
-                observation_space_shape,
+                image_processor=self.image_processor,
                 seq_len=args.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
-                image_processor_type=args.image_processor_type,
                 use_image_only=True,
             )
         elif args.encoder == "qwenvl":
             self.encoder = QwenVLEncoder(
-                observation_space_shape=observation_space_shape,
+                image_processor=self.image_processor,
                 output_text=False,
                 use_quantization=args.use_quantization,
                 use_lora=args.use_lora,
@@ -63,12 +63,11 @@ class Network(nn.Module):
                 seq_len=args.seq_len,
             )
         elif args.encoder == "mmmamba":
-            self.encoder = MMMambaEncoder(observation_space_shape=observation_space_shape)
+            self.encoder = MMMambaEncoder(image_processor=self.image_processor)
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
         hidden_dim = self.encoder.output_dim
-        hidden_image_dim = self.encoder.image_processor.output_shape[0]
 
         self.value_head = StateValueHead(
             in_channels=hidden_dim,
@@ -86,7 +85,7 @@ class Network(nn.Module):
             raise ValueError("Invalid policy type")
 
         self.prediction_head = StatePredictionHead(
-            hidden_image_dim=hidden_image_dim,
+            image_processor=self.image_processor,
             action_dim=self.action_dim,
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
@@ -217,7 +216,6 @@ class Network(nn.Module):
         return self.prediction_head.predict_next_state(
             state_curr,
             action_curr,
-            self.encoder.image_processor,
             self.observation_space_shape,
             self.predictor_step_num,
             self.disable_state_predictor,

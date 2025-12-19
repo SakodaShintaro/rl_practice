@@ -1,9 +1,9 @@
 import numpy as np
 import torch
-from diffusers.models import AutoencoderTiny
 from torch import nn
 from torch.nn import functional as F
 
+from .image_processor import ImageProcessor
 from .self_attention import get_fourier_embeds_from_coordinates
 from .spatial_temporal_transformer import SpatialTemporalTransformer
 from .temporal_block import CausalTransformerBlock, Config, GdnBlock, GRUBlock, MambaBlock
@@ -27,61 +27,16 @@ def init_weights(m):
             nn.init.constant_(m.bias, 0)
 
 
-class ImageProcessor(nn.Module):
-    def __init__(self, observation_space_shape: tuple[int], processor_type: str) -> None:
-        super().__init__()
-        self.observation_space_shape = observation_space_shape
-        self.processor_type = processor_type
-        if processor_type == "ae":
-            self.processor = AutoencoderTiny.from_pretrained(
-                "madebyollin/taesd", cache_dir="./cache"
-            )
-        elif processor_type == "simple_cnn":
-            self.processor = nn.Sequential(
-                nn.Conv2d(observation_space_shape[0], 32, 8, 4),
-                nn.ReLU(),
-                nn.Conv2d(32, 64, 4, 2, 0),
-                nn.ReLU(),
-                nn.Conv2d(64, 64, 3, 1, 0),
-                nn.ReLU(),
-            )
-        self.output_shape = self._get_conv_output_shape(observation_space_shape)
-
-    def _get_conv_output_shape(self, shape: tuple[int]) -> tuple[int]:
-        x = torch.zeros(1, *shape)
-        if self.processor_type == "ae":
-            x = self.processor.encode(x).latents
-        elif self.processor_type == "simple_cnn":
-            x = self.processor(x)
-        return list(x.size())[1:]
-
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        if self.processor_type == "ae":
-            x = self.processor.encode(x).latents
-        elif self.processor_type == "simple_cnn":
-            x = self.processor(x)
-        return x
-
-    def decode(self, x: torch.Tensor) -> torch.Tensor:
-        if self.processor_type == "ae":
-            x = x.view(x.size(0), *self.output_shape)
-            x = self.processor.decode(x).sample
-        elif self.processor_type == "simple_cnn":
-            x = torch.zeros(x.size(0), *self.observation_space_shape, device=x.device)
-        return x
-
-
 class SpatialTemporalEncoder(nn.Module):
     """Sequence encoder using SpatialTemporalTransformer"""
 
     def __init__(
         self,
-        observation_space_shape: tuple[int],
+        image_processor: ImageProcessor,
         seq_len: int,
         n_layer: int,
         action_dim: int,
         temporal_model_type: str,
-        image_processor_type: str,
         use_image_only: bool,
     ):
         super().__init__()
@@ -90,10 +45,8 @@ class SpatialTemporalEncoder(nn.Module):
         self.n_layer = n_layer
         self.temporal_model_type = temporal_model_type
 
-        self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=image_processor_type
-        )
-        self.freeze_image_processor = image_processor_type == "ae"
+        self.image_processor = image_processor
+        self.freeze_image_processor = image_processor.processor_type == "ae"
 
         # image_processor outputs [B, C, H, W] -> treat as [B, H * W, C] (H * W tokens, C channels each)
         self.hidden_image_dim = self.image_processor.output_shape[0]
@@ -208,36 +161,32 @@ class TemporalOnlyEncoder(nn.Module):
     RecurrentEncoderとSimpleTransformerEncoderを統合し、柔軟な設定を可能にする
 
     Args:
-        observation_space_shape: 観測空間の形状 [C, H, W]
+        image_processor: 画像プロセッサのインスタンス
         seq_len: シーケンス長
         n_layer: レイヤー数 (GRUならnum_layers、transformerならブロック数)
         action_dim: アクションの次元 (未使用)
         temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
-        image_processor_type: 画像プロセッサのタイプ ("ae" or "simple_cnn")
         use_image_only: 画像のみを使うか（Falseならaction, rewardも入れる）
     """
 
     def __init__(
         self,
-        observation_space_shape: tuple[int],
+        image_processor: ImageProcessor,
         seq_len: int,
         n_layer: int,
         action_dim: int,
         temporal_model_type: str,
-        image_processor_type: str,
         use_image_only: bool,
     ):
         super().__init__()
 
         self.n_layer = n_layer
         self.temporal_model_type = temporal_model_type
-        self.freeze_image_processor = image_processor_type == "ae"
+        self.freeze_image_processor = image_processor.processor_type == "ae"
         self.use_image_only = use_image_only
 
         # Image processor
-        self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=image_processor_type
-        )
+        self.image_processor = image_processor
 
         # 画像特徴量の次元を計算
         image_feature_dim = np.prod(self.image_processor.output_shape)

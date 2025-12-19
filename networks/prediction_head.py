@@ -4,17 +4,20 @@ import torch.nn as nn
 
 from .epona.flux_dit import FluxDiT
 from .epona.layers import LinearEmbedder
+from .image_processor import ImageProcessor
 
 
 class StatePredictionHead(nn.Module):
     def __init__(
         self,
-        hidden_image_dim: int,
+        image_processor: ImageProcessor,
         action_dim: int,
         predictor_hidden_dim: int,
         predictor_block_num: int,
     ):
         super().__init__()
+        self.image_processor = image_processor
+        hidden_image_dim = image_processor.output_shape[0]
         self.reward_encoder = LinearEmbedder(hidden_image_dim)
         self.state_predictor = FluxDiT(
             in_channels=hidden_image_dim,
@@ -36,7 +39,6 @@ class StatePredictionHead(nn.Module):
         self,
         state_curr: torch.Tensor,
         action_curr: torch.Tensor,
-        image_processor,
         observation_space_shape: tuple[int, ...],
         predictor_step_num: int,
         disable_state_predictor: bool,
@@ -50,9 +52,9 @@ class StatePredictionHead(nn.Module):
 
         device = state_curr.device
         B = state_curr.size(0)
-        C = image_processor.output_shape[0]
-        H = image_processor.output_shape[1]
-        W = image_processor.output_shape[2]
+        C = self.image_processor.output_shape[0]
+        H = self.image_processor.output_shape[1]
+        W = self.image_processor.output_shape[2]
         state_curr = state_curr.view(B, -1, C)
         noise_shape = (B, (H * W) + 1, C)
         normal = torch.distributions.Normal(
@@ -75,7 +77,7 @@ class StatePredictionHead(nn.Module):
 
         image_part = next_hidden_state[:, :-1, :]
         image_part = image_part.permute(0, 2, 1).view(B, C, H, W)
-        next_image = image_processor.decode(image_part)
+        next_image = self.image_processor.decode(image_part)
         next_image = next_image.detach().cpu().numpy()
         next_image = next_image.squeeze(0)
         next_image = next_image.transpose(1, 2, 0)

@@ -16,8 +16,8 @@ from transformers import (
     BitsAndBytesConfig,
 )
 
-from .backbone import ImageProcessor
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
+from .image_processor import ImageProcessor
 
 ACTION_PROMPT = (
     "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
@@ -76,7 +76,7 @@ def parse_action_text(action_text: str) -> np.ndarray:
 class QwenVLEncoder(nn.Module):
     def __init__(
         self,
-        observation_space_shape: tuple[int],
+        image_processor: ImageProcessor,
         output_text: bool,
         use_quantization: bool,
         use_lora: bool,
@@ -150,7 +150,7 @@ class QwenVLEncoder(nn.Module):
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
-        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+        self.image_processor = image_processor
         self._dummy_state = torch.zeros(1, 1, 1)
 
     def init_state(self) -> torch.Tensor:
@@ -279,7 +279,7 @@ class MMMambaEncoder(nn.Module):
     https://huggingface.co/hustvl/mmMamba-linear/blob/main/modeling_mmMamba_chat.py
     """
 
-    def __init__(self, observation_space_shape, device=None) -> None:
+    def __init__(self, image_processor: ImageProcessor, device=None) -> None:
         super().__init__()
 
         if device is None:
@@ -323,7 +323,7 @@ class MMMambaEncoder(nn.Module):
 
         self.inference_params = InferenceParams(max_seqlen=1024, max_batch_size=1)
         self.output_dim = 2048
-        self.image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+        self.image_processor = image_processor
 
     def init_state(self) -> torch.Tensor:
         """Return dummy state for compatibility with standard encoders"""
