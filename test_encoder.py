@@ -9,6 +9,7 @@ import torch
 from torchvision import transforms
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from networks.image_processor import ImageProcessor
 from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -82,36 +83,36 @@ if __name__ == "__main__":
     observation_space_shape = (3, 96, 96)
     seq_len = images_sequence.shape[0]
 
+    image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+    image_processor = image_processor.to(device)
+
     if args.encoder == "spatial_temporal":
         encoder = SpatialTemporalEncoder(
-            observation_space_shape,
-            seq_len,
-            1,
-            3,
-            "transformer",
-            "simple_cnn",
-            False,
+            image_processor=image_processor,
+            seq_len=seq_len,
+            n_layer=1,
+            action_dim=3,
+            temporal_model_type="transformer",
+            use_image_only=False,
         )
         encoder = encoder.to(device)
 
     elif args.encoder == "temporal_only":
         encoder = TemporalOnlyEncoder(
-            observation_space_shape,
-            seq_len,
-            1,
-            3,
-            "gru",
-            "simple_cnn",
-            True,
+            image_processor=image_processor,
+            seq_len=seq_len,
+            n_layer=1,
+            action_dim=3,
+            temporal_model_type="gru",
+            use_image_only=True,
         )
         encoder = encoder.to(device)
 
     elif args.encoder == "mmmamba":
-        encoder = MMMambaEncoder(observation_space_shape=observation_space_shape, device=device)
+        encoder = MMMambaEncoder(device=device)
 
     elif args.encoder == "qwenvl":
         encoder = QwenVLEncoder(
-            observation_space_shape=observation_space_shape,
             output_text=True,
             use_quantization=False,
             use_lora=False,
@@ -125,7 +126,7 @@ if __name__ == "__main__":
     batched_images = images_sequence.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
     seq_len = images_sequence.shape[0]
 
-    obs_z_shape = encoder.image_processor.output_shape
+    obs_z_shape = image_processor.output_shape
     obs_z = torch.zeros(batch_size, seq_len, *obs_z_shape, device=device)
     rnn_state = encoder.init_state().to(device)
     rnn_state = rnn_state.repeat(batch_size, *([1] * (rnn_state.dim() - 1)))

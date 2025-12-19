@@ -80,7 +80,7 @@ class OnPolicyAgent:
                 self.device
             )
         self.rnn_state = self.network.init_state().to(self.device)
-        obs_z_shape = tuple(self.network.encoder.image_processor.output_shape)
+        obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
             seq_len=self.seq_len + 1,
@@ -142,7 +142,7 @@ class OnPolicyAgent:
 
         # add to replay buffer
         obs_tensor = torch.from_numpy(obs).to(self.device)
-        obs_z = self.network.encoder.image_processor.encode(obs_tensor.unsqueeze(0))
+        obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
         self.rb.add(
             obs_tensor,

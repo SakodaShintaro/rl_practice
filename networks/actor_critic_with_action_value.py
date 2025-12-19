@@ -54,7 +54,6 @@ class Network(nn.Module):
             )
         elif args.encoder == "qwenvl":
             self.encoder = QwenVLEncoder(
-                image_processor=self.image_processor,
                 output_text=False,
                 use_quantization=args.use_quantization,
                 use_lora=args.use_lora,
@@ -63,7 +62,7 @@ class Network(nn.Module):
                 seq_len=args.seq_len,
             )
         elif args.encoder == "mmmamba":
-            self.encoder = MMMambaEncoder(image_processor=self.image_processor)
+            self.encoder = MMMambaEncoder()
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 

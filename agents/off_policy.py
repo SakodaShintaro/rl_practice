@@ -45,7 +45,7 @@ class OffPolicyAgent:
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
 
-        obs_z_shape = tuple(self.network.encoder.image_processor.output_shape)
+        obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
             size=args.buffer_size,
             seq_len=self.seq_len + 1,
@@ -101,7 +101,7 @@ class OffPolicyAgent:
 
         # add to replay buffer
         obs_tensor = torch.from_numpy(obs).to(self.device)
-        obs_z = self.network.encoder.image_processor.encode(obs_tensor.unsqueeze(0))
+        obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
         self.rb.add(
             obs_tensor,
