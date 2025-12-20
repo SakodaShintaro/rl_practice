@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .image_processor import ImageProcessor
+from .reward_processor import RewardProcessor
 from .self_attention import get_fourier_embeds_from_coordinates
 from .spatial_temporal_transformer import SpatialTemporalTransformer
 from .temporal_block import CausalTransformerBlock, Config, GdnBlock, GRUBlock, MambaBlock
@@ -33,6 +34,7 @@ class SpatialTemporalEncoder(nn.Module):
     def __init__(
         self,
         image_processor: ImageProcessor,
+        reward_processor: RewardProcessor,
         seq_len: int,
         n_layer: int,
         action_dim: int,
@@ -46,6 +48,7 @@ class SpatialTemporalEncoder(nn.Module):
         self.temporal_model_type = temporal_model_type
 
         self.image_processor = image_processor
+        self.reward_processor = reward_processor
         self.freeze_image_processor = image_processor.processor_type == "ae"
 
         # image_processor outputs [B, C, H, W] -> treat as [B, H * W, C] (H * W tokens, C channels each)
@@ -126,7 +129,7 @@ class SpatialTemporalEncoder(nn.Module):
         action_embed = get_fourier_embeds_from_coordinates(self.hidden_image_dim, actions)
 
         # [B, T, 1] -> [B, T, 1, C']
-        reward_embed = get_fourier_embeds_from_coordinates(self.hidden_image_dim, rewards)
+        reward_embed = self.reward_processor.encode(rewards)  # (B, T, 1, C')
 
         # [B, T, 1, C']
         register_token = torch.zeros(
@@ -162,6 +165,7 @@ class TemporalOnlyEncoder(nn.Module):
 
     Args:
         image_processor: 画像プロセッサのインスタンス
+        reward_processor: 報酬プロセッサのインスタンス
         seq_len: シーケンス長
         n_layer: レイヤー数 (GRUならnum_layers、transformerならブロック数)
         action_dim: アクションの次元 (未使用)
@@ -172,6 +176,7 @@ class TemporalOnlyEncoder(nn.Module):
     def __init__(
         self,
         image_processor: ImageProcessor,
+        reward_processor: RewardProcessor,
         seq_len: int,
         n_layer: int,
         action_dim: int,
@@ -187,6 +192,7 @@ class TemporalOnlyEncoder(nn.Module):
 
         # Image processor
         self.image_processor = image_processor
+        self.reward_processor = reward_processor
 
         # 画像特徴量の次元を計算
         image_feature_dim = np.prod(self.image_processor.output_shape)
@@ -266,9 +272,7 @@ class TemporalOnlyEncoder(nn.Module):
             )  # (B, T, action_dim, d_model)
             action_emb = action_emb.sum(dim=2)  # (B, T, d_model)
 
-            reward_emb = get_fourier_embeds_from_coordinates(
-                self.output_dim, rewards
-            )  # (B, T, 1, d_model)
+            reward_emb = self.reward_processor.encode(rewards)  # (B, T, 1, d_model)
             reward_emb = reward_emb.sum(dim=2)  # (B, T, d_model)
 
             # Interleave: [s_0, a_0, r_0, s_1, a_1, r_1, ...]

@@ -10,6 +10,7 @@ from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from networks.image_processor import ImageProcessor
 from networks.policy_head import DiffusionPolicy
 from networks.prediction_head import StatePredictionHead
+from networks.reward_processor import RewardProcessor
 from networks.value_head import ActionValueHead
 from networks.vlm import MMMambaEncoder, QwenVLEncoder
 
@@ -33,10 +34,13 @@ class Network(nn.Module):
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=args.image_processor_type
         )
+        hidden_image_dim = self.image_processor.output_shape[0]
+        self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
                 image_processor=self.image_processor,
+                reward_processor=self.reward_processor,
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=action_dim,
@@ -46,6 +50,7 @@ class Network(nn.Module):
         elif args.encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
                 image_processor=self.image_processor,
+                reward_processor=self.reward_processor,
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=action_dim,
@@ -84,6 +89,7 @@ class Network(nn.Module):
         )
         self.prediction_head = StatePredictionHead(
             image_processor=self.image_processor,
+            reward_processor=self.reward_processor,
             action_dim=action_dim,
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
@@ -324,8 +330,11 @@ class Network(nn.Module):
             target_state_next = target_state_next.flatten(2).permute(0, 2, 1)  # (B, H'*W', C')
 
         reward_next = data.rewards[:, -1]  # (B, 1)
-        target_reward_next = self.prediction_head.reward_encoder.encode(reward_next)  # (B, C')
-        x1 = torch.cat([target_state_next, target_reward_next], dim=1)  # (B, H'*W'+1, C')
+        target_reward_next = self.reward_processor.encode(reward_next)  # (B, 1, C')
+        target_reward_next = target_reward_next.squeeze(1)  # (B, C')
+        x1 = torch.cat(
+            [target_state_next, target_reward_next.unsqueeze(1)], dim=1
+        )  # (B, H'*W'+1, C')
 
         # Flow Matching for state prediction
         x0 = torch.randn_like(x1)

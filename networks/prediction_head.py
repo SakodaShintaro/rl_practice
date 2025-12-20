@@ -3,22 +3,23 @@ import torch
 import torch.nn as nn
 
 from .epona.flux_dit import FluxDiT
-from .epona.layers import LinearEmbedder
 from .image_processor import ImageProcessor
+from .reward_processor import RewardProcessor
 
 
 class StatePredictionHead(nn.Module):
     def __init__(
         self,
         image_processor: ImageProcessor,
+        reward_processor: RewardProcessor,
         action_dim: int,
         predictor_hidden_dim: int,
         predictor_block_num: int,
     ):
         super().__init__()
         self.image_processor = image_processor
+        self.reward_processor = reward_processor
         hidden_image_dim = image_processor.output_shape[0]
-        self.reward_encoder = LinearEmbedder(hidden_image_dim)
         self.state_predictor = FluxDiT(
             in_channels=hidden_image_dim,
             out_channels=hidden_image_dim,
@@ -83,6 +84,6 @@ class StatePredictionHead(nn.Module):
         next_image = next_image.transpose(1, 2, 0)
 
         reward_part = next_hidden_state[:, -1, :]
-        next_reward = self.reward_encoder.decode(reward_part)
+        next_reward = self.reward_processor.decode(reward_part)
 
         return next_image, next_reward.item()

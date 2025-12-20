@@ -9,6 +9,7 @@ from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from networks.image_processor import ImageProcessor
 from networks.policy_head import BetaPolicy, CategoricalPolicy
 from networks.prediction_head import StatePredictionHead
+from networks.reward_processor import RewardProcessor
 from networks.value_head import StateValueHead
 from networks.vlm import MMMambaEncoder, QwenVLEncoder
 
@@ -33,10 +34,13 @@ class Network(nn.Module):
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=args.image_processor_type
         )
+        hidden_image_dim = self.image_processor.output_shape[0]
+        self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
         if args.encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
                 image_processor=self.image_processor,
+                reward_processor=self.reward_processor,
                 seq_len=args.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=self.action_dim,
@@ -46,6 +50,7 @@ class Network(nn.Module):
         elif args.encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
                 image_processor=self.image_processor,
+                reward_processor=self.reward_processor,
                 seq_len=args.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=self.action_dim,
@@ -85,6 +90,7 @@ class Network(nn.Module):
 
         self.prediction_head = StatePredictionHead(
             image_processor=self.image_processor,
+            reward_processor=self.reward_processor,
             action_dim=self.action_dim,
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,

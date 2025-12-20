@@ -10,6 +10,7 @@ from torchvision import transforms
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from networks.image_processor import ImageProcessor
+from networks.reward_processor import RewardProcessor
 from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -86,9 +87,14 @@ if __name__ == "__main__":
     image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
     image_processor = image_processor.to(device)
 
+    hidden_image_dim = image_processor.output_shape[0]
+    reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
+    reward_processor = reward_processor.to(device)
+
     if args.encoder == "spatial_temporal":
         encoder = SpatialTemporalEncoder(
             image_processor=image_processor,
+            reward_processor=reward_processor,
             seq_len=seq_len,
             n_layer=1,
             action_dim=3,
@@ -100,6 +106,7 @@ if __name__ == "__main__":
     elif args.encoder == "temporal_only":
         encoder = TemporalOnlyEncoder(
             image_processor=image_processor,
+            reward_processor=reward_processor,
             seq_len=seq_len,
             n_layer=1,
             action_dim=3,
