@@ -25,7 +25,7 @@ CROP_HEIGHT = 400
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("input_dir", type=str)
+    parser.add_argument("input_dir", type=Path)
     return parser.parse_args()
 
 
@@ -41,7 +41,6 @@ def crop_video(input_path, output_path):
     fps = cap.get(cv2.CAP_PROP_FPS)
 
     cropped_frames = []
-    first_frame = True
 
     while True:
         ret, frame = cap.read()
@@ -50,12 +49,6 @@ def crop_video(input_path, output_path):
 
         # BGR to RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        if first_frame:
-            print(f"元の動画サイズ: {frame_rgb.shape[1]}x{frame_rgb.shape[0]}")
-            print(f"クロップ領域: x={CROP_X}, y={CROP_Y}, width={CROP_WIDTH}, height={CROP_HEIGHT}")
-            first_frame = False
-
         cropped_frame = frame_rgb[CROP_Y : CROP_Y + CROP_HEIGHT, CROP_X : CROP_X + CROP_WIDTH]
         cropped_frames.append(cropped_frame)
 
@@ -72,15 +65,13 @@ def crop_video(input_path, output_path):
 
 def main():
     args = parse_args()
+    input_dir = args.input_dir
 
-    input_dir = Path(args.input_dir)
-    # 出力ディレクトリは入力ディレクトリと同じ階層に固定
     output_dir = input_dir.parent / "video_cropped"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # パターンに一致する動画ファイルを取得
     video_files = sorted(list(input_dir.glob("*.mp4")))
-
     if not video_files:
         print(f"動画ファイルが見つかりません: {input_dir}/*.mp4")
         return
@@ -90,11 +81,7 @@ def main():
     for i, video_path in enumerate(video_files):
         print(f"\n[{i + 1}/{len(video_files)}] 処理中: {video_path.name}")
         output_path = output_dir / video_path.name
-
-        try:
-            crop_video(video_path, output_path)
-        except Exception as e:
-            print(f"エラー: {video_path.name} - {str(e)}")
+        crop_video(video_path, output_path)
 
 
 if __name__ == "__main__":
