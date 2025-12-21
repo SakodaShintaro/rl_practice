@@ -246,9 +246,13 @@ def main():
 
     # モデルとプロセッサのロード
     model_id = "Qwen/Qwen3-VL-2B-Instruct"
+    # model_id = "Qwen/Qwen3-VL-2B-Thinking"
     # model_id = "Qwen/Qwen3-VL-8B-Instruct"
     # model_id = "Qwen/Qwen3-VL-8B-Thinking"
     # model_id = "Qwen/Qwen3-VL-32B-Instruct"
+    # model_id = "Qwen/Qwen3-VL-32B-Thinking"
+    # model_id = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+    # model_id = "Qwen/Qwen3-VL-235B-A22B-Thinking"
     print(f"モデルをロード中: {model_id}")
     model = AutoModelForImageTextToText.from_pretrained(
         model_id,
