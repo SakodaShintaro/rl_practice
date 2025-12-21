@@ -23,6 +23,12 @@ CROP_WIDTH = 600
 CROP_HEIGHT = 400
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_dir", type=str)
+    return parser.parse_args()
+
+
 def crop_video(input_path, output_path):
     """
     動画のenvironment部分だけをクロップ
@@ -65,24 +71,18 @@ def crop_video(input_path, output_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="動画のenvironment部分だけをクロップ")
-    parser.add_argument("--input_dir", type=str, required=True, help="入力動画ディレクトリ")
-    parser.add_argument("--output_dir", type=str, required=True, help="出力動画ディレクトリ")
-    parser.add_argument(
-        "--pattern", type=str, required=True, help="処理する動画のパターン（例: *.mp4）"
-    )
-
-    args = parser.parse_args()
+    args = parse_args()
 
     input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
+    # 出力ディレクトリは入力ディレクトリと同じ階層に固定
+    output_dir = input_dir.parent / "video_cropped"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # パターンに一致する動画ファイルを取得
-    video_files = sorted(list(input_dir.glob(args.pattern)))
+    video_files = sorted(list(input_dir.glob("*.mp4")))
 
     if not video_files:
-        print(f"動画ファイルが見つかりません: {input_dir}/{args.pattern}")
+        print(f"動画ファイルが見つかりません: {input_dir}/*.mp4")
         return
 
     print(f"処理する動画数: {len(video_files)}")
