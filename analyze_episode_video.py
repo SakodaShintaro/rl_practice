@@ -108,11 +108,14 @@ def load_video_frames(video_path):
     return frames, fps
 
 
-def analyze_episode_with_qwen(video_path, model, processor, device, episode_score, max_score):
+def analyze_episode_with_qwen(
+    video_path, best_video_path, model, processor, device, episode_score, max_score
+):
     """QwenVLで動画を解析してエピソードの反省点を生成
 
     Args:
         video_path: 動画ファイルのパス
+        best_video_path: ベストエピソードの動画ファイルのパス
         model: QwenVLモデル
         processor: QwenVLプロセッサ
         device: 使用するデバイス
@@ -124,46 +127,47 @@ def analyze_episode_with_qwen(video_path, model, processor, device, episode_scor
     """
     # 動画からフレームを抽出
     frames, fps = load_video_frames(video_path)
+    best_frames, best_fps = load_video_frames(best_video_path)
 
-    print(f"読み込んだフレーム数: {len(frames)}, FPS: {fps}")
+    print(f"対象エピソード - フレーム数: {len(frames)}, FPS: {fps}")
+    print(f"ベストエピソード - フレーム数: {len(best_frames)}, FPS: {best_fps}")
 
-    prompt = f"""This video shows an episode of a reinforcement learning agent in the CarRacing-v3 environment.
+    prompt = f"""You are shown TWO videos of a reinforcement learning agent in the CarRacing-v3 environment.
 The red car is the learning agent, which must drive on the gray road and avoid going onto the green grass.
 
-PERFORMANCE CONTEXT:
-- This episode's score: {episode_score:.2f}
-- Best score achieved: {max_score:.2f}
-- Performance level: {episode_score / max_score * 100:.1f}% of best performance
+VIDEO 1 (BEST EPISODE): Score = {max_score:.2f} points (Best performance)
+VIDEO 2 (CURRENT EPISODE): Score = {episode_score:.2f} points ({episode_score / max_score * 100:.1f}% of best)
 
-Please analyze this episode and provide insights on the following points:
+TASK: Compare these two episodes and analyze why Video 2 performed worse than Video 1.
 
-1. Agent's Driving Performance
-   - Track positioning (Is the agent staying near the center of the road?)
-   - Smoothness of steering operations
-   - Appropriateness of speed control
-   - How does the performance match the score ({episode_score:.2f} out of {max_score:.2f})?
+Please provide insights on the following points:
 
-2. Failure Point Identification
-   - Specific locations where the agent went onto the grass (if any)
-   - Causes of track departure (excessive steering, speeding, etc.)
-   - Critical mistakes that lowered the score
+1. Performance Comparison
+   - What are the key differences in driving behavior between the best episode and current episode?
+   - Speed control: How does the current episode's speed management compare?
 
-3. Improvement Suggestions
-   - What driving behavior would lead to better performance?
-   - What aspects should be improved through learning to reach the best score level?
+2. Failure Analysis (Current Episode)
+   - What specific mistakes did the agent make in the current episode that the best episode avoided?
+   - Where did the agent go off-track or onto the grass?
+   - What were the critical errors that led to the lower score?
 
-Please provide a concise and specific analysis that reflects the actual performance level."""
+3. Learning Improvements
+   - Based on the comparison, what should the agent learn from the best episode?
+   - What specific behaviors need to be corrected to reach best episode performance?
+   - What patterns from the best episode should be replicated?
+
+Please provide a detailed comparison-based analysis."""
 
     # チャットメッセージ形式で構築
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "video", "video": frames, "fps": fps},
-                {"type": "text", "text": prompt},
-            ],
-        }
+    content = [
+        {"type": "text", "text": "Video 1 (Best Episode):"},
+        {"type": "video", "video": best_frames, "fps": best_fps},
+        {"type": "text", "text": "Video 2 (Current Episode):"},
+        {"type": "video", "video": frames, "fps": fps},
+        {"type": "text", "text": prompt},
     ]
+
+    messages = [{"role": "user", "content": content}]
 
     # テキストテンプレート適用
     text = processor.apply_chat_template(
@@ -241,9 +245,9 @@ def main():
     print(f"最高得点: {max_score:.2f}")
 
     # モデルとプロセッサのロード
-    # model_id = "Qwen/Qwen3-VL-2B-Instruct"
+    model_id = "Qwen/Qwen3-VL-2B-Instruct"
     # model_id = "Qwen/Qwen3-VL-8B-Instruct"
-    model_id = "Qwen/Qwen3-VL-8B-Thinking"
+    # model_id = "Qwen/Qwen3-VL-8B-Thinking"
     # model_id = "Qwen/Qwen3-VL-32B-Instruct"
     print(f"モデルをロード中: {model_id}")
     model = AutoModelForImageTextToText.from_pretrained(
@@ -264,6 +268,19 @@ def main():
         print(f"動画ファイルが見つかりません: {video_dir}")
         return
 
+    # best_episode.mp4のパスを取得
+    best_video_path = video_dir / "best_episode.mp4"
+    if not best_video_path.exists():
+        print(f"best_episode.mp4が見つかりません: {best_video_path}")
+        return
+
+    # best_episode.mp4以外のファイルのみを解析対象とする
+    video_files = [v for v in video_files if v.name != "best_episode.mp4"]
+
+    if not video_files:
+        print("解析対象の動画ファイルが見つかりません（best_episode.mp4以外）")
+        return
+
     print(f"\n解析する動画数: {len(video_files)}")
 
     # 結果を保存
@@ -280,7 +297,13 @@ def main():
         print(f"エピソード番号: {episode_num}, スコア: {episode_score:.2f} / {max_score_val:.2f}")
 
         analysis = analyze_episode_with_qwen(
-            str(video_path), model, processor, device, episode_score, max_score_val
+            str(video_path),
+            str(best_video_path),
+            model,
+            processor,
+            device,
+            episode_score,
+            max_score_val,
         )
 
         result = f"""
