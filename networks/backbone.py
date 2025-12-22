@@ -198,7 +198,7 @@ class TemporalOnlyEncoder(nn.Module):
         image_feature_dim = np.prod(self.image_processor.output_shape)
 
         # 共通の隠れ層サイズ
-        self.output_dim = 128
+        self.output_dim = 64
 
         # image_processor後の共通線形層
         self.lin_hidden_in = nn.Linear(image_feature_dim, self.output_dim)
