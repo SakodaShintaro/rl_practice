@@ -198,7 +198,7 @@ class TemporalOnlyEncoder(nn.Module):
         image_feature_dim = np.prod(self.image_processor.output_shape)
 
         # 共通の隠れ層サイズ
-        self.output_dim = 256
+        self.output_dim = 128
 
         # image_processor後の共通線形層
         self.lin_hidden_in = nn.Linear(image_feature_dim, self.output_dim)
@@ -259,7 +259,7 @@ class TemporalOnlyEncoder(nn.Module):
 
         # Flatten and linear projection
         h = image_features.flatten(start_dim=1)  # (B*T, feature_dim)
-        h = F.relu(self.lin_hidden_in(h))  # (B*T, hidden_size)
+        h = self.lin_hidden_in(h)  # (B*T, hidden_size)
         h = h.reshape(B, T, -1)  # (B, T, hidden_size)
 
         if self.use_image_only:
