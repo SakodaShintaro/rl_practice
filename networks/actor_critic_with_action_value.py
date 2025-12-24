@@ -55,7 +55,7 @@ class Network(nn.Module):
                 n_layer=args.encoder_block_num,
                 action_dim=action_dim,
                 temporal_model_type=args.temporal_model_type,
-                use_image_only=True,
+                use_image_only=False,
             )
         elif args.encoder == "qwenvl":
             self.encoder = QwenVLEncoder(

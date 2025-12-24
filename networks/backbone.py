@@ -272,11 +272,13 @@ class TemporalOnlyEncoder(nn.Module):
             )  # (B, T, action_dim, d_model)
             action_emb = action_emb.sum(dim=2)  # (B, T, d_model)
 
-            reward_emb = self.reward_processor.encode(rewards)  # (B, T, 1, d_model)
+            reward_emb = get_fourier_embeds_from_coordinates(
+                self.output_dim, rewards
+            )  # (B, T, 1, d_model)
             reward_emb = reward_emb.sum(dim=2)  # (B, T, d_model)
 
-            # Interleave: [s_0, a_0, r_0, s_1, a_1, r_1, ...]
-            sequence = torch.stack([h, action_emb, reward_emb], dim=2)  # (B, T, 3, d_model)
+            # Interleave: [a_0, r_0, s_0, a_1, r_1, s_1, ...]
+            sequence = torch.stack([action_emb, reward_emb, h], dim=2)  # (B, T, 3, d_model)
             sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
 
         # 各レイヤーの状態を分割: [B, state_size, n_layer] -> n_layer個の [B, state_size]
