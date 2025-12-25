@@ -15,11 +15,10 @@ class BaseTemporalBlock(nn.Module):
 
     Args:
         hidden_dim: 隠れ次元数
-        res_drop_prob: residual dropout確率
         temporal_layer: 時系列処理を行うレイヤー
     """
 
-    def __init__(self, hidden_dim, res_drop_prob, temporal_layer):
+    def __init__(self, hidden_dim, temporal_layer):
         super().__init__()
         self.hidden_dim = hidden_dim
 
@@ -33,7 +32,7 @@ class BaseTemporalBlock(nn.Module):
             nn.Linear(hidden_dim, 4 * hidden_dim, bias=False),
             nn.GELU(),
             nn.Linear(4 * hidden_dim, hidden_dim, bias=False),
-            nn.Dropout(res_drop_prob),
+            nn.Dropout(0.0),
         )
 
     def get_rnn_state_size(self):
@@ -324,35 +323,32 @@ class IdentityLayer(nn.Module):
 
 
 # 互換性のためのエイリアス
-def CausalTransformerBlock(
-    hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_position_embeddings
-):
+def CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, max_position_embeddings):
     """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
     return BaseTemporalBlock(
         hidden_dim,
-        res_drop_prob,
         SelfAttentionLayer(hidden_dim, n_head, attn_drop_prob, max_position_embeddings),
     )
 
 
-def MambaBlock(hidden_dim, res_drop_prob):
+def MambaBlock(hidden_dim):
     """Mamba状態空間モデルブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(hidden_dim, res_drop_prob, MambaLayer(hidden_dim))
+    return BaseTemporalBlock(hidden_dim, MambaLayer(hidden_dim))
 
 
-def GRUBlock(hidden_dim, res_drop_prob):
+def GRUBlock(hidden_dim):
     """GRUブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(hidden_dim, res_drop_prob, GRULayer(hidden_dim))
+    return BaseTemporalBlock(hidden_dim, GRULayer(hidden_dim))
 
 
-def GdnBlock(hidden_dim, n_head, res_drop_prob):
+def GdnBlock(hidden_dim, n_head):
     """GatedDeltaNetブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(hidden_dim, res_drop_prob, GatedDeltaNetLayer(hidden_dim, n_head))
+    return BaseTemporalBlock(hidden_dim, GatedDeltaNetLayer(hidden_dim, n_head))
 
 
-def IdentityBlock(hidden_dim, res_drop_prob):
+def IdentityBlock(hidden_dim):
     """何もしないブロック（比較用）"""
-    return BaseTemporalBlock(hidden_dim, res_drop_prob, IdentityLayer(hidden_dim))
+    return BaseTemporalBlock(hidden_dim, IdentityLayer(hidden_dim))
 
 
 if __name__ == "__main__":
@@ -378,14 +374,13 @@ if __name__ == "__main__":
     hidden_dim = C
     n_head = 4
     attn_drop_prob = 0.1
-    res_drop_prob = 0.1
     max_position_embeddings = 512
 
     # CausalTransformerBlock
     print("\n=== CausalTransformerBlock ===")
-    block = CausalTransformerBlock(
-        hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_position_embeddings
-    ).to(device)
+    block = CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, max_position_embeddings).to(
+        device
+    )
     rnn_state = torch.zeros(1, B, block.get_rnn_state_size(), device=device)
     out, new_rnn_state = block(x, rnn_state)
     print(f"output shape: {out.shape}")
@@ -394,7 +389,7 @@ if __name__ == "__main__":
 
     # GRUBlock
     print("\n=== GRUBlock ===")
-    gru_block = GRUBlock(hidden_dim, res_drop_prob).to(device)
+    gru_block = GRUBlock(hidden_dim).to(device)
     rnn_state = torch.zeros(1, B, gru_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = gru_block(x, rnn_state)
     print(f"output shape: {out.shape}")
@@ -403,7 +398,7 @@ if __name__ == "__main__":
 
     # MambaBlock
     print("\n=== MambaBlock ===")
-    mamba_block = MambaBlock(hidden_dim, res_drop_prob).to(device)
+    mamba_block = MambaBlock(hidden_dim).to(device)
     rnn_state = torch.zeros(1, B, mamba_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = mamba_block(x, rnn_state)
     print(f"output shape: {out.shape}")
@@ -412,7 +407,7 @@ if __name__ == "__main__":
 
     # GdnBlock
     print("\n=== GdnBlock ===")
-    gdn_block = GdnBlock(hidden_dim, n_head, res_drop_prob).to(device)
+    gdn_block = GdnBlock(hidden_dim, n_head).to(device)
     rnn_state = torch.zeros(1, B, gdn_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = gdn_block(x, rnn_state)
     print(f"output shape: {out.shape}")
@@ -421,7 +416,7 @@ if __name__ == "__main__":
 
     # IdentityBlock
     print("\n=== IdentityBlock ===")
-    identity_block = IdentityBlock(hidden_dim, res_drop_prob).to(device)
+    identity_block = IdentityBlock(hidden_dim).to(device)
     rnn_state = torch.zeros(1, B, identity_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = identity_block(x, rnn_state)
     print(f"output shape: {out.shape}")

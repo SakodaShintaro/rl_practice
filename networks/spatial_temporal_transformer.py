@@ -14,7 +14,6 @@ class SpatialTemporalBlock(nn.Module):
         hidden_dim,
         n_head,
         attn_drop_prob,
-        res_drop_prob,
         temporal_model_type,
         tempo_len,
         space_len,
@@ -22,20 +21,16 @@ class SpatialTemporalBlock(nn.Module):
         super().__init__()
 
         if temporal_model_type == "mamba":
-            self.tempo_block = MambaBlock(hidden_dim, res_drop_prob)
+            self.tempo_block = MambaBlock(hidden_dim)
         elif temporal_model_type == "transformer":
-            self.tempo_block = CausalTransformerBlock(
-                hidden_dim, n_head, attn_drop_prob, res_drop_prob, tempo_len
-            )
+            self.tempo_block = CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, tempo_len)
         elif temporal_model_type == "gru":
-            self.tempo_block = GRUBlock(hidden_dim, res_drop_prob)
+            self.tempo_block = GRUBlock(hidden_dim)
         elif temporal_model_type == "gdn":
-            self.tempo_block = GdnBlock(hidden_dim, n_head, res_drop_prob)
+            self.tempo_block = GdnBlock(hidden_dim, n_head)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
-        self.space_block = SpatialTransformerBlock(
-            hidden_dim, n_head, attn_drop_prob, res_drop_prob, space_len
-        )
+        self.space_block = SpatialTransformerBlock(hidden_dim, n_head, attn_drop_prob, space_len)
 
     def forward(self, x, rnn_state):
         """
@@ -65,7 +60,6 @@ class SpatialTemporalTransformer(nn.Module):
         hidden_dim: int,
         n_head: int,
         attn_drop_prob: float,
-        res_drop_prob: float,
         temporal_model_type: str,
     ):
         super().__init__()
@@ -84,7 +78,6 @@ class SpatialTemporalTransformer(nn.Module):
                     hidden_dim,
                     n_head,
                     attn_drop_prob,
-                    res_drop_prob,
                     temporal_model_type,
                     tempo_len,
                     space_len,

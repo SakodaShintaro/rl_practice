@@ -56,20 +56,17 @@ class SelfAttention(nn.Module):
         hidden_dim: 隠れ次元数
         n_head: アテンションヘッド数
         attn_drop_prob: アテンションdropout確率
-        res_drop_prob: residual dropout確率
         max_position_embeddings: 最大位置埋め込み数
         use_rope: RoPEを使用するか
     """
 
-    def __init__(
-        self, hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_position_embeddings, use_rope
-    ):
+    def __init__(self, hidden_dim, n_head, attn_drop_prob, max_position_embeddings, use_rope):
         super().__init__()
         assert hidden_dim % n_head == 0
         self.key = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.query = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.value = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.res_drop_prob = nn.Dropout(res_drop_prob)
+        self.res_drop_prob = nn.Dropout(0.0)
         self.attn_dropout_rate = attn_drop_prob
         self.proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.n_head = n_head
@@ -135,11 +132,10 @@ class SpatialTransformerBlock(nn.Module):
         hidden_dim: 隠れ次元数
         n_head: アテンションヘッド数
         attn_drop_prob: アテンションdropout確率
-        res_drop_prob: residual dropout確率
         max_position_embeddings: 最大位置埋め込み数
     """
 
-    def __init__(self, hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_position_embeddings):
+    def __init__(self, hidden_dim, n_head, attn_drop_prob, max_position_embeddings):
         super().__init__()
         self.ln1 = nn.LayerNorm(hidden_dim)
         self.ln2 = nn.LayerNorm(hidden_dim)
@@ -147,7 +143,6 @@ class SpatialTransformerBlock(nn.Module):
             hidden_dim,
             n_head,
             attn_drop_prob,
-            res_drop_prob,
             max_position_embeddings,
             use_rope=False,
         )
@@ -155,7 +150,7 @@ class SpatialTransformerBlock(nn.Module):
             nn.Linear(hidden_dim, 4 * hidden_dim, bias=False),
             nn.GELU(),
             nn.Linear(4 * hidden_dim, hidden_dim, bias=False),
-            nn.Dropout(res_drop_prob),
+            nn.Dropout(0.0),
         )
 
     def forward(self, x):
