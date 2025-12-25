@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from fla.layers import GatedDeltaNet
 from fla.models.utils import FLACache
-from mamba_ssm.modules.block import Block
 from mamba_ssm.modules.mamba2 import Mamba2
 from mamba_ssm.ops.triton.layer_norm import RMSNorm
 
@@ -60,16 +59,18 @@ class MambaBlock(nn.Module):
         super().__init__()
         self.hidden_dim = config.hidden_dim
         d_ssm = 2 * config.hidden_dim
-        self.block = Block(
-            dim=config.hidden_dim,
-            mixer_cls=lambda dim: Mamba2(d_model=dim, headdim=d_ssm),
-            norm_cls=lambda dim: RMSNorm(dim),
-            mlp_cls=lambda dim: nn.Sequential(
-                nn.Linear(dim, 4 * dim, bias=False),
-                nn.GELU(),
-                nn.Linear(4 * dim, dim, bias=False),
-                nn.Dropout(config.res_drop_prob),
-            ),
+
+        # 第1ブロック: RMSNorm + Mamba2 + Residual
+        self.mamba_norm = RMSNorm(config.hidden_dim)
+        self.mamba = Mamba2(d_model=config.hidden_dim, headdim=d_ssm)
+
+        # 第2ブロック: RMSNorm + MLP + Residual
+        self.mlp_norm = RMSNorm(config.hidden_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
+            nn.GELU(),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
+            nn.Dropout(config.res_drop_prob),
         )
 
     def get_rnn_state_size(self):
@@ -77,7 +78,13 @@ class MambaBlock(nn.Module):
         return self.hidden_dim
 
     def forward(self, x, rnn_state):
-        return self.block(x)[0], rnn_state
+        # 第1ブロック: RMSNorm + Mamba2 + Residual
+        x = x + self.mamba(self.mamba_norm(x))
+
+        # 第2ブロック: RMSNorm + MLP + Residual
+        x = x + self.mlp(self.mlp_norm(x))
+
+        return x, rnn_state
 
 
 class GRUBlock(nn.Module):
@@ -89,13 +96,26 @@ class GRUBlock(nn.Module):
     Args:
         config: Configオブジェクト。必要な属性：
             - hidden_dim: 隠れ次元数
+            - res_drop_prob: residual dropout確率
     """
 
     def __init__(self, config):
         super().__init__()
         self.hidden_dim = config.hidden_dim
+
+        # 第1ブロック: LayerNorm + GRU + Residual
+        self.gru_norm = nn.LayerNorm(config.hidden_dim)
         # num_layers=1 のGRUを使用
         self.gru = nn.GRU(config.hidden_dim, config.hidden_dim, num_layers=1, batch_first=True)
+
+        # 第2ブロック: LayerNorm + MLP + Residual
+        self.mlp_norm = nn.LayerNorm(config.hidden_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
+            nn.GELU(),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
+            nn.Dropout(config.res_drop_prob),
+        )
 
     def get_rnn_state_size(self):
         """rnn_stateのサイズを返す"""
@@ -111,9 +131,17 @@ class GRUBlock(nn.Module):
             x: [B, T, C]
             rnn_state: [1, B, C] 更新されたGRUの隠れ状態
         """
+        # 第1ブロック: LayerNorm + GRU + Residual
+        residual = x
+        x_norm = self.gru_norm(x)
         # repeat/reshapeで非連続になるケースに備えて contiguous を取る
         rnn_state = rnn_state.contiguous()
-        x, rnn_state = self.gru(x, rnn_state)
+        gru_output, rnn_state = self.gru(x_norm, rnn_state)
+        x = residual + gru_output
+
+        # 第2ブロック: LayerNorm + MLP + Residual
+        x = x + self.mlp(self.mlp_norm(x))
+
         return x, rnn_state
 
 
@@ -125,6 +153,7 @@ class GdnBlock(nn.Module):
         config: Configオブジェクト。必要な属性：
             - hidden_dim: 隠れ次元数
             - n_head: アテンションヘッド数
+            - res_drop_prob: residual dropout確率
     """
 
     def __init__(self, config):
@@ -138,11 +167,22 @@ class GdnBlock(nn.Module):
         self.key_dim = self.num_heads * self.head_dim  # num_heads * 64
         self.value_dim = self.num_heads * self.head_v_dim  # num_heads * 128
 
+        # 第1ブロック: LayerNorm + GatedDeltaNet + Residual
+        self.attn_norm = nn.LayerNorm(config.hidden_dim)
         self.gdn = GatedDeltaNet(
             hidden_size=config.hidden_dim,
             head_dim=self.head_dim,
             num_heads=config.n_head,
             mode="chunk",
+        )
+
+        # 第2ブロック: LayerNorm + MLP + Residual
+        self.mlp_norm = nn.LayerNorm(config.hidden_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
+            nn.GELU(),
+            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
+            nn.Dropout(config.res_drop_prob),
         )
 
         # recurrent_state: [B, num_heads, head_dim, head_v_dim]
@@ -242,25 +282,37 @@ class GdnBlock(nn.Module):
         """
         B, T, C = x.shape
 
+        # 第1ブロック: LayerNorm + GatedDeltaNet + Residual
+        residual = x
+        x_norm = self.attn_norm(x)
+
         # GatedDeltaNetはtraining時にseq_len <= 64だとfused_recurrentモードになりエラーが出るため、
         # 必要に応じてパディングして65以上にする
         if T <= 64:
-            padding = torch.zeros(B, 65 - T, C, device=x.device, dtype=x.dtype)
-            x_padded = torch.cat([x, padding], dim=1)
+            padding = torch.zeros(B, 65 - T, C, device=x_norm.device, dtype=x_norm.dtype)
+            x_padded = torch.cat([x_norm, padding], dim=1)
             need_unpad = True
         else:
-            x_padded = x
+            x_padded = x_norm
             need_unpad = False
 
         # rnn_state をデフラット化して FLACache を作成
         past_key_values = self._unflatten_cache(rnn_state, B, x.device, x.dtype)
 
         # GatedDeltaNet を実行
-        output, _, new_cache = self.gdn(x_padded, past_key_values=past_key_values, use_cache=True)
+        gdn_output, _, new_cache = self.gdn(
+            x_padded, past_key_values=past_key_values, use_cache=True
+        )
 
         # パディングを除去
         if need_unpad:
-            output = output[:, :T, :]
+            gdn_output = gdn_output[:, :T, :]
+
+        # 第1のスキップコネクション
+        x = residual + gdn_output
+
+        # 第2ブロック: LayerNorm + MLP + Residual
+        x = x + self.mlp(self.mlp_norm(x))
 
         # 新しい cache をフラット化
         if new_cache is not None and len(new_cache) > 0:
@@ -269,7 +321,7 @@ class GdnBlock(nn.Module):
         else:
             new_rnn_state = rnn_state
 
-        return output, new_rnn_state
+        return x, new_rnn_state
 
 
 if __name__ == "__main__":
