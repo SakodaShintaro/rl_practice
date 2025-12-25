@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -50,40 +48,46 @@ def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) ->
     return emb
 
 
-@dataclass
-class Config:
-    hidden_dim: int
-    n_head: int
-    attn_drop_prob: float
-    res_drop_prob: float
-
-
 class SelfAttention(nn.Module):
-    def __init__(self, config, max_position_embeddings, use_rope):
+    """
+    Self-Attentionモジュール
+
+    Args:
+        hidden_dim: 隠れ次元数
+        n_head: アテンションヘッド数
+        attn_drop_prob: アテンションdropout確率
+        res_drop_prob: residual dropout確率
+        max_position_embeddings: 最大位置埋め込み数
+        use_rope: RoPEを使用するか
+    """
+
+    def __init__(
+        self, hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_position_embeddings, use_rope
+    ):
         super().__init__()
-        assert config.hidden_dim % config.n_head == 0
-        self.key = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.query = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.value = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.res_drop_prob = nn.Dropout(config.res_drop_prob)
-        self.attn_dropout_rate = config.attn_drop_prob
-        self.proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=False)
-        self.n_head = config.n_head
-        self.head_dim = config.hidden_dim // config.n_head
+        assert hidden_dim % n_head == 0
+        self.key = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.query = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.value = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.res_drop_prob = nn.Dropout(res_drop_prob)
+        self.attn_dropout_rate = attn_drop_prob
+        self.proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.n_head = n_head
+        self.head_dim = hidden_dim // n_head
         self.qk_norm = True
         self.use_rope = use_rope
 
         if self.qk_norm:
-            self.q_norm = nn.LayerNorm(config.hidden_dim)
-            self.k_norm = nn.LayerNorm(config.hidden_dim)
+            self.q_norm = nn.LayerNorm(hidden_dim)
+            self.k_norm = nn.LayerNorm(hidden_dim)
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
         # RoPEを使用する場合のみLlamaRotaryEmbeddingを初期化
         if self.use_rope:
             rope_config = LlamaConfig(
-                hidden_size=config.hidden_dim,
-                num_attention_heads=config.n_head,
+                hidden_size=hidden_dim,
+                num_attention_heads=n_head,
                 max_position_embeddings=max_position_embeddings,
                 head_dim=self.head_dim,
             )
@@ -124,18 +128,34 @@ class SelfAttention(nn.Module):
 
 
 class SpatialTransformerBlock(nn.Module):
-    """空間的なTransformerブロック（RoPEなし、maskなし）"""
+    """
+    空間的なTransformerブロック（RoPEなし、maskなし）
 
-    def __init__(self, config, max_position_embeddings):
+    Args:
+        hidden_dim: 隠れ次元数
+        n_head: アテンションヘッド数
+        attn_drop_prob: アテンションdropout確率
+        res_drop_prob: residual dropout確率
+        max_position_embeddings: 最大位置埋め込み数
+    """
+
+    def __init__(self, hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_position_embeddings):
         super().__init__()
-        self.ln1 = nn.LayerNorm(config.hidden_dim)
-        self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = SelfAttention(config, max_position_embeddings, use_rope=False)
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.attn = SelfAttention(
+            hidden_dim,
+            n_head,
+            attn_drop_prob,
+            res_drop_prob,
+            max_position_embeddings,
+            use_rope=False,
+        )
         self.mlp = nn.Sequential(
-            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
+            nn.Linear(hidden_dim, 4 * hidden_dim, bias=False),
             nn.GELU(),
-            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
-            nn.Dropout(config.res_drop_prob),
+            nn.Linear(4 * hidden_dim, hidden_dim, bias=False),
+            nn.Dropout(res_drop_prob),
         )
 
     def forward(self, x):

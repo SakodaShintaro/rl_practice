@@ -5,30 +5,37 @@ import torch.nn as nn
 from einops import rearrange
 
 from .self_attention import SpatialTransformerBlock
-from .temporal_block import (
-    CausalTransformerBlock,
-    Config,
-    GdnBlock,
-    GRUBlock,
-    MambaBlock,
-)
+from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, MambaBlock
 
 
 class SpatialTemporalBlock(nn.Module):
-    def __init__(self, config, temporal_model_type, tempo_len, space_len):
+    def __init__(
+        self,
+        hidden_dim,
+        n_head,
+        attn_drop_prob,
+        res_drop_prob,
+        temporal_model_type,
+        tempo_len,
+        space_len,
+    ):
         super().__init__()
 
         if temporal_model_type == "mamba":
-            self.tempo_block = MambaBlock(config)
+            self.tempo_block = MambaBlock(hidden_dim, res_drop_prob)
         elif temporal_model_type == "transformer":
-            self.tempo_block = CausalTransformerBlock(config, tempo_len)
+            self.tempo_block = CausalTransformerBlock(
+                hidden_dim, n_head, attn_drop_prob, res_drop_prob, tempo_len
+            )
         elif temporal_model_type == "gru":
-            self.tempo_block = GRUBlock(config)
+            self.tempo_block = GRUBlock(hidden_dim, res_drop_prob)
         elif temporal_model_type == "gdn":
-            self.tempo_block = GdnBlock(config)
+            self.tempo_block = GdnBlock(hidden_dim, n_head, res_drop_prob)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
-        self.space_block = SpatialTransformerBlock(config, space_len)
+        self.space_block = SpatialTransformerBlock(
+            hidden_dim, n_head, attn_drop_prob, res_drop_prob, space_len
+        )
 
     def forward(self, x, rnn_state):
         """
@@ -62,13 +69,6 @@ class SpatialTemporalTransformer(nn.Module):
         temporal_model_type: str,
     ):
         super().__init__()
-        config = Config(
-            hidden_dim=hidden_dim,
-            n_head=n_head,
-            attn_drop_prob=attn_drop_prob,
-            res_drop_prob=res_drop_prob,
-        )
-
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
         self.space_len = space_len
@@ -81,10 +81,13 @@ class SpatialTemporalTransformer(nn.Module):
         self.spatial_temporal_blocks = nn.ModuleList(
             [
                 SpatialTemporalBlock(
-                    config,
+                    hidden_dim,
+                    n_head,
+                    attn_drop_prob,
+                    res_drop_prob,
                     temporal_model_type,
-                    tempo_len=tempo_len,
-                    space_len=space_len,
+                    tempo_len,
+                    space_len,
                 )
                 for _ in range(self.n_layer)
             ]

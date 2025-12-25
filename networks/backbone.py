@@ -7,7 +7,7 @@ from .image_processor import ImageProcessor
 from .reward_processor import RewardProcessor
 from .self_attention import get_fourier_embeds_from_coordinates
 from .spatial_temporal_transformer import SpatialTemporalTransformer
-from .temporal_block import CausalTransformerBlock, Config, GdnBlock, GRUBlock, MambaBlock
+from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, MambaBlock
 
 
 def init_weights(m):
@@ -205,25 +205,32 @@ class TemporalOnlyEncoder(nn.Module):
 
         # 時系列ブロックのリストを作成
         max_seq_len = seq_len if use_image_only else seq_len * 3
-        n_heads = 8
-
-        config = Config(
-            hidden_dim=self.output_dim,
-            n_head=n_heads,
-            attn_drop_prob=0.0,
-            res_drop_prob=0.0,
-        )
+        hidden_dim = self.output_dim
+        n_head = 8
+        attn_drop_prob = 0.0
+        res_drop_prob = 0.0
 
         if temporal_model_type == "gru":
-            self.blocks = nn.ModuleList([GRUBlock(config) for _ in range(n_layer)])
+            self.blocks = nn.ModuleList(
+                [GRUBlock(hidden_dim, res_drop_prob) for _ in range(n_layer)]
+            )
         elif temporal_model_type == "transformer":
             self.blocks = nn.ModuleList(
-                [CausalTransformerBlock(config, max_seq_len) for _ in range(n_layer)]
+                [
+                    CausalTransformerBlock(
+                        hidden_dim, n_head, attn_drop_prob, res_drop_prob, max_seq_len
+                    )
+                    for _ in range(n_layer)
+                ]
             )
         elif temporal_model_type == "gdn":
-            self.blocks = nn.ModuleList([GdnBlock(config) for _ in range(n_layer)])
+            self.blocks = nn.ModuleList(
+                [GdnBlock(hidden_dim, n_head, res_drop_prob) for _ in range(n_layer)]
+            )
         elif temporal_model_type == "mamba":
-            self.blocks = nn.ModuleList([MambaBlock(config) for _ in range(n_layer)])
+            self.blocks = nn.ModuleList(
+                [MambaBlock(hidden_dim, res_drop_prob) for _ in range(n_layer)]
+            )
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
