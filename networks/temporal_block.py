@@ -132,25 +132,35 @@ class GdnBlock(nn.Module):
         self.hidden_dim = config.hidden_dim
         self.num_heads = config.n_head
         # GdnBlockは単一レイヤーとして動作するので、常にlayer_idx=0を使用
+        # GatedDeltaNetのデフォルト設定: head_dim=64, expand_v=2.0
+        self.head_dim = 64
+        self.expand_v = 2.0
+        self.head_v_dim = int(self.head_dim * self.expand_v)  # 128
+        self.key_dim = self.num_heads * self.head_dim  # num_heads * 64
+        self.value_dim = self.num_heads * self.head_v_dim  # num_heads * 128
+
         self.gdn = GatedDeltaNet(
             hidden_size=config.hidden_dim,
-            head_dim=64,
+            head_dim=self.head_dim,
             num_heads=config.n_head,
             mode="chunk",
             layer_idx=0,
         )
 
-        # per-sample cache size estimates (overridden after first cache update)
-        self.recurrent_state_shape = (self.num_heads, self.hidden_dim, self.hidden_dim * 2)
+        # recurrent_state: [B, num_heads, head_dim, head_v_dim]
+        self.recurrent_state_shape = (self.num_heads, self.head_dim, self.head_v_dim)
         self.recurrent_state_size = math.prod(self.recurrent_state_shape)
+
+        # conv_state: 3つのShortConvolution state (q, k, v)
+        # q_conv1d: [B, key_dim, conv_size], k_conv1d: [B, key_dim, conv_size], v_conv1d: [B, value_dim, conv_size]
+        self.conv_size = 4
         self.conv_state_shapes = [
-            (self.hidden_dim * self.num_heads, 4),
-            (self.hidden_dim * self.num_heads, 4),
-            (self.hidden_dim * self.num_heads * 2, 4),
+            (self.key_dim, self.conv_size),  # q_conv1d
+            (self.key_dim, self.conv_size),  # k_conv1d
+            (self.value_dim, self.conv_size),  # v_conv1d
         ]
         self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
-        self._initialized = False
 
     def get_rnn_state_size(self):
         """rnn_stateのサイズを返す"""
@@ -161,18 +171,9 @@ class GdnBlock(nn.Module):
         if cache_dict is None:
             return None
 
-        recurrent_state = cache_dict["recurrent_state"]  # [B, ...]
+        recurrent_state = cache_dict["recurrent_state"]  # [B, num_heads, head_dim, head_v_dim]
         conv_state = cache_dict["conv_state"]  # tuple of 3 tensors
         batch_size = recurrent_state.shape[0]
-
-        # 初回実行時に cache のサイズ/形状を取得
-        if not self._initialized:
-            self.recurrent_state_shape = tuple(recurrent_state.shape[1:])
-            self.recurrent_state_size = math.prod(self.recurrent_state_shape)
-            self.conv_state_shapes = [tuple(c.shape[1:]) for c in conv_state]
-            self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
-            self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
-            self._initialized = True
 
         # recurrent_state/conv_state をバッチ毎にフラット化
         recurrent_flat = recurrent_state.reshape(batch_size, -1).to(torch.float32)
