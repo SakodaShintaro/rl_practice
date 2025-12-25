@@ -12,27 +12,23 @@ from .self_attention import Config, SelfAttention
 
 class BaseTemporalBlock(nn.Module):
     """
-    時系列処理 + MLP の汎用Transformerブロック
+    時系列処理 + MLP の汎用ブロック
 
     Args:
         config: Configオブジェクト
         temporal_layer: 時系列処理を行うレイヤー
-        use_rms_norm: RMSNormを使用するか（False=LayerNorm）
     """
 
-    def __init__(self, config, temporal_layer, use_rms_norm):
+    def __init__(self, config, temporal_layer):
         super().__init__()
         self.hidden_dim = config.hidden_dim
 
-        # 正規化レイヤーの選択
-        norm_cls = RMSNorm if use_rms_norm else nn.LayerNorm
-
         # 第1ブロック: Norm + TemporalLayer + Residual
-        self.temporal_norm = norm_cls(config.hidden_dim)
+        self.temporal_norm = nn.LayerNorm(config.hidden_dim)
         self.temporal = temporal_layer
 
         # 第2ブロック: Norm + MLP + Residual
-        self.mlp_norm = norm_cls(config.hidden_dim)
+        self.mlp_norm = nn.LayerNorm(config.hidden_dim)
         self.mlp = nn.Sequential(
             nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
@@ -366,27 +362,27 @@ def CausalTransformerBlock(config, max_position_embeddings):
     """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
     # configにmax_position_embeddingsを追加
     config.max_position_embeddings = max_position_embeddings
-    return BaseTemporalBlock(config, SelfAttentionLayer(config), use_rms_norm=False)
+    return BaseTemporalBlock(config, SelfAttentionLayer(config))
 
 
 def MambaBlock(config):
     """Mamba状態空間モデルブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(config, MambaLayer(config), use_rms_norm=True)
+    return BaseTemporalBlock(config, MambaLayer(config))
 
 
 def GRUBlock(config):
     """GRUブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(config, GRULayer(config), use_rms_norm=False)
+    return BaseTemporalBlock(config, GRULayer(config))
 
 
 def GdnBlock(config):
     """GatedDeltaNetブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(config, GatedDeltaNetLayer(config), use_rms_norm=False)
+    return BaseTemporalBlock(config, GatedDeltaNetLayer(config))
 
 
 def IdentityBlock(config):
     """何もしないブロック（比較用）"""
-    return BaseTemporalBlock(config, IdentityLayer(config), use_rms_norm=False)
+    return BaseTemporalBlock(config, IdentityLayer(config))
 
 
 if __name__ == "__main__":
