@@ -218,7 +218,7 @@ class TemporalOnlyEncoder(nn.Module):
                 ]
             )
         elif temporal_model_type == "gdn":
-            self.blocks = nn.ModuleList([GdnBlock(hidden_dim, n_head) for _ in range(n_layer)])
+            self.blocks = nn.ModuleList([GdnBlock(hidden_dim) for _ in range(n_layer)])
         elif temporal_model_type == "mamba":
             self.blocks = nn.ModuleList([MambaBlock(hidden_dim) for _ in range(n_layer)])
         else:
