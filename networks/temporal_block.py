@@ -61,15 +61,14 @@ class CausalAttentionLayer(nn.Module):
     Args:
         hidden_dim: 隠れ次元数
         n_head: アテンションヘッド数
-        attn_drop_prob: アテンションdropout確率
         max_position_embeddings: 最大位置埋め込み数
     """
 
-    def __init__(self, hidden_dim, n_head, attn_drop_prob, max_position_embeddings):
+    def __init__(self, hidden_dim, n_head, max_position_embeddings):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.attn = SelfAttention(
-            hidden_dim, n_head, attn_drop_prob, 0.0, max_position_embeddings, use_rope=True
+            hidden_dim, n_head, 0.0, max_position_embeddings, use_rope=True
         )
 
         # Causal maskを登録
@@ -320,11 +319,11 @@ class IdentityLayer(nn.Module):
 
 
 # 互換性のためのエイリアス
-def CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, max_position_embeddings):
+def CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings):
     """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
     return BaseTemporalBlock(
         hidden_dim,
-        CausalAttentionLayer(hidden_dim, n_head, attn_drop_prob, max_position_embeddings),
+        CausalAttentionLayer(hidden_dim, n_head, max_position_embeddings),
     )
 
 
@@ -370,12 +369,11 @@ if __name__ == "__main__":
 
     hidden_dim = C
     n_head = 4
-    attn_drop_prob = 0.1
     max_position_embeddings = 512
 
     # CausalTransformerBlock
     print("\n=== CausalTransformerBlock ===")
-    block = CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, max_position_embeddings).to(
+    block = CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings).to(
         device
     )
     rnn_state = torch.zeros(1, B, block.get_rnn_state_size(), device=device)

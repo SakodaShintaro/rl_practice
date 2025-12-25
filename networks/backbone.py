@@ -70,7 +70,6 @@ class SpatialTemporalEncoder(nn.Module):
             tempo_len=seq_len,
             hidden_dim=self.hidden_image_dim,
             n_head=1,
-            attn_drop_prob=0.0,
             temporal_model_type=temporal_model_type,
         )
 
@@ -206,14 +205,13 @@ class TemporalOnlyEncoder(nn.Module):
         max_seq_len = seq_len if use_image_only else seq_len * 3
         hidden_dim = self.output_dim
         n_head = 8
-        attn_drop_prob = 0.0
 
         if temporal_model_type == "gru":
             self.blocks = nn.ModuleList([GRUBlock(hidden_dim) for _ in range(n_layer)])
         elif temporal_model_type == "transformer":
             self.blocks = nn.ModuleList(
                 [
-                    CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, max_seq_len)
+                    CausalTransformerBlock(hidden_dim, n_head, max_seq_len)
                     for _ in range(n_layer)
                 ]
             )
