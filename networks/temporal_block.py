@@ -131,7 +131,6 @@ class GdnBlock(nn.Module):
         super().__init__()
         self.hidden_dim = config.hidden_dim
         self.num_heads = config.n_head
-        # GdnBlockは単一レイヤーとして動作するので、常にlayer_idx=0を使用
         # GatedDeltaNetのデフォルト設定: head_dim=64, expand_v=2.0
         self.head_dim = 64
         self.expand_v = 2.0
@@ -144,7 +143,6 @@ class GdnBlock(nn.Module):
             head_dim=self.head_dim,
             num_heads=config.n_head,
             mode="chunk",
-            layer_idx=0,
         )
 
         # recurrent_state: [B, num_heads, head_dim, head_v_dim]
@@ -226,9 +224,9 @@ class GdnBlock(nn.Module):
             "ffn_state": (),
         }
 
-        # FLACache を作成（単一レイヤーとして常にlayer_idx=0を使用）
+        # FLACache を作成
         fla_cache = FLACache()
-        fla_cache.update(cache_dict, 0)
+        fla_cache.update(cache_dict)
 
         return fla_cache
 
@@ -264,7 +262,7 @@ class GdnBlock(nn.Module):
         if need_unpad:
             output = output[:, :T, :]
 
-        # 新しい cache をフラット化（単一レイヤーとして常にlayer_idx=0を使用）
+        # 新しい cache をフラット化
         if new_cache is not None and len(new_cache) > 0:
             new_cache_dict = new_cache[0]
             new_rnn_state = self._flatten_cache(new_cache_dict)
