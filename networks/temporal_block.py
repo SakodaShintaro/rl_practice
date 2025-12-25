@@ -68,7 +68,7 @@ class CausalAttentionLayer(nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.attn = SelfAttention(
-            hidden_dim, n_head, 0.0, max_position_embeddings, use_rope=True
+            hidden_dim, n_head, max_position_embeddings, use_rope=True
         )
 
         # Causal maskを登録

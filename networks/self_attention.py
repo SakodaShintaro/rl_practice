@@ -110,9 +110,7 @@ class SelfAttention(nn.Module):
         if attn_mask is not None:
             attn_mask = attn_mask.to(q.dtype)
         y = (
-            F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=self.attn_dropout_rate
-            )
+            F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
             .transpose(1, 2)
             .contiguous()
             .view(B, T, C)
