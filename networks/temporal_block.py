@@ -54,9 +54,9 @@ class BaseTemporalBlock(nn.Module):
         return x, new_rnn_state
 
 
-class SelfAttentionLayer(nn.Module):
+class CausalAttentionLayer(nn.Module):
     """
-    Self-Attentionによる時系列処理レイヤー
+    CausalAttentionによる時系列処理レイヤー
 
     Args:
         hidden_dim: 隠れ次元数
@@ -324,7 +324,7 @@ def CausalTransformerBlock(hidden_dim, n_head, attn_drop_prob, max_position_embe
     """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
     return BaseTemporalBlock(
         hidden_dim,
-        SelfAttentionLayer(hidden_dim, n_head, attn_drop_prob, max_position_embeddings),
+        CausalAttentionLayer(hidden_dim, n_head, attn_drop_prob, max_position_embeddings),
     )
 
 
