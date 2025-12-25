@@ -10,106 +10,29 @@ from mamba_ssm.ops.triton.layer_norm import RMSNorm
 from .self_attention import Config, SelfAttention
 
 
-class CausalTransformerBlock(nn.Module):
-    """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
-
-    def __init__(self, config: Config, max_position_embeddings):
-        super().__init__()
-        self.hidden_dim = config.hidden_dim
-        self.ln1 = nn.LayerNorm(config.hidden_dim)
-        self.ln2 = nn.LayerNorm(config.hidden_dim)
-        self.attn = SelfAttention(config, max_position_embeddings, use_rope=True)
-        self.mlp = nn.Sequential(
-            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
-            nn.GELU(),
-            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
-            nn.Dropout(config.res_drop_prob),
-        )
-
-        # Causal maskを登録
-        matrix = torch.tril(torch.ones(max_position_embeddings, max_position_embeddings))
-        causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
-        causal_mask = torch.where(matrix == 1, 0, causal_mask)
-        self.register_buffer("causal_mask", causal_mask.contiguous())
-
-    def get_rnn_state_size(self):
-        """rnn_stateのサイズを返す (Transformerは状態を使わないので hidden_dim を返す)"""
-        return self.hidden_dim
-
-    def forward(self, x, rnn_state):
-        B, T, C = x.size()
-        # 現在のシーケンス長に合わせてmaskを切り出す
-        current_mask = self.causal_mask[:T, :T]
-        x = x + self.attn(self.ln1(x), attn_mask=current_mask)
-        x = x + self.mlp(self.ln2(x))
-        return x, rnn_state
-
-
-class MambaBlock(nn.Module):
+class BaseTemporalBlock(nn.Module):
     """
-    Mamba状態空間モデルブロック
+    時系列処理 + MLP の汎用Transformerブロック
 
     Args:
-        config: Configオブジェクト。必要な属性：
-            - hidden_dim: 隠れ次元数
-            - res_drop_prob: residual dropout確率
+        config: Configオブジェクト
+        temporal_layer: 時系列処理を行うレイヤー
+        use_rms_norm: RMSNormを使用するか（False=LayerNorm）
     """
 
-    def __init__(self, config):
-        super().__init__()
-        self.hidden_dim = config.hidden_dim
-        d_ssm = 2 * config.hidden_dim
-
-        # 第1ブロック: RMSNorm + Mamba2 + Residual
-        self.mamba_norm = RMSNorm(config.hidden_dim)
-        self.mamba = Mamba2(d_model=config.hidden_dim, headdim=d_ssm)
-
-        # 第2ブロック: RMSNorm + MLP + Residual
-        self.mlp_norm = RMSNorm(config.hidden_dim)
-        self.mlp = nn.Sequential(
-            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
-            nn.GELU(),
-            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
-            nn.Dropout(config.res_drop_prob),
-        )
-
-    def get_rnn_state_size(self):
-        """rnn_stateのサイズを返す (Mambaは状態を使わないので hidden_dim を返す)"""
-        return self.hidden_dim
-
-    def forward(self, x, rnn_state):
-        # 第1ブロック: RMSNorm + Mamba2 + Residual
-        x = x + self.mamba(self.mamba_norm(x))
-
-        # 第2ブロック: RMSNorm + MLP + Residual
-        x = x + self.mlp(self.mlp_norm(x))
-
-        return x, rnn_state
-
-
-class GRUBlock(nn.Module):
-    """
-    GRUブロック
-
-    このブロックはインターフェースを統一するため、rnn_stateの形状変換を内部で行います。
-
-    Args:
-        config: Configオブジェクト。必要な属性：
-            - hidden_dim: 隠れ次元数
-            - res_drop_prob: residual dropout確率
-    """
-
-    def __init__(self, config):
+    def __init__(self, config, temporal_layer, use_rms_norm):
         super().__init__()
         self.hidden_dim = config.hidden_dim
 
-        # 第1ブロック: LayerNorm + GRU + Residual
-        self.gru_norm = nn.LayerNorm(config.hidden_dim)
-        # num_layers=1 のGRUを使用
-        self.gru = nn.GRU(config.hidden_dim, config.hidden_dim, num_layers=1, batch_first=True)
+        # 正規化レイヤーの選択
+        norm_cls = RMSNorm if use_rms_norm else nn.LayerNorm
 
-        # 第2ブロック: LayerNorm + MLP + Residual
-        self.mlp_norm = nn.LayerNorm(config.hidden_dim)
+        # 第1ブロック: Norm + TemporalLayer + Residual
+        self.temporal_norm = norm_cls(config.hidden_dim)
+        self.temporal = temporal_layer
+
+        # 第2ブロック: Norm + MLP + Residual
+        self.mlp_norm = norm_cls(config.hidden_dim)
         self.mlp = nn.Sequential(
             nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
             nn.GELU(),
@@ -119,41 +42,147 @@ class GRUBlock(nn.Module):
 
     def get_rnn_state_size(self):
         """rnn_stateのサイズを返す"""
-        return self.hidden_dim
+        return self.temporal.get_rnn_state_size()
 
     def forward(self, x, rnn_state):
         """
         Args:
             x: [B, T, C]
-            rnn_state: [1, B, C] GRUの隠れ状態
+            rnn_state: [1, B, rnn_state_size]
 
         Returns:
             x: [B, T, C]
-            rnn_state: [1, B, C] 更新されたGRUの隠れ状態
+            rnn_state: [1, B, rnn_state_size]
         """
-        # 第1ブロック: LayerNorm + GRU + Residual
-        residual = x
-        x_norm = self.gru_norm(x)
-        # repeat/reshapeで非連続になるケースに備えて contiguous を取る
-        rnn_state = rnn_state.contiguous()
-        gru_output, rnn_state = self.gru(x_norm, rnn_state)
-        x = residual + gru_output
+        # 第1ブロック: Norm + TemporalLayer + Residual
+        temporal_output, new_rnn_state = self.temporal(self.temporal_norm(x), rnn_state)
+        x = x + temporal_output
 
-        # 第2ブロック: LayerNorm + MLP + Residual
+        # 第2ブロック: Norm + MLP + Residual
         x = x + self.mlp(self.mlp_norm(x))
 
-        return x, rnn_state
+        return x, new_rnn_state
 
 
-class GdnBlock(nn.Module):
+class SelfAttentionLayer(nn.Module):
     """
-    GatedDeltaNetブロック
+    Self-Attentionによる時系列処理レイヤー
 
     Args:
         config: Configオブジェクト。必要な属性：
             - hidden_dim: 隠れ次元数
             - n_head: アテンションヘッド数
-            - res_drop_prob: residual dropout確率
+            - attn_drop_prob: アテンションdropout確率
+            - max_position_embeddings: 最大位置埋め込み数
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_dim = config.hidden_dim
+        self.attn = SelfAttention(config, config.max_position_embeddings, use_rope=True)
+
+        # Causal maskを登録
+        max_pos = config.max_position_embeddings
+        matrix = torch.tril(torch.ones(max_pos, max_pos))
+        causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
+        causal_mask = torch.where(matrix == 1, 0, causal_mask)
+        self.register_buffer("causal_mask", causal_mask.contiguous())
+
+    def get_rnn_state_size(self):
+        """状態を使わないのでhidden_dimを返す"""
+        return self.hidden_dim
+
+    def forward(self, x, rnn_state):
+        """
+        Args:
+            x: [B, T, C] 正規化済み入力
+            rnn_state: [1, B, C] 未使用
+
+        Returns:
+            output: [B, T, C]
+            rnn_state: [1, B, C] 未変更
+        """
+        B, T, C = x.size()
+        current_mask = self.causal_mask[:T, :T]
+        output = self.attn(x, attn_mask=current_mask)
+        return output, rnn_state
+
+
+class MambaLayer(nn.Module):
+    """
+    Mamba2による時系列処理レイヤー
+
+    Args:
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_dim = config.hidden_dim
+        d_ssm = 2 * config.hidden_dim
+        self.mamba = Mamba2(d_model=config.hidden_dim, headdim=d_ssm)
+
+    def get_rnn_state_size(self):
+        """状態を使わないのでhidden_dimを返す"""
+        return self.hidden_dim
+
+    def forward(self, x, rnn_state):
+        """
+        Args:
+            x: [B, T, C] 正規化済み入力
+            rnn_state: [1, B, C] 未使用
+
+        Returns:
+            output: [B, T, C]
+            rnn_state: [1, B, C] 未変更
+        """
+        output = self.mamba(x)
+        return output, rnn_state
+
+
+class GRULayer(nn.Module):
+    """
+    GRUによる時系列処理レイヤー
+
+    Args:
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_dim = config.hidden_dim
+        self.gru = nn.GRU(config.hidden_dim, config.hidden_dim, num_layers=1, batch_first=True)
+
+    def get_rnn_state_size(self):
+        """GRUの状態サイズを返す"""
+        return self.hidden_dim
+
+    def forward(self, x, rnn_state):
+        """
+        Args:
+            x: [B, T, C] 正規化済み入力
+            rnn_state: [1, B, C] GRUの隠れ状態
+
+        Returns:
+            output: [B, T, C]
+            rnn_state: [1, B, C] 更新されたGRUの隠れ状態
+        """
+        # repeat/reshapeで非連続になるケースに備えて contiguous を取る
+        rnn_state = rnn_state.contiguous()
+        output, new_rnn_state = self.gru(x, rnn_state)
+        return output, new_rnn_state
+
+
+class GatedDeltaNetLayer(nn.Module):
+    """
+    GatedDeltaNetによる時系列処理レイヤー
+
+    Args:
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+            - n_head: アテンションヘッド数
     """
 
     def __init__(self, config):
@@ -167,8 +196,6 @@ class GdnBlock(nn.Module):
         self.key_dim = self.num_heads * self.head_dim  # num_heads * 64
         self.value_dim = self.num_heads * self.head_v_dim  # num_heads * 128
 
-        # 第1ブロック: LayerNorm + GatedDeltaNet + Residual
-        self.attn_norm = nn.LayerNorm(config.hidden_dim)
         self.gdn = GatedDeltaNet(
             hidden_size=config.hidden_dim,
             head_dim=self.head_dim,
@@ -176,21 +203,11 @@ class GdnBlock(nn.Module):
             mode="chunk",
         )
 
-        # 第2ブロック: LayerNorm + MLP + Residual
-        self.mlp_norm = nn.LayerNorm(config.hidden_dim)
-        self.mlp = nn.Sequential(
-            nn.Linear(config.hidden_dim, 4 * config.hidden_dim, bias=False),
-            nn.GELU(),
-            nn.Linear(4 * config.hidden_dim, config.hidden_dim, bias=False),
-            nn.Dropout(config.res_drop_prob),
-        )
-
         # recurrent_state: [B, num_heads, head_dim, head_v_dim]
         self.recurrent_state_shape = (self.num_heads, self.head_dim, self.head_v_dim)
         self.recurrent_state_size = math.prod(self.recurrent_state_shape)
 
         # conv_state: 3つのShortConvolution state (q, k, v)
-        # q_conv1d: [B, key_dim, conv_size], k_conv1d: [B, key_dim, conv_size], v_conv1d: [B, value_dim, conv_size]
         self.conv_size = 4
         self.conv_state_shapes = [
             (self.key_dim, self.conv_size),  # q_conv1d
@@ -201,7 +218,7 @@ class GdnBlock(nn.Module):
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
 
     def get_rnn_state_size(self):
-        """rnn_stateのサイズを返す"""
+        """GatedDeltaNetのキャッシュサイズを返す"""
         return self.cache_size
 
     def _flatten_cache(self, cache_dict):
@@ -273,27 +290,23 @@ class GdnBlock(nn.Module):
     def forward(self, x, rnn_state):
         """
         Args:
-            x: [B, T, C]
-            rnn_state: [1, B, cache_size] フラット化された cache
+            x: [B, T, C] 正規化済み入力
+            rnn_state: [1, B, cache_size] フラット化されたキャッシュ
 
         Returns:
-            x: [B, T, C]
-            rnn_state: [1, B, cache_size] 更新されたフラット化された cache
+            output: [B, T, C]
+            rnn_state: [1, B, cache_size] 更新されたキャッシュ
         """
         B, T, C = x.shape
 
-        # 第1ブロック: LayerNorm + GatedDeltaNet + Residual
-        residual = x
-        x_norm = self.attn_norm(x)
-
-        # GatedDeltaNetはtraining時にseq_len <= 64だとfused_recurrentモードになりエラーが出るため、
+        # GatedDeltaNetはtraining時にseq_len <= 64だとエラーが出るため、
         # 必要に応じてパディングして65以上にする
         if T <= 64:
-            padding = torch.zeros(B, 65 - T, C, device=x_norm.device, dtype=x_norm.dtype)
-            x_padded = torch.cat([x_norm, padding], dim=1)
+            padding = torch.zeros(B, 65 - T, C, device=x.device, dtype=x.dtype)
+            x_padded = torch.cat([x, padding], dim=1)
             need_unpad = True
         else:
-            x_padded = x_norm
+            x_padded = x
             need_unpad = False
 
         # rnn_state をデフラット化して FLACache を作成
@@ -308,12 +321,6 @@ class GdnBlock(nn.Module):
         if need_unpad:
             gdn_output = gdn_output[:, :T, :]
 
-        # 第1のスキップコネクション
-        x = residual + gdn_output
-
-        # 第2ブロック: LayerNorm + MLP + Residual
-        x = x + self.mlp(self.mlp_norm(x))
-
         # 新しい cache をフラット化
         if new_cache is not None and len(new_cache) > 0:
             new_cache_dict = new_cache[0]
@@ -321,7 +328,65 @@ class GdnBlock(nn.Module):
         else:
             new_rnn_state = rnn_state
 
-        return x, new_rnn_state
+        return gdn_output, new_rnn_state
+
+
+class IdentityLayer(nn.Module):
+    """
+    何もしない時系列処理レイヤー（比較用）
+
+    Args:
+        config: Configオブジェクト。必要な属性：
+            - hidden_dim: 隠れ次元数
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_dim = config.hidden_dim
+
+    def get_rnn_state_size(self):
+        """状態を使わないのでhidden_dimを返す"""
+        return self.hidden_dim
+
+    def forward(self, x, rnn_state):
+        """
+        Args:
+            x: [B, T, C] 正規化済み入力
+            rnn_state: [1, B, C] 未使用
+
+        Returns:
+            output: [B, T, C] 入力をそのまま返す
+            rnn_state: [1, B, C] 未変更
+        """
+        return x, rnn_state
+
+
+# 互換性のためのエイリアス
+def CausalTransformerBlock(config, max_position_embeddings):
+    """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
+    # configにmax_position_embeddingsを追加
+    config.max_position_embeddings = max_position_embeddings
+    return BaseTemporalBlock(config, SelfAttentionLayer(config), use_rms_norm=False)
+
+
+def MambaBlock(config):
+    """Mamba状態空間モデルブロック（Transformerブロックと同じ構造）"""
+    return BaseTemporalBlock(config, MambaLayer(config), use_rms_norm=True)
+
+
+def GRUBlock(config):
+    """GRUブロック（Transformerブロックと同じ構造）"""
+    return BaseTemporalBlock(config, GRULayer(config), use_rms_norm=False)
+
+
+def GdnBlock(config):
+    """GatedDeltaNetブロック（Transformerブロックと同じ構造）"""
+    return BaseTemporalBlock(config, GatedDeltaNetLayer(config), use_rms_norm=False)
+
+
+def IdentityBlock(config):
+    """何もしないブロック（比較用）"""
+    return BaseTemporalBlock(config, IdentityLayer(config), use_rms_norm=False)
 
 
 if __name__ == "__main__":
@@ -376,11 +441,19 @@ if __name__ == "__main__":
     # GdnBlock
     print("\n=== GdnBlock ===")
     gdn_block = GdnBlock(config).to(device)
-    # ゼロ初期化された状態を使用（初回実行時を想定）
     rnn_state = torch.zeros(1, B, gdn_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = gdn_block(x, rnn_state)
     print(f"output shape: {out.shape}")
     print(f"new_rnn_state shape: {new_rnn_state.shape}")
     print(f"rnn_state_size: {gdn_block.get_rnn_state_size()}")
+
+    # IdentityBlock
+    print("\n=== IdentityBlock ===")
+    identity_block = IdentityBlock(config).to(device)
+    rnn_state = torch.zeros(1, B, identity_block.get_rnn_state_size(), device=device)
+    out, new_rnn_state = identity_block(x, rnn_state)
+    print(f"output shape: {out.shape}")
+    print(f"new_rnn_state shape: {new_rnn_state.shape}")
+    print(f"rnn_state_size: {identity_block.get_rnn_state_size()}")
 
     print("\nAll tests passed!")
