@@ -154,37 +154,34 @@ class GatedDeltaNetLayer(nn.Module):
 
     Args:
         hidden_dim: 隠れ次元数
-        n_head: アテンションヘッド数
     """
 
-    def __init__(self, hidden_dim, n_head):
+    def __init__(self, hidden_dim):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_heads = n_head
-        # GatedDeltaNetのデフォルト設定: head_dim=64, expand_v=2.0
-        self.head_dim = 64
-        self.expand_v = 2.0
-        self.head_v_dim = int(self.head_dim * self.expand_v)  # 128
-        self.key_dim = self.num_heads * self.head_dim  # num_heads * 64
-        self.value_dim = self.num_heads * self.head_v_dim  # num_heads * 128
-
+        expand_v = 2
+        n_head = 8
+        qk_dim = int(0.75 * hidden_dim)
+        assert qk_dim % n_head == 0
+        head_dim = qk_dim // n_head
+        head_v_dim = int(head_dim * expand_v)
+        value_dim = n_head * head_v_dim
         self.gdn = GatedDeltaNet(
             hidden_size=hidden_dim,
-            head_dim=self.head_dim,
+            head_dim=head_dim,
             num_heads=n_head,
             mode="chunk",
         )
 
         # recurrent_state: [B, num_heads, head_dim, head_v_dim]
-        self.recurrent_state_shape = (self.num_heads, self.head_dim, self.head_v_dim)
+        self.recurrent_state_shape = (n_head, head_dim, head_v_dim)
         self.recurrent_state_size = math.prod(self.recurrent_state_shape)
 
         # conv_state: 3つのShortConvolution state (q, k, v)
         self.conv_size = 4
         self.conv_state_shapes = [
-            (self.key_dim, self.conv_size),  # q_conv1d
-            (self.key_dim, self.conv_size),  # k_conv1d
-            (self.value_dim, self.conv_size),  # v_conv1d
+            (qk_dim, self.conv_size),  # q_conv1d
+            (qk_dim, self.conv_size),  # k_conv1d
+            (value_dim, self.conv_size),  # v_conv1d
         ]
         self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
@@ -341,9 +338,9 @@ def GRUBlock(hidden_dim):
     return BaseTemporalBlock(hidden_dim, GRULayer(hidden_dim))
 
 
-def GdnBlock(hidden_dim, n_head):
+def GdnBlock(hidden_dim):
     """GatedDeltaNetブロック（Transformerブロックと同じ構造）"""
-    return BaseTemporalBlock(hidden_dim, GatedDeltaNetLayer(hidden_dim, n_head))
+    return BaseTemporalBlock(hidden_dim, GatedDeltaNetLayer(hidden_dim))
 
 
 def IdentityBlock(hidden_dim):
