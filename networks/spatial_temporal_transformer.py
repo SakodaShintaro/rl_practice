@@ -113,12 +113,9 @@ class SpatialTemporalTransformer(nn.Module):
 
         out = x + space_emb
 
-        # rnn_stateを各レイヤーの状態に分割: [1, B*S, state_size, n_layer] -> n_layer個の [1, B*S, state_size]
-        layer_states = [rnn_state[:, :, :, i] for i in range(self.n_layer)]
-
         new_layer_states = []
         for i in range(self.n_layer):
-            out, new_state = self.spatial_temporal_blocks[i](out, layer_states[i])
+            out, new_state = self.spatial_temporal_blocks[i](out, rnn_state[:, :, :, i])
             new_layer_states.append(new_state)
 
         # 各レイヤーの状態を結合: n_layer個の [1, B*S, state_size] -> [1, B*S, state_size, n_layer]
