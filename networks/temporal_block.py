@@ -40,16 +40,11 @@ class BaseTemporalBlock(nn.Module):
         """rnn_stateのサイズを返す"""
         return self.temporal.get_rnn_state_size()
 
-    def forward(self, x, rnn_state):
-        """
-        Args:
-            x: [B, T, C]
-            rnn_state: [1, B, rnn_state_size]
-
-        Returns:
-            x: [B, T, C]
-            rnn_state: [1, B, rnn_state_size]
-        """
+    def forward(
+        self,
+        x: torch.Tensor,  # [B, T, C]
+        rnn_state: torch.Tensor,  # [1, B, C]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # 第1ブロック: Norm + TemporalLayer + Residual
         temporal_output, new_rnn_state = self.temporal(self.temporal_norm(x), rnn_state)
         x = x + temporal_output
@@ -88,16 +83,11 @@ class SelfAttentionLayer(nn.Module):
         """状態を使わないのでhidden_dimを返す"""
         return self.hidden_dim
 
-    def forward(self, x, rnn_state):
-        """
-        Args:
-            x: [B, T, C] 正規化済み入力
-            rnn_state: [1, B, C] 未使用
-
-        Returns:
-            output: [B, T, C]
-            rnn_state: [1, B, C] 未変更
-        """
+    def forward(
+        self,
+        x: torch.Tensor,  # [B, T, C]
+        rnn_state: torch.Tensor,  # [1, B, C]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         B, T, C = x.size()
         current_mask = self.causal_mask[:T, :T]
         output = self.attn(x, attn_mask=current_mask)
@@ -123,16 +113,11 @@ class MambaLayer(nn.Module):
         """状態を使わないのでhidden_dimを返す"""
         return self.hidden_dim
 
-    def forward(self, x, rnn_state):
-        """
-        Args:
-            x: [B, T, C] 正規化済み入力
-            rnn_state: [1, B, C] 未使用
-
-        Returns:
-            output: [B, T, C]
-            rnn_state: [1, B, C] 未変更
-        """
+    def forward(
+        self,
+        x: torch.Tensor,  # [B, T, C]
+        rnn_state: torch.Tensor,  # [1, B, C]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         output = self.mamba(x)
         return output, rnn_state
 
@@ -155,16 +140,11 @@ class GRULayer(nn.Module):
         """GRUの状態サイズを返す"""
         return self.hidden_dim
 
-    def forward(self, x, rnn_state):
-        """
-        Args:
-            x: [B, T, C] 正規化済み入力
-            rnn_state: [1, B, C] GRUの隠れ状態
-
-        Returns:
-            output: [B, T, C]
-            rnn_state: [1, B, C] 更新されたGRUの隠れ状態
-        """
+    def forward(
+        self,
+        x: torch.Tensor,  # [B, T, C]
+        rnn_state: torch.Tensor,  # [1, B, C]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # repeat/reshapeで非連続になるケースに備えて contiguous を取る
         rnn_state = rnn_state.contiguous()
         output, new_rnn_state = self.gru(x, rnn_state)
@@ -283,16 +263,11 @@ class GatedDeltaNetLayer(nn.Module):
 
         return fla_cache
 
-    def forward(self, x, rnn_state):
-        """
-        Args:
-            x: [B, T, C] 正規化済み入力
-            rnn_state: [1, B, cache_size] フラット化されたキャッシュ
-
-        Returns:
-            output: [B, T, C]
-            rnn_state: [1, B, cache_size] 更新されたキャッシュ
-        """
+    def forward(
+        self,
+        x: torch.Tensor,  # [B, T, C]
+        rnn_state: torch.Tensor,  # [1, B, C]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         B, T, C = x.shape
 
         # GatedDeltaNetはtraining時にseq_len <= 64だとエラーが出るため、
@@ -344,44 +319,34 @@ class IdentityLayer(nn.Module):
         """状態を使わないのでhidden_dimを返す"""
         return self.hidden_dim
 
-    def forward(self, x, rnn_state):
-        """
-        Args:
-            x: [B, T, C] 正規化済み入力
-            rnn_state: [1, B, C] 未使用
-
-        Returns:
-            output: [B, T, C] 入力をそのまま返す
-            rnn_state: [1, B, C] 未変更
-        """
+    def forward(
+        self,
+        x: torch.Tensor,  # [B, T, C]
+        rnn_state: torch.Tensor,  # [1, B, C]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         return x, rnn_state
 
 
 # 互換性のためのエイリアス
 def CausalTransformerBlock(config, max_position_embeddings):
-    """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
     # configにmax_position_embeddingsを追加
     config.max_position_embeddings = max_position_embeddings
     return BaseTemporalBlock(config, SelfAttentionLayer(config))
 
 
 def MambaBlock(config):
-    """Mamba状態空間モデルブロック（Transformerブロックと同じ構造）"""
     return BaseTemporalBlock(config, MambaLayer(config))
 
 
 def GRUBlock(config):
-    """GRUブロック（Transformerブロックと同じ構造）"""
     return BaseTemporalBlock(config, GRULayer(config))
 
 
 def GdnBlock(config):
-    """GatedDeltaNetブロック（Transformerブロックと同じ構造）"""
     return BaseTemporalBlock(config, GatedDeltaNetLayer(config))
 
 
 def IdentityBlock(config):
-    """何もしないブロック（比較用）"""
     return BaseTemporalBlock(config, IdentityLayer(config))
 
 
