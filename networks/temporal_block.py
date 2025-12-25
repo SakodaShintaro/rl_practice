@@ -5,7 +5,6 @@ import torch.nn as nn
 from fla.layers import GatedDeltaNet
 from fla.models.utils import FLACache
 from mamba_ssm.modules.mamba2 import Mamba2
-from mamba_ssm.ops.triton.layer_norm import RMSNorm
 
 from .self_attention import Config, SelfAttention
 
