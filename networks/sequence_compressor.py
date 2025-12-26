@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .self_attention import SelfAttention
+from .self_attention import SpatialTransformerBlock
 
 
 class SequenceCompressor(nn.Module):
@@ -15,11 +15,10 @@ class SequenceCompressor(nn.Module):
         self.learnable_tokens = nn.Parameter(torch.randn(1, l_out, hidden_dim))
         self.transformer_block = nn.ModuleList(
             [
-                SelfAttention(
+                SpatialTransformerBlock(
                     hidden_dim=hidden_dim,
                     n_head=1,
                     max_position_embeddings=l_in + l_out,
-                    use_rope=False,
                 )
                 for _ in range(2)
             ]
