@@ -6,6 +6,7 @@ from torch.nn import functional as F
 from .image_processor import ImageProcessor
 from .reward_processor import RewardProcessor
 from .self_attention import get_fourier_embeds_from_coordinates
+from .sequence_compressor import SequenceCompressor
 from .spatial_temporal_transformer import SpatialTemporalTransformer
 from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, MambaBlock
 
@@ -193,27 +194,29 @@ class TemporalOnlyEncoder(nn.Module):
         self.reward_processor = reward_processor
 
         # 画像特徴量の次元を計算
-        image_feature_dim = np.prod(self.image_processor.output_shape)
+        C, H, W = self.image_processor.output_shape
 
         # 共通の隠れ層サイズ
-        self.output_dim = 64
+        self.output_dim = C
 
-        # image_processor後の共通線形層
-        self.lin_hidden_in = nn.Linear(image_feature_dim, self.output_dim)
+        image_token_num = 4
+        self.sequence_compressor = SequenceCompressor(
+            hidden_dim=C,
+            l_in=H * W,
+            l_out=image_token_num,
+        )
 
         # 時系列ブロックのリストを作成
-        max_seq_len = seq_len if use_image_only else seq_len * 3
+        len_per_step = image_token_num if use_image_only else (image_token_num + 1)
+        max_seq_len = seq_len * len_per_step
         hidden_dim = self.output_dim
-        n_head = 8
+        n_head = 1
 
         if temporal_model_type == "gru":
             self.blocks = nn.ModuleList([GRUBlock(hidden_dim) for _ in range(n_layer)])
         elif temporal_model_type == "transformer":
             self.blocks = nn.ModuleList(
-                [
-                    CausalTransformerBlock(hidden_dim, n_head, max_seq_len)
-                    for _ in range(n_layer)
-                ]
+                [CausalTransformerBlock(hidden_dim, n_head, max_seq_len) for _ in range(n_layer)]
             )
         elif temporal_model_type == "gdn":
             self.blocks = nn.ModuleList([GdnBlock(hidden_dim) for _ in range(n_layer)])
@@ -246,20 +249,20 @@ class TemporalOnlyEncoder(nn.Module):
 
         # Use pre-encoded obs_z if using ae, otherwise encode from images
         if self.freeze_image_processor:
-            image_features = obs_z.reshape(B * T, *obs_z.shape[2:])  # (B*T, C', H', W')
+            image_emb = obs_z.reshape(B * T, *obs_z.shape[2:])  # (B*T, C', H', W')
         else:
             # 画像を処理
             all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
-            image_features = self.image_processor.encode(all_frames)
+            image_emb = self.image_processor.encode(all_frames)
 
-        # Flatten and linear projection
-        h = image_features.flatten(start_dim=1)  # (B*T, feature_dim)
-        h = self.lin_hidden_in(h)  # (B*T, hidden_size)
-        h = h.reshape(B, T, -1)  # (B, T, hidden_size)
+        image_emb = image_emb.flatten(start_dim=2)  # (B*T, C', H'*W')
+        image_emb = image_emb.transpose(1, 2)  # (B*T, H'*W', C')
+        image_emb = self.sequence_compressor(image_emb)  # (B*T, image_token_num, C')
+        image_emb = image_emb.reshape(B, T, -1, self.output_dim)  # (B, T, image_token_num, C')
 
         if self.use_image_only:
             # 画像のみ
-            sequence = h  # (B, T, d_model)
+            sequence = image_emb  # (B, T, d_model)
         else:
             # action, rewardを埋め込み
             action_emb = get_fourier_embeds_from_coordinates(
@@ -272,9 +275,12 @@ class TemporalOnlyEncoder(nn.Module):
             )  # (B, T, 1, d_model)
             reward_emb = reward_emb.sum(dim=2)  # (B, T, d_model)
 
-            # Interleave: [a_0, r_0, s_0, a_1, r_1, s_1, ...]
-            sequence = torch.stack([action_emb, reward_emb, h], dim=2)  # (B, T, 3, d_model)
-            sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
+            # Interleave: [a_0, s_00, s_01, a_1, s_10, s_11, ...]
+            action_emb = action_emb.unsqueeze(2)  # (B, T, 1, d_model)
+            sequence = torch.cat(
+                [action_emb, image_emb], dim=2
+            )  # (B, T, 1 + image_token_num, d_model)
+            sequence = sequence.view(B, T * (1 + image_emb.shape[2]), self.output_dim)
 
         # 各レイヤーの状態を分割: [B, state_size, n_layer] -> n_layer個の [B, state_size]
         layer_states = [rnn_state[:, :, i] for i in range(self.n_layer)]
