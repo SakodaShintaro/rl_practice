@@ -19,7 +19,7 @@ python3 train.py qwenvl$suffix \
   --seq_len 1 \
   --use_quantization 1 \
   --use_lora 0 \
-  --use_pixel_values 1 \
+  --use_pixel_values 0 \
   --target_layer_idx 2 \
-  --batch_size 1 \
+  --batch_size 8 \
   --learning_rate 1e-5 \
