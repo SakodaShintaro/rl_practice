@@ -12,6 +12,12 @@ import pygame
 from PIL import Image, ImageDraw, ImageFont
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", type=str, choices=["sequential", "random"], default="random")
+    return parser.parse_args()
+
+
 class LetterTracingGame:
     def __init__(self, sequential):
         pygame.init()
@@ -290,9 +296,7 @@ class LetterTracingGame:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["sequential", "random"], default="random")
-    args = parser.parse_args()
+    args = parse_args()
 
     sequential = args.mode == "sequential"
     game = LetterTracingGame(sequential)
