@@ -22,7 +22,7 @@ from generic_gui_env import GenericGUIEnv, activate_window, create_letter_tracin
 
 def parse_args():
     parser = argparse.ArgumentParser(description="人間プレイ用スクリプト")
-    parser.add_argument("window_title", type=str)
+    parser.add_argument("--window_title", type=str, default="Letter Tracing Game")
     parser.add_argument("--save_data", action="store_true", help="模倣学習用のデータを保存")
     parser.add_argument("--save_dir", type=str, default="results")
     return parser.parse_args()
