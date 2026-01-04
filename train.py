@@ -242,7 +242,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
             bgr_image_list.append(bgr_image)
             if args.render:
-                cv2.imshow("CarRacing", bgr_image)
+                cv2.imshow(args.env_id, bgr_image)
                 cv2.waitKey(1)
 
             if terminated or truncated:
