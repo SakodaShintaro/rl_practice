@@ -58,7 +58,7 @@ class LetterTracingGame:
         self.score_timer = 0
 
         # Doneボタン
-        self.button_rect = pygame.Rect(self.width - 120, self.height - 60, 100, 40)
+        self.button_rect = pygame.Rect(self.width - 180, self.height - 80, 150, 60)
 
         # 文字位置のオフセット
         self.letter_offset_x = 0
@@ -239,7 +239,7 @@ class LetterTracingGame:
         pygame.draw.rect(self.screen, color, self.button_rect, border_radius=5)
 
         # テキスト
-        font = pygame.font.Font(None, 36)
+        font = pygame.font.Font(None, 48)
         text = font.render("Done", True, self.WHITE)
         text_rect = text.get_rect(center=self.button_rect.center)
         self.screen.blit(text, text_rect)
@@ -247,8 +247,8 @@ class LetterTracingGame:
     def _draw_score(self):
         """スコアを画面中央に表示（OCR検出しやすい形式）"""
         # スコア表示用の矩形（黄色い背景）
-        score_box_width = 400
-        score_box_height = 150
+        score_box_width = 500
+        score_box_height = 200
         score_box_x = (self.width - score_box_width) // 2
         score_box_y = (self.height - score_box_height) // 2
 
@@ -261,17 +261,17 @@ class LetterTracingGame:
         pygame.draw.rect(self.screen, self.SCORE_BORDER, score_box_rect, 5)
 
         # "Score:" ラベル
-        label_font = pygame.font.Font(None, 48)
+        label_font = pygame.font.Font(None, 64)
         label_text = label_font.render("Score:", True, self.BLACK)
-        label_rect = label_text.get_rect(center=(self.width // 2, self.height // 2 - 30))
+        label_rect = label_text.get_rect(center=(self.width // 2, self.height // 2 - 40))
         self.screen.blit(label_text, label_rect)
 
         # スコア値
-        score_font = pygame.font.Font(None, 72)
+        score_font = pygame.font.Font(None, 96)
         score_text = f"{self.score:.2f}"
         score_text_surface = score_font.render(score_text, True, self.BLACK)
         score_text_rect = score_text_surface.get_rect(
-            center=(self.width // 2, self.height // 2 + 30)
+            center=(self.width // 2, self.height // 2 + 40)
         )
         self.screen.blit(score_text_surface, score_text_rect)
 
