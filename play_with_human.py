@@ -23,7 +23,6 @@ from generic_gui_env import GenericGUIEnv, activate_window, create_letter_tracin
 def parse_args():
     parser = argparse.ArgumentParser(description="人間プレイ用スクリプト")
     parser.add_argument("--window_title", type=str, default="Letter Tracing Game")
-    parser.add_argument("--save_data", action="store_true", help="模倣学習用のデータを保存")
     parser.add_argument("--save_dir", type=str, default="results")
     return parser.parse_args()
 
@@ -31,10 +30,9 @@ def parse_args():
 class HumanPlayRecorder:
     """人間プレイを記録するクラス"""
 
-    def __init__(self, env, save_data, save_dir):
+    def __init__(self, env, save_dir):
         self.env = env
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.save_data = save_data
         self.save_dir = Path(save_dir) / datetime_str
 
         # マウス状態
@@ -54,14 +52,13 @@ class HumanPlayRecorder:
         self.total_reward = 0.0
         self.reward_history = deque(maxlen=10)
 
-        if self.save_data:
-            self.save_dir.mkdir(parents=True, exist_ok=True)
-            self.images_dir = self.save_dir / "images"
-            self.images_dir.mkdir(parents=True, exist_ok=True)
-            self.tsv_path = self.save_dir / "log.tsv"
-            if not self.tsv_path.exists():
-                with open(self.tsv_path, "w", encoding="utf-8") as f:
-                    f.write("step\taction0\taction1\taction2\taction3\treward\n")
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.images_dir = self.save_dir / "images"
+        self.images_dir.mkdir(parents=True, exist_ok=True)
+        self.tsv_path = self.save_dir / "log.tsv"
+        if not self.tsv_path.exists():
+            with open(self.tsv_path, "w", encoding="utf-8") as f:
+                f.write("step\taction0\taction1\taction2\taction3\treward\n")
 
         # マウスリスナーを開始
         self.listener = mouse.Listener(on_move=self.on_move, on_click=self.on_click)
@@ -131,8 +128,7 @@ class HumanPlayRecorder:
                 self.step_count += 1
 
                 # データ保存
-                if self.save_data:
-                    self._save_step(obs, action, reward)
+                self._save_step(obs, action, reward)
 
                 if reward > 0:
                     self.total_reward += reward
@@ -207,7 +203,7 @@ def main():
     )
 
     # 人間プレイを開始
-    recorder = HumanPlayRecorder(env, save_data=args.save_data, save_dir=args.save_dir)
+    recorder = HumanPlayRecorder(env, save_dir=args.save_dir)
 
     try:
         recorder.run()
