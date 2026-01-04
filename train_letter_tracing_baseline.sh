@@ -21,3 +21,4 @@ python3 train.py baseline$suffix \
   --batch_size 32 \
   --learning_rate 1e-4 \
   --buffer_device cpu \
+  --render 0 \
