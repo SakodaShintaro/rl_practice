@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import time
 
+import cv2
 import gymnasium as gym
 import numpy as np
 import pyautogui
@@ -99,6 +100,10 @@ class GenericGUIEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
+    # 観測のリサイズサイズ (height, width) or None
+    # サブクラスでオーバーライド可能
+    resize_shape = (96, 96)
+
     def __init__(self, reward_detector, render_mode, window_title):
         """
         Args:
@@ -142,8 +147,13 @@ class GenericGUIEnv(gym.Env):
         )
 
         # Observation space: RGB image
+        if self.resize_shape is not None:
+            obs_height, obs_width = self.resize_shape
+        else:
+            obs_height, obs_width = self.height, self.width
+
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=(self.height, self.width, 3), dtype=np.uint8
+            low=0, high=255, shape=(obs_height, obs_width, 3), dtype=np.uint8
         )
 
         # 前回の画面（報酬検出用）
@@ -223,6 +233,11 @@ class GenericGUIEnv(gym.Env):
 
         # numpy配列に変換
         screen_array = np.array(screenshot)
+
+        # リサイズ処理
+        if self.resize_shape is not None:
+            height, width = self.resize_shape
+            screen_array = cv2.resize(screen_array, (width, height), interpolation=cv2.INTER_AREA)
 
         return screen_array
 
