@@ -100,10 +100,8 @@ class LetterTracingGame:
             font = ImageFont.truetype(
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", self.font_size
             )
-            print("Loaded DejaVuSans-Bold.ttf font.")
         except:
             font = ImageFont.load_default()
-            print("Failed to load custom font. Using default font.")
 
         # 文字のバウンディングボックスを取得
         bbox = draw.textbbox((0, 0), letter, font=font)
