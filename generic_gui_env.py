@@ -264,6 +264,8 @@ def create_letter_tracing_reward_detector():
         Returns:
             reward: float
         """
+        if np.all(current_screen == prev_screen):
+            return 0.0
         try:
             # 色ベースでスコア表示領域を検出
             mask = np.all(
