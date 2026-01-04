@@ -20,65 +20,33 @@ from PIL import Image
 
 
 def _find_window_region(window_title):
-    """wmctrl/xdotoolでウィンドウ領域を取得 (部分一致)"""
-    if shutil.which("wmctrl"):
-        result = subprocess.run(["wmctrl", "-lG"], capture_output=True, text=True)
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                # id desk x y w h host/title...
-                parts = line.split(None, 6)
-                if len(parts) < 7:
-                    continue
-                _, _, x, y, w, h, title = parts
-                if window_title.lower() in title.lower():
-                    return (int(x), int(y), int(w), int(h), title)
-
-    if shutil.which("xdotool"):
-        search = subprocess.run(
-            ["xdotool", "search", "--name", window_title], capture_output=True, text=True
-        )
-        if search.returncode == 0 and search.stdout.strip():
-            window_id = search.stdout.splitlines()[0].strip()
-            geometry = subprocess.run(
-                ["xdotool", "getwindowgeometry", "--shell", window_id],
-                capture_output=True,
-                text=True,
-            )
-            if geometry.returncode == 0:
-                values = {}
-                for line in geometry.stdout.splitlines():
-                    if "=" in line:
-                        key, value = line.split("=", 1)
-                        values[key] = value
-                required_keys = ("X", "Y", "WIDTH", "HEIGHT")
-                if all(key in values for key in required_keys):
-                    return (
-                        int(values["X"]),
-                        int(values["Y"]),
-                        int(values["WIDTH"]),
-                        int(values["HEIGHT"]),
-                        window_title,
-                    )
+    """wmctrlでウィンドウ領域を取得"""
+    result = subprocess.run(["wmctrl", "-lG"], capture_output=True, text=True)
+    if result.returncode == 0:
+        for line in result.stdout.splitlines():
+            # id desk x y w h host/title...
+            parts = line.split(None, 6)
+            if len(parts) < 7:
+                continue
+            _, _, x, y, w, h, title = parts
+            if window_title.lower() in title.lower():
+                return (int(x), int(y), int(w), int(h), title)
 
     return None
 
 
 def activate_window(window_title):
-    """xdotool/wmctrlでウィンドウをアクティブ化"""
-    if shutil.which("xdotool"):
-        search = subprocess.run(
-            ["xdotool", "search", "--onlyvisible", "--limit", "1", "--name", window_title],
-            capture_output=True,
-            text=True,
-        )
-        if search.returncode == 0 and search.stdout.strip():
-            window_id = search.stdout.splitlines()[0].strip()
-            subprocess.run(["xdotool", "windowactivate", "--sync", window_id])
-            subprocess.run(["xdotool", "windowraise", window_id])
-            return
-
-    if shutil.which("wmctrl"):
-        subprocess.run(["wmctrl", "-a", window_title])
+    """xdotoolでウィンドウをアクティブ化"""
+    search = subprocess.run(
+        ["xdotool", "search", "--onlyvisible", "--limit", "1", "--name", window_title],
+        capture_output=True,
+        text=True,
+    )
+    if search.returncode == 0 and search.stdout.strip():
+        window_id = search.stdout.splitlines()[0].strip()
+        subprocess.run(["xdotool", "windowactivate", "--sync", window_id])
+        subprocess.run(["xdotool", "windowraise", window_id])
+        return
 
 
 class GenericGUIEnv(gym.Env):
