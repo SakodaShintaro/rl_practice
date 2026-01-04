@@ -8,13 +8,15 @@
 """
 
 import argparse
+import pickle
 import time
 from collections import deque
+from datetime import datetime
 
 import numpy as np
 from pynput import mouse
 
-from generic_gui_env import GenericGUIEnv, create_letter_tracing_reward_detector
+from generic_gui_env import GenericGUIEnv, activate_window, create_letter_tracing_reward_detector
 
 
 def parse_args():
@@ -172,8 +174,6 @@ class HumanPlayRecorder:
 
     def _save_data(self):
         """データを保存"""
-        import pickle
-        from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"human_play_data_{timestamp}.pkl"
@@ -201,6 +201,9 @@ def main():
     print(f"対象ウィンドウ: {args.window_title}")
     print("\n注意: 先にゲームを起動してください")
     print("      ウィンドウが見つかるまで待機します...\n")
+
+    # フォーカスを移す
+    activate_window(args.window_title)
 
     # 報酬検出関数を作成
     reward_detector = create_letter_tracing_reward_detector()

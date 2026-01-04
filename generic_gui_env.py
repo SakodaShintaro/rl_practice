@@ -62,6 +62,25 @@ def _find_window_region(window_title):
     return None
 
 
+def activate_window(window_title):
+    """xdotoolでウィンドウをアクティブ化"""
+    if shutil.which("xdotool") is None:
+        print("xdotoolが見つからないためウィンドウのアクティブ化をスキップします")
+        return
+
+    search = subprocess.run(
+        ["xdotool", "search", "--name", window_title], capture_output=True, text=True
+    )
+    if search.returncode != 0 or not search.stdout.strip():
+        print(f"xdotoolでウィンドウを検索できませんでした: '{window_title}'")
+        return
+
+    window_id = search.stdout.splitlines()[0].strip()
+    subprocess.run(["xdotool", "windowactivate", window_id])
+    subprocess.run(["xdotool", "windowraise", window_id])
+    print(f"Activated window '{window_title}' using xdotool.")
+
+
 class GenericGUIEnv(gym.Env):
     """
     汎用的なGUI環境ラッパー（PyAutoGui使用）
