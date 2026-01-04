@@ -188,10 +188,14 @@ class GenericGUIEnv(gym.Env):
         # アクションを解釈
         x_norm, y_norm, key_down_prob, key_up_prob = action
 
+        # アクションを0.0～1.0の範囲にクリップ
+        x_norm_clipped = np.clip(x_norm, 0.0, 1.0)
+        y_norm_clipped = np.clip(y_norm, 0.0, 1.0)
+
         # 画面座標に変換（region内の相対座標）
         region_x, region_y, _, _ = self.region
-        x = int(np.clip(region_x + x_norm * self.width, region_x, region_x + self.width - 1))
-        y = int(np.clip(region_y + y_norm * self.height, region_y, region_y + self.height - 1))
+        x = int(region_x + x_norm_clipped * (self.width - 1))
+        y = int(region_y + y_norm_clipped * (self.height - 1))
 
         # マウスを移動
         pyautogui.moveTo(x, y)
