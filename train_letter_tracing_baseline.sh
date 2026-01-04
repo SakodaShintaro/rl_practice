@@ -3,6 +3,7 @@ set -eux
 
 suffix=${1:-""}
 cd $(dirname $0)
+source ./.venv/bin/activate
 
 python3 train.py baseline$suffix \
   --env_id LetterTracing-v0 \
