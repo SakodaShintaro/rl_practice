@@ -6,7 +6,6 @@ PyAutoGuiを使って実際のマウスを操作し、スクリーンショッ�
 """
 
 import re
-import shutil
 import subprocess
 import time
 
@@ -20,19 +19,61 @@ from PIL import Image
 
 
 def _find_window_region(window_title):
-    """wmctrlでウィンドウ領域を取得"""
+    """wmctrlでウィンドウを検索し、xwininfoでクライアント領域を取得"""
+    # wmctrlでウィンドウを検索（部分一致）
     result = subprocess.run(["wmctrl", "-lG"], capture_output=True, text=True)
-    if result.returncode == 0:
-        for line in result.stdout.splitlines():
-            # id desk x y w h host/title...
-            parts = line.split(None, 6)
-            if len(parts) < 7:
-                continue
-            _, _, x, y, w, h, title = parts
-            if window_title.lower() in title.lower():
-                return (int(x), int(y), int(w), int(h), title)
+    if result.returncode != 0:
+        return None
 
-    return None
+    window_id_hex = None
+    matched_title = None
+
+    for line in result.stdout.splitlines():
+        # id desk x y w h host title...
+        parts = line.split(None, 6)
+        if len(parts) < 7:
+            continue
+        wid_hex, _, _, _, _, _, title = parts
+        if window_title.lower() in title.lower():
+            window_id_hex = wid_hex
+            matched_title = title
+            break
+
+    if window_id_hex is None:
+        return None
+
+    # xwininfoでクライアント領域の正確な位置とサイズを取得
+    xwinfo = subprocess.run(
+        ["xwininfo", "-id", window_id_hex],
+        capture_output=True,
+        text=True,
+    )
+
+    if xwinfo.returncode != 0:
+        return None
+
+    # xwininfoの出力をパース
+    abs_x = None
+    abs_y = None
+    width = None
+    height = None
+
+    for line in xwinfo.stdout.splitlines():
+        line = line.strip()
+        if "Absolute upper-left X:" in line:
+            abs_x = int(line.split(":")[-1].strip())
+        elif "Absolute upper-left Y:" in line:
+            abs_y = int(line.split(":")[-1].strip())
+        elif "Width:" in line:
+            width = int(line.split(":")[-1].strip())
+        elif "Height:" in line:
+            height = int(line.split(":")[-1].strip())
+
+    if None in [abs_x, abs_y, width, height]:
+        return None
+
+    # xwininfoのAbsolute座標はクライアント領域の位置を指す
+    return (abs_x, abs_y, width, height, matched_title)
 
 
 def activate_window(window_title):
@@ -100,7 +141,25 @@ class GenericGUIEnv(gym.Env):
 
         region = _find_window_region(window_title)
         if region is None:
-            raise ValueError(f"ウィンドウが見つかりません: '{window_title}' (wmctrl/xdotoolで検索)")
+            # 利用可能なウィンドウのリストを取得して表示
+            wmctrl_result = subprocess.run(
+                ["wmctrl", "-lG"],
+                capture_output=True,
+                text=True,
+            )
+            window_list = []
+            if wmctrl_result.returncode == 0:
+                for line in wmctrl_result.stdout.splitlines()[:10]:  # 最大10個まで
+                    parts = line.split(None, 6)
+                    if len(parts) >= 7:
+                        window_list.append(f"  - {parts[6]}")
+
+            available = "\n".join(window_list) if window_list else "  (取得できませんでした)"
+            raise ValueError(
+                f"ウィンドウが見つかりません: '{window_title}'\n"
+                f"wmctrlで検索しましたが見つかりませんでした。\n"
+                f"利用可能なウィンドウ（最大10個）:\n{available}"
+            )
 
         self.region = tuple(region[:4])
         self.width = region[2]
