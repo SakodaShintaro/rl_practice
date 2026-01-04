@@ -186,6 +186,9 @@ class GenericGUIEnv(gym.Env):
         # 前回の画面（報酬検出用）
         self.prev_screen = None
 
+        # ステップカウンタ（100ステップごとにエピソードを区切る）
+        self.step_count = 0
+
     def reset(self, seed=None, options=None):
         """
         環境をリセット
@@ -197,6 +200,9 @@ class GenericGUIEnv(gym.Env):
 
         # 前回画面をリセット
         self.prev_screen = None
+
+        # ステップカウンタをリセット
+        self.step_count = 0
 
         # 初期観測を取得
         observation = self._get_observation()
@@ -249,9 +255,12 @@ class GenericGUIEnv(gym.Env):
         # 前回画面を更新
         self.prev_screen = current_screen.copy()
 
-        # 終了判定（基本的に終了しない）
+        # ステップカウンタをインクリメント
+        self.step_count += 1
+
+        # 終了判定
         terminated = False
-        truncated = False
+        truncated = self.step_count >= 100
 
         info = {}
 
