@@ -111,7 +111,7 @@ class GenericGUIEnv(gym.Env):
 
     # 観測のリサイズサイズ (height, width) or None
     # サブクラスでオーバーライド可能
-    resize_shape = (96, 96)
+    resize_shape = (512, 512)
 
     def __init__(self, reward_detector, render_mode, window_title):
         """
@@ -302,11 +302,6 @@ def create_letter_tracing_reward_detector():
     Returns:
         reward_detector関数
     """
-    # Letter Tracing Game固有の設定
-    score_keyword = "Score:"
-    lower_bound = (240, 240, 180)  # 薄い黄色の下限
-    upper_bound = (255, 255, 220)  # 薄い黄色の上限
-
     def reward_detector(prev_screen, current_screen):
         """
         画面からOCRでスコアを検出
@@ -322,6 +317,8 @@ def create_letter_tracing_reward_detector():
             return 0.0
         try:
             # 色ベースでスコア表示領域を検出
+            lower_bound = (240, 240, 180)  # 薄い黄色の下限
+            upper_bound = (255, 255, 220)  # 薄い黄色の上限
             mask = np.all(
                 (current_screen >= lower_bound) & (current_screen <= upper_bound),
                 axis=2,
@@ -356,6 +353,7 @@ def create_letter_tracing_reward_detector():
             text = pytesseract.image_to_string(pil_image, config="--psm 6").strip()
 
             # "Score:" キーワードを含むかチェック
+            score_keyword = "Score:"
             if score_keyword.lower() not in text.lower():
                 return 0.0
 
