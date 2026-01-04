@@ -8,12 +8,13 @@
 """
 
 import argparse
-import pickle
 import time
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
+from PIL import Image
 from pynput import mouse
 
 from generic_gui_env import GenericGUIEnv, activate_window, create_letter_tracing_reward_detector
@@ -23,20 +24,18 @@ def parse_args():
     parser = argparse.ArgumentParser(description="人間プレイ用スクリプト")
     parser.add_argument("window_title", type=str)
     parser.add_argument("--save_data", action="store_true", help="模倣学習用のデータを保存")
+    parser.add_argument("--save_dir", type=str, default="results")
     return parser.parse_args()
 
 
 class HumanPlayRecorder:
     """人間プレイを記録するクラス"""
 
-    def __init__(self, env, save_data):
+    def __init__(self, env, save_data, save_dir):
         self.env = env
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.save_data = save_data
-
-        # データ保存用
-        self.observations = []
-        self.actions = []
-        self.rewards = []
+        self.save_dir = Path(save_dir) / datetime_str
 
         # マウス状態
         self.current_pos = (0, 0)
@@ -54,6 +53,15 @@ class HumanPlayRecorder:
         self.step_count = 0
         self.total_reward = 0.0
         self.reward_history = deque(maxlen=10)
+
+        if self.save_data:
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+            self.images_dir = self.save_dir / "images"
+            self.images_dir.mkdir(parents=True, exist_ok=True)
+            self.tsv_path = self.save_dir / "log.tsv"
+            if not self.tsv_path.exists():
+                with open(self.tsv_path, "w", encoding="utf-8") as f:
+                    f.write("step\taction0\taction1\taction2\taction3\treward\n")
 
         # マウスリスナーを開始
         self.listener = mouse.Listener(on_move=self.on_move, on_click=self.on_click)
@@ -100,8 +108,7 @@ class HumanPlayRecorder:
         return action
 
     def run(self):
-        """プレイを実行
-        """
+        """プレイを実行"""
         print("\n=== 人間プレイ開始 ===")
         print("マウスでゲームをプレイしてください")
         print("Ctrl+C で終了します")
@@ -120,14 +127,13 @@ class HumanPlayRecorder:
                 # ステップ実行
                 obs, reward, terminated, truncated, info = self.env.step(action)
 
-                # データ保存
-                if self.save_data:
-                    self.observations.append(obs)
-                    self.actions.append(action)
-                    self.rewards.append(reward)
-
                 # 統計更新
                 self.step_count += 1
+
+                # データ保存
+                if self.save_data:
+                    self._save_step(obs, action, reward)
+
                 if reward > 0:
                     self.total_reward += reward
                     self.reward_history.append(reward)
@@ -158,10 +164,6 @@ class HumanPlayRecorder:
             # 統計情報を表示
             self._print_statistics()
 
-            # データを保存
-            if self.save_data:
-                self._save_data()
-
     def _print_statistics(self):
         """統計情報を表示"""
         print("\n=== プレイ統計 ===")
@@ -172,26 +174,16 @@ class HumanPlayRecorder:
             print(f"最大報酬: {np.max(self.reward_history):.4f}")
             print(f"最小報酬: {np.min(self.reward_history):.4f}")
 
-    def _save_data(self):
-        """データを保存"""
+    def _save_step(self, obs, action, reward):
+        """各ステップを画像,TSVに保存"""
+        img_path = self.images_dir / f"{self.step_count:08d}.png"
+        Image.fromarray(obs).save(img_path)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"human_play_data_{timestamp}.pkl"
-
-        data = {
-            "observations": np.array(self.observations),
-            "actions": np.array(self.actions),
-            "rewards": np.array(self.rewards),
-            "total_reward": self.total_reward,
-            "step_count": self.step_count,
-        }
-
-        with open(filename, "wb") as f:
-            pickle.dump(data, f)
-
-        print(f"\nデータを保存しました: {filename}")
-        print(f"  観測数: {len(self.observations)}")
-        print(f"  アクション数: {len(self.actions)}")
+        with open(self.tsv_path, "a", encoding="utf-8") as f:
+            f.write(
+                f"{self.step_count}\t{float(action[0]):.6f}\t{float(action[1]):.6f}\t"
+                f"{float(action[2]):.6f}\t{float(action[3]):.6f}\t{float(reward):.6f}\n"
+            )
 
 
 def main():
@@ -215,7 +207,7 @@ def main():
     )
 
     # 人間プレイを開始
-    recorder = HumanPlayRecorder(env, save_data=args.save_data)
+    recorder = HumanPlayRecorder(env, save_data=args.save_data, save_dir=args.save_dir)
 
     try:
         recorder.run()
