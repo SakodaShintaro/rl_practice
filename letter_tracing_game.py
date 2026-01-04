@@ -36,6 +36,8 @@ class LetterTracingGame:
         self.GRAY = (200, 200, 200)
         self.BUTTON_COLOR = (100, 100, 200)
         self.BUTTON_HOVER = (150, 150, 255)
+        self.SCORE_BG = (255, 255, 200)  # 薄い黄色（スコア背景）
+        self.SCORE_BORDER = (200, 150, 0)  # オレンジ（スコア枠）
 
         # ゲーム状態
         self.current_letter = None
@@ -237,12 +239,35 @@ class LetterTracingGame:
         self.screen.blit(text, text_rect)
 
     def _draw_score(self):
-        """スコアを画面中央に表示"""
-        font = pygame.font.Font(None, 72)
+        """スコアを画面中央に表示（OCR検出しやすい形式）"""
+        # スコア表示用の矩形（黄色い背景）
+        score_box_width = 400
+        score_box_height = 150
+        score_box_x = (self.width - score_box_width) // 2
+        score_box_y = (self.height - score_box_height) // 2
+
+        score_box_rect = pygame.Rect(score_box_x, score_box_y, score_box_width, score_box_height)
+
+        # 背景（薄い黄色）
+        pygame.draw.rect(self.screen, self.SCORE_BG, score_box_rect)
+
+        # 枠線（オレンジ）
+        pygame.draw.rect(self.screen, self.SCORE_BORDER, score_box_rect, 5)
+
+        # "Score:" ラベル
+        label_font = pygame.font.Font(None, 48)
+        label_text = label_font.render("Score:", True, self.BLACK)
+        label_rect = label_text.get_rect(center=(self.width // 2, self.height // 2 - 30))
+        self.screen.blit(label_text, label_rect)
+
+        # スコア値
+        score_font = pygame.font.Font(None, 72)
         score_text = f"{self.score:.2f}"
-        text = font.render(score_text, True, self.BLACK)
-        text_rect = text.get_rect(center=(self.width // 2, self.height // 2))
-        self.screen.blit(text, text_rect)
+        score_text_surface = score_font.render(score_text, True, self.BLACK)
+        score_text_rect = score_text_surface.get_rect(
+            center=(self.width // 2, self.height // 2 + 30)
+        )
+        self.screen.blit(score_text_surface, score_text_rect)
 
     def get_screen_array(self):
         """画面をnumpy配列として取得（Gymnasium環境用）"""
