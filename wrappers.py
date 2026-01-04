@@ -4,6 +4,7 @@ import minigrid
 import numpy as np
 
 from carla_leaderboard_env import CARLALeaderboardEnv
+from generic_gui_env import GenericGUIEnv, create_letter_tracing_reward_detector
 from memory_maze_gym_wrapper import MemoryMazeGymWrapper
 
 REPEAT = 8
@@ -43,6 +44,18 @@ def make_env(env_id: str) -> gym.Env:
     elif env_id == "CARLA-Leaderboard-v0":
         env = CARLALeaderboardEnv()
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = ZeroObsOnDoneWrapper(env)
+        return env
+
+    elif env_id == "LetterTracing-v0":
+        reward_detector = create_letter_tracing_reward_detector()
+        env = GenericGUIEnv(
+            reward_detector=reward_detector,
+            render_mode="rgb_array",
+            window_title="Letter Tracing Game",
+        )
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         return env
 
