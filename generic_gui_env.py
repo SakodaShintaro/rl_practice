@@ -110,8 +110,7 @@ class GenericGUIEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
     # 観測のリサイズサイズ (height, width) or None
-    # サブクラスでオーバーライド可能
-    resize_shape = (512, 512)
+    resize_shape = (384, 384)
 
     def __init__(self, reward_detector, render_mode, window_title):
         """
