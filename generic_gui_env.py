@@ -295,6 +295,7 @@ def create_letter_tracing_reward_detector():
 
         except Exception as e:
             # OCR失敗時は0を返す
+            print(f"OCRエラー: {e}")
             return 0.0
 
     return reward_detector

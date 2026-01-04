@@ -11,4 +11,4 @@ pip3 install mamba-ssm --no-build-isolation
 pip3 install causal-conv1d --no-build-isolation
 pip3 install flash-attn --no-build-isolation
 
-sudo apt install -y xdotool wmctrlt gnome-screenshot
+sudo apt install -y xdotool wmctrl gnome-screenshot tesseract-ocr
