@@ -191,7 +191,7 @@ class LetterTracingGame:
                         self.drawing = True
                         self.last_pos = event.pos
                         # 最初のクリック位置にも円を描画
-                        pygame.draw.circle(self.user_surface, self.BLACK, event.pos, 5)
+                        pygame.draw.circle(self.user_surface, self.BLACK, event.pos, 12)
 
             # マウスボタンが離された
             elif event.type == pygame.MOUSEBUTTONUP:
@@ -204,7 +204,7 @@ class LetterTracingGame:
                 if self.drawing:
                     current_pos = event.pos
                     # 円を描画
-                    pygame.draw.circle(self.user_surface, self.BLACK, current_pos, 5)
+                    pygame.draw.circle(self.user_surface, self.BLACK, current_pos, 12)
                     self.last_pos = current_pos
 
         return True
