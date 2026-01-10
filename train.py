@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
             "MemoryMaze-9x9-v0",
             "CARLA-Leaderboard-v0",
             "LetterTracing-v0",
+            "FourQuadrant-v0",
         ],
     )
     parser.add_argument(

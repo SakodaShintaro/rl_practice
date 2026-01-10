@@ -301,9 +301,11 @@ class GenericGUIEnv(gym.Env):
         pyautogui.mouseUp(button="left")
 
 
-def create_letter_tracing_reward_detector():
+def create_score_reward_detector():
     """
-    Letter Tracing Game用の報酬検出関数を生成
+    スコア表示からOCRで報酬を検出する汎用関数
+
+    Letter Tracing GameとFour Quadrant Game両方で使用可能
 
     Returns:
         reward_detector関数
@@ -364,9 +366,8 @@ def create_letter_tracing_reward_detector():
             if score_keyword.lower() not in text.lower():
                 return 0.0
 
-            # 数字を抽出
-            # "Score: 0.45" のような形式を想定
-            match = re.search(r"(\d+\.\d+)", text)
+            # 数字を抽出（負の数にも対応）
+            match = re.search(r"(-?\d+\.\d+)", text)
             if match:
                 score = float(match.group(1))
                 return score

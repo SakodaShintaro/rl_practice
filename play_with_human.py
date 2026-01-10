@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image
 from pynput import mouse
 
-from generic_gui_env import GenericGUIEnv, activate_window, create_letter_tracing_reward_detector
+from generic_gui_env import GenericGUIEnv, activate_window, create_score_reward_detector
 
 
 def parse_args():
@@ -116,7 +116,7 @@ class HumanPlayRecorder:
                 # データ保存
                 self._save_step(obs, action, reward)
 
-                if reward > 0:
+                if reward != 0:
                     self.total_reward += reward
                     self.reward_history.append(reward)
                     print(f"\n[Step {self.step_count}] 報酬獲得: {reward:.4f}")
@@ -180,7 +180,7 @@ def main():
     activate_window(args.window_title)
 
     # 報酬検出関数を作成
-    reward_detector = create_letter_tracing_reward_detector()
+    reward_detector = create_score_reward_detector()
 
     env = GenericGUIEnv(
         reward_detector=reward_detector,
