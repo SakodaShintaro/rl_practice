@@ -8,7 +8,7 @@ source ./.venv/bin/activate
 python3 train.py baseline$suffix \
   --env_id LetterTracing-v0 \
   --agent_type off_policy \
-  --action_norm_penalty 1.0 \
+  --action_norm_penalty 0.0 \
   --target_score 800.0 \
   --encoder spatial_temporal \
   --temporal_model_type transformer \
