@@ -114,7 +114,7 @@ class FourQuadrantGame:
         # スコア表示中の場合
         if self.show_score:
             # 1秒経過したら次の問題へ
-            if pygame.time.get_ticks() - self.score_timer > 1000:
+            if pygame.time.get_ticks() - self.score_timer > 500:
                 self.new_question()
         else:
             # 制限時間チェック
