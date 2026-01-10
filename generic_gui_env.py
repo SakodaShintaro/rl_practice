@@ -181,7 +181,7 @@ class GenericGUIEnv(gym.Env):
             low=0, high=255, shape=(obs_height, obs_width, 3), dtype=np.uint8
         )
 
-        # 前回の画面（報酬検出用）
+        # 前回の画面
         self.prev_screen = None
 
         # ステップカウンタ（100ステップごとにエピソードを区切る）
@@ -290,7 +290,7 @@ class GenericGUIEnv(gym.Env):
     def render(self):
         """レンダリング"""
         if self.render_mode == "rgb_array":
-            return self._get_observation()
+            return self.prev_screen
         elif self.render_mode == "human":
             # 実際の画面が表示されているのでレンダリング不要
             pass
