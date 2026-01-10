@@ -15,17 +15,21 @@ from PIL import Image, ImageDraw, ImageFont
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, choices=["sequential", "random"], default="random")
+    parser.add_argument("--show_done_button", action="store_true")
     return parser.parse_args()
 
 
 class LetterTracingGame:
-    def __init__(self, sequential):
+    def __init__(self, sequential, show_done_button):
         pygame.init()
 
         # 固定値
-        self.width = 800
-        self.height = 600
-        self.font_size = 200
+        self.width = 192
+        self.height = 192
+        self.font_size = 150
+
+        # Doneボタン表示フラグ
+        self.show_done_button = show_done_button
 
         # 文字表示モード
         self.sequential = sequential
@@ -62,7 +66,14 @@ class LetterTracingGame:
         self.start_time = 0
 
         # Doneボタン
-        self.button_rect = pygame.Rect(self.width - 180, self.height - 80, 150, 60)
+        button_width = 50
+        button_height = 20
+        self.button_rect = pygame.Rect(
+            self.width - button_width - 5,
+            self.height - button_height - 5,
+            button_width,
+            button_height,
+        )
 
         # 文字位置のオフセット
         self.letter_offset_x = 0
@@ -81,9 +92,9 @@ class LetterTracingGame:
             # ランダムモード
             self.current_letter = random.choice(string.ascii_lowercase)
 
-        # ランダムなオフセット（-30 ~ +30ピクセル）
-        self.letter_offset_x = random.randint(-30, 30)
-        self.letter_offset_y = random.randint(-30, 30)
+        # ランダムなオフセット（-5 ~ +5ピクセル）
+        self.letter_offset_x = random.randint(-5, 5)
+        self.letter_offset_y = random.randint(-5, 5)
 
         # 文字のSurfaceを生成
         self.letter_surface = self._create_letter_surface(self.current_letter)
@@ -174,13 +185,13 @@ class LetterTracingGame:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # 左クリック
                     # Doneボタンのクリック判定
-                    if self.button_rect.collidepoint(event.pos):
+                    if self.show_done_button and self.button_rect.collidepoint(event.pos):
                         self._on_done_clicked()
                     else:
                         self.drawing = True
                         self.last_pos = event.pos
                         # 最初のクリック位置にも円を描画
-                        pygame.draw.circle(self.user_surface, self.BLACK, event.pos, 12)
+                        pygame.draw.circle(self.user_surface, self.BLACK, event.pos, 5)
 
             # マウスボタンが離された
             elif event.type == pygame.MOUSEBUTTONUP:
@@ -193,7 +204,7 @@ class LetterTracingGame:
                 if self.drawing:
                     current_pos = event.pos
                     # 円を描画
-                    pygame.draw.circle(self.user_surface, self.BLACK, current_pos, 12)
+                    pygame.draw.circle(self.user_surface, self.BLACK, current_pos, 5)
                     self.last_pos = current_pos
 
         return True
@@ -235,7 +246,8 @@ class LetterTracingGame:
             self.screen.blit(self.user_surface, (0, 0))
 
             # Doneボタンを描画
-            self._draw_button()
+            if self.show_done_button:
+                self._draw_button()
 
         pygame.display.flip()
 
@@ -245,10 +257,10 @@ class LetterTracingGame:
         mouse_pos = pygame.mouse.get_pos()
         color = self.BUTTON_HOVER if self.button_rect.collidepoint(mouse_pos) else self.BUTTON_COLOR
 
-        pygame.draw.rect(self.screen, color, self.button_rect, border_radius=5)
+        pygame.draw.rect(self.screen, color, self.button_rect, border_radius=2)
 
         # テキスト
-        font = pygame.font.Font(None, 48)
+        font = pygame.font.Font(None, 16)
         text = font.render("Done", True, self.WHITE)
         text_rect = text.get_rect(center=self.button_rect.center)
         self.screen.blit(text, text_rect)
@@ -256,8 +268,8 @@ class LetterTracingGame:
     def _draw_score(self):
         """スコアを画面中央に表示（OCR検出しやすい形式）"""
         # スコア表示用の矩形（黄色い背景）
-        score_box_width = 500
-        score_box_height = 200
+        score_box_width = 150
+        score_box_height = 80
         score_box_x = (self.width - score_box_width) // 2
         score_box_y = (self.height - score_box_height) // 2
 
@@ -267,20 +279,20 @@ class LetterTracingGame:
         pygame.draw.rect(self.screen, self.SCORE_BG, score_box_rect)
 
         # 枠線（オレンジ）
-        pygame.draw.rect(self.screen, self.SCORE_BORDER, score_box_rect, 5)
+        pygame.draw.rect(self.screen, self.SCORE_BORDER, score_box_rect, 2)
 
         # "Score:" ラベル
-        label_font = pygame.font.Font(None, 64)
+        label_font = pygame.font.Font(None, 24)
         label_text = label_font.render("Score:", True, self.BLACK)
-        label_rect = label_text.get_rect(center=(self.width // 2, self.height // 2 - 40))
+        label_rect = label_text.get_rect(center=(self.width // 2, self.height // 2 - 15))
         self.screen.blit(label_text, label_rect)
 
         # スコア値
-        score_font = pygame.font.Font(None, 96)
+        score_font = pygame.font.Font(None, 36)
         score_text = f"{self.score:.2f}"
         score_text_surface = score_font.render(score_text, True, self.BLACK)
         score_text_rect = score_text_surface.get_rect(
-            center=(self.width // 2, self.height // 2 + 40)
+            center=(self.width // 2, self.height // 2 + 15)
         )
         self.screen.blit(score_text_surface, score_text_rect)
 
@@ -308,5 +320,5 @@ if __name__ == "__main__":
     args = parse_args()
 
     sequential = args.mode == "sequential"
-    game = LetterTracingGame(sequential)
+    game = LetterTracingGame(sequential, args.show_done_button)
     game.run()
