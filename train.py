@@ -21,6 +21,36 @@ from wrappers import make_env
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
+def save_episode_data(video_dir, image_dir, name, bgr_image_list, action_list, reward_list):
+    """エピソードのビデオ、画像、actionとrewardを保存"""
+    if not bgr_image_list:
+        return
+
+    video_path = video_dir / f"{name}.mp4"
+    rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
+    imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
+
+    # 画像として保存
+    curr_image_dir = image_dir / f"{name}_frames"
+    curr_image_dir.mkdir(parents=True, exist_ok=True)
+    for idx, img in enumerate(bgr_image_list):
+        image_path = curr_image_dir / f"{idx:08d}.png"
+        cv2.imwrite(str(image_path), img)
+
+    # actionとrewardをTSVファイルに保存
+    tsv_path = curr_image_dir / "log.tsv"
+    with open(tsv_path, "w", encoding="utf-8") as f:
+        f.write("step\t")
+        for i in range(len(action_list[0])):
+            f.write(f"action{i}\t")
+        f.write("reward\n")
+        for step, (action, reward) in enumerate(zip(action_list, reward_list)):
+            f.write(f"{step}\t")
+            for a in action:
+                f.write(f"{float(a):.6f}\t")
+            f.write(f"{float(reward):.6f}\n")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
@@ -206,6 +236,10 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         )
         bgr_image_list = [cv2.cvtColor(initial_rgb_image, cv2.COLOR_RGB2BGR)]
 
+        # action and reward history for this episode
+        action_list = []
+        reward_list = []
+
         # initial prediction for next step
         pred_image = agent_info.get("next_image", np.zeros_like(obs_for_render))
         pred_reward = agent_info.get("next_reward", 0.0)
@@ -215,6 +249,11 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
             # step
             obs, reward, terminated, truncated, env_info = env.step(action)
+
+            # save action and reward
+            action_list.append(action.copy())
+            reward_list.append(reward)
+
             action, agent_info = agent.step(global_step, obs, reward, terminated, truncated)
 
             # render
@@ -299,32 +338,21 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             with open(result_dir / "best_score.txt", "w") as f:
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
-            video_path = video_dir / f"best_episode.mp4"
-            if bgr_image_list:
-                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
-                imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
-
-                # 画像としても保存
-                curr_image_dir = image_dir / "best_episode_frames"
-                curr_image_dir.mkdir(parents=True, exist_ok=True)
-                for idx, img in enumerate(bgr_image_list):
-                    image_path = curr_image_dir / f"{idx:08d}.png"
-                    cv2.imwrite(str(image_path), img)
+            save_episode_data(
+                video_dir, image_dir, "best_episode", bgr_image_list, action_list, reward_list
+            )
 
         if (
             episode_id == 0 or (episode_id + 1) % args.image_save_interval == 0
         ) and result_dir is not None:
-            video_path = video_dir / f"ep_{episode_id + 1:08d}.mp4"
-            if bgr_image_list:
-                rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
-                imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
-
-                # 画像としても保存
-                curr_image_dir = image_dir / f"ep_{episode_id + 1:08d}_frames"
-                curr_image_dir.mkdir(parents=True, exist_ok=True)
-                for idx, img in enumerate(bgr_image_list):
-                    image_path = curr_image_dir / f"{idx:08d}.png"
-                    cv2.imwrite(str(image_path), img)
+            save_episode_data(
+                video_dir,
+                image_dir,
+                f"ep_{episode_id + 1:08d}",
+                bgr_image_list,
+                action_list,
+                reward_list,
+            )
 
         episode_id += 1
 
