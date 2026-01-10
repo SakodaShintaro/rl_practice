@@ -38,7 +38,6 @@ class HumanPlayRecorder:
         # マウス状態
         self.current_pos = (0, 0)
         self.button_pressed = False
-        self.prev_button_pressed = False
 
         # 環境の領域
         if env.region is not None:
@@ -58,7 +57,7 @@ class HumanPlayRecorder:
         self.tsv_path = self.save_dir / "log.tsv"
         if not self.tsv_path.exists():
             with open(self.tsv_path, "w", encoding="utf-8") as f:
-                f.write("step\taction0\taction1\taction2\taction3\treward\n")
+                f.write("step\taction0\taction1\taction2\treward\n")
 
         # マウスリスナーを開始
         self.listener = mouse.Listener(on_move=self.on_move, on_click=self.on_click)
@@ -85,23 +84,10 @@ class HumanPlayRecorder:
         x_norm = np.clip(x_norm, 0.0, 1.0)
         y_norm = np.clip(y_norm, 0.0, 1.0)
 
-        # KeyDown/KeyUpの確率
-        # ボタンが押された瞬間 -> KeyDown = 1.0
-        # ボタンが離された瞬間 -> KeyUp = 1.0
-        # それ以外 -> 両方 0.0
-        key_down_prob = 0.0
-        key_up_prob = 0.0
+        # マウスボタン状態（押されている=1.0、押されていない=0.0）
+        button_state = 1.0 if self.button_pressed else 0.0
 
-        if self.button_pressed and not self.prev_button_pressed:
-            # 押された瞬間
-            key_down_prob = 1.0
-        elif not self.button_pressed and self.prev_button_pressed:
-            # 離された瞬間
-            key_up_prob = 1.0
-
-        self.prev_button_pressed = self.button_pressed
-
-        action = np.array([x_norm, y_norm, key_down_prob, key_up_prob], dtype=np.float32)
+        action = np.array([x_norm, y_norm, button_state], dtype=np.float32)
         return action
 
     def run(self):
@@ -178,7 +164,7 @@ class HumanPlayRecorder:
         with open(self.tsv_path, "a", encoding="utf-8") as f:
             f.write(
                 f"{self.step_count}\t{float(action[0]):.6f}\t{float(action[1]):.6f}\t"
-                f"{float(action[2]):.6f}\t{float(action[3]):.6f}\t{float(reward):.6f}\n"
+                f"{float(action[2]):.6f}\t{float(reward):.6f}\n"
             )
 
 

@@ -94,11 +94,10 @@ class GenericGUIEnv(gym.Env):
     """
     汎用的なGUI環境ラッパー（PyAutoGui使用）
 
-    Action Space: Box(4,)
+    Action Space: Box(3,)
         - action[0]: x座標 (0.0 ~ 1.0, 画面幅に対する相対位置)
         - action[1]: y座標 (0.0 ~ 1.0, 画面高さに対する相対位置)
-        - action[2]: KeyDown確率 (0.0 ~ 1.0)
-        - action[3]: KeyUp確率 (0.0 ~ 1.0)
+        - action[2]: マウスボタン状態 (0.0 ~ 1.0, 1でdown、0でup)
 
     Observation Space: Box(height, width, 3)
         - RGB画像 (uint8)
@@ -165,10 +164,10 @@ class GenericGUIEnv(gym.Env):
         self.height = region[3]
         print(f"ウィンドウを検出: '{region[4]}' at {self.region}")
 
-        # Action space: [x, y, key_down_prob, key_up_prob]
+        # Action space: [x, y, button_state]
         self.action_space = spaces.Box(
-            low=np.array([0.0, 0.0, 0.0, 0.0]),
-            high=np.array([1.0, 1.0, 1.0, 1.0]),
+            low=np.array([0.0, 0.0, 0.0]),
+            high=np.array([1.0, 1.0, 1.0]),
             dtype=np.float32,
         )
 
@@ -188,6 +187,9 @@ class GenericGUIEnv(gym.Env):
         # ステップカウンタ（100ステップごとにエピソードを区切る）
         self.step_count = 0
 
+        # マウスボタンの状態
+        self.mouse_button_down = False
+
     def reset(self, seed=None, options=None):
         """
         環境をリセット
@@ -203,6 +205,10 @@ class GenericGUIEnv(gym.Env):
         # ステップカウンタをリセット
         self.step_count = 0
 
+        # マウスボタンの状態をリセット
+        self.mouse_button_down = False
+        pyautogui.mouseUp(button="left")
+
         # 初期観測を取得
         observation = self._get_observation()
         self.prev_screen = observation.copy()
@@ -215,10 +221,10 @@ class GenericGUIEnv(gym.Env):
         1ステップ実行
 
         Args:
-            action: [x, y, key_down_prob, key_up_prob]
+            action: [x, y, button_state]
         """
         # アクションを解釈
-        x_norm, y_norm, key_down_prob, key_up_prob = action
+        x_norm, y_norm, button_state = action
 
         # アクションを0.0～1.0の範囲にクリップ
         x_norm_clipped = np.clip(x_norm, 0.0, 1.0)
@@ -232,13 +238,14 @@ class GenericGUIEnv(gym.Env):
         # マウスを移動
         pyautogui.moveTo(x, y)
 
-        # KeyUp/KeyDownの処理（確率的）
-        # 同時実行の場合はup->downの順
-        if np.random.random() < key_up_prob:
-            pyautogui.mouseUp(button="left")
-
-        if np.random.random() < key_down_prob:
+        # マウスボタンの状態を更新
+        desired_state = button_state > 0.5
+        if desired_state and not self.mouse_button_down:
             pyautogui.mouseDown(button="left")
+            self.mouse_button_down = True
+        elif not desired_state and self.mouse_button_down:
+            pyautogui.mouseUp(button="left")
+            self.mouse_button_down = False
 
         # 少し待機（アプリケーションの処理を待つ）
         time.sleep(0.016)  # 約60fps
@@ -301,6 +308,7 @@ def create_letter_tracing_reward_detector():
     Returns:
         reward_detector関数
     """
+
     def reward_detector(prev_screen, current_screen):
         """
         画面からOCRでスコアを検出
