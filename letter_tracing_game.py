@@ -57,6 +57,10 @@ class LetterTracingGame:
         self.score = 0.0
         self.score_timer = 0
 
+        # 制限時間（ミリ秒）
+        self.time_limit = 5000
+        self.start_time = 0
+
         # Doneボタン
         self.button_rect = pygame.Rect(self.width - 180, self.height - 80, 150, 60)
 
@@ -95,6 +99,7 @@ class LetterTracingGame:
         self.show_score = False
         self.score = 0.0
         self.score_timer = 0
+        self.start_time = pygame.time.get_ticks()
 
     def _create_letter_surface(self, letter):
         """PILを使って文字のSurfaceを生成"""
@@ -209,6 +214,10 @@ class LetterTracingGame:
             # 1秒経過したら次の文字へ
             if pygame.time.get_ticks() - self.score_timer > 1000:
                 self.new_letter()
+        else:
+            # 制限時間チェック
+            if pygame.time.get_ticks() - self.start_time > self.time_limit:
+                self._on_done_clicked()
 
     def draw(self):
         """画面描画"""
