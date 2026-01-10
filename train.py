@@ -216,6 +216,9 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             obs, reward, terminated, truncated, env_info = env.step(action)
             action, agent_info = agent.step(global_step, obs, reward, terminated, truncated)
 
+            # render
+            obs_for_render = obs.copy().transpose(1, 2, 0)
+
             # log
             elapsed_time_sec = time.time() - start_time
             elapsed_time_min = elapsed_time_sec / 60
@@ -231,9 +234,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             data_dict["losses/pred_image_loss"] = np.mean(np.abs(pred_image - obs_for_render))
             data_dict["losses/pred_reward_loss"] = np.abs(pred_reward - reward)
             wandb.log(data_dict)
-
-            # render
-            obs_for_render = obs.copy().transpose(1, 2, 0)
 
             reward_image = create_reward_image(pred_reward, reward)
             rgb_image = concat_labeled_images(
