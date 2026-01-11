@@ -114,7 +114,7 @@ class FourQuadrantGame:
         if clicked_quadrant == self.correct_quadrant:
             self.score = 1.0  # 正解
         else:
-            self.score = 0.0  # 不正解
+            self.score = -0.01  # 不正解
 
         # スコア表示モードに移行
         self.show_score = True

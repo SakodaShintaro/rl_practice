@@ -132,7 +132,7 @@ class SimpleFourQuadrantEnv(gym.Env):
             if clicked_quadrant == self.correct_quadrant:
                 reward = 1.0
             else:
-                reward = 0.0
+                reward = -0.01
 
             # スコア表示モードに移行
             self.current_score = reward
