@@ -16,9 +16,9 @@ python3 train.py baseline$suffix \
   --value_range 200.0 \
   --step_limit 40_000 \
   --eval_range 20 \
-  --image_processor_type ae \
+  --image_processor_type simple_cnn \
   --seq_len 1 \
   --batch_size 16 \
   --learning_rate 1e-4 \
-  --buffer_device cpu \
-  --render 0 \
+  --render 1 \
+  --use_done 0 \
