@@ -106,41 +106,39 @@ class SimpleFourQuadrantEnv(gym.Env):
         # ボタンの状態を判定
         current_button_state = button_state > 0.5
 
-        # スコア表示タイマーの更新
+        # スコア表示中かどうかで処理を分岐
         if self.show_score:
+            # スコア表示中の処理
             self.score_timer += 1
             if self.score_timer >= self.score_display_duration:
                 self.show_score = False
                 self.score_timer = 0
-
-        # スコア表示中は報酬0、そうでなければデフォルト-0.5
-        if self.show_score:
+                # スコア表示が終わったら新しい問題を生成
+                self.correct_quadrant = random.randint(0, 3)
             reward = 0.0
         else:
+            # スコア表示中でない場合の処理
             reward = -0.5
 
-        # クリック判定（ボタンが押されている間、かつスコア表示中でない場合）
-        if current_button_state and not self.show_score:
-            # どの区画がクリックされたか判定
-            clicked_quadrant = None
-            for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
-                if qx <= x < qx + qw and qy <= y < qy + qh:
-                    clicked_quadrant = i
-                    break
+            # クリック判定（ボタンが押されている間）
+            if current_button_state:
+                # どの区画がクリックされたか判定
+                clicked_quadrant = None
+                for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
+                    if qx <= x < qx + qw and qy <= y < qy + qh:
+                        clicked_quadrant = i
+                        break
 
-            # 報酬を計算
-            if clicked_quadrant == self.correct_quadrant:
-                reward = 1.0
-            else:
-                reward = -0.01
+                # 報酬を計算
+                if clicked_quadrant == self.correct_quadrant:
+                    reward = 1.0
+                else:
+                    reward = -0.01
 
-            # スコア表示モードに移行
-            self.current_score = reward
-            self.show_score = True
-            self.score_timer = 0
-
-            # 新しい問題を生成
-            self.correct_quadrant = random.randint(0, 3)
+                # スコア表示モードに移行
+                self.current_score = reward
+                self.show_score = True
+                self.score_timer = 0
 
         # ボタンの状態を更新
         self.prev_button_state = current_button_state
