@@ -184,7 +184,7 @@ class GenericGUIEnv(gym.Env):
         # 前回の画面
         self.prev_screen = None
 
-        # ステップカウンタ（100ステップごとにエピソードを区切る）
+        # ステップカウンタ（適当なステップごとにエピソードを区切る）
         self.step_count = 0
 
         # マウスボタンの状態
@@ -266,7 +266,7 @@ class GenericGUIEnv(gym.Env):
 
         # 終了判定
         terminated = False
-        truncated = self.step_count >= 100
+        truncated = self.step_count >= 200
 
         info = {}
 
