@@ -45,7 +45,6 @@ class SequentialBatchSampler:
 
 class OnPolicyAgent:
     on_policy_epoch = 4
-    gamma = 0.99
 
     def __init__(self, args, observation_space, action_space) -> None:
         # action properties
@@ -56,6 +55,7 @@ class OnPolicyAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
 
+        self.gamma = args.gamma
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
         self.batch_size = args.batch_size

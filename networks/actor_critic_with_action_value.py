@@ -20,7 +20,7 @@ class Network(nn.Module):
         self, observation_space_shape: tuple[int], action_dim: int, args: argparse.Namespace
     ) -> None:
         super(Network, self).__init__()
-        self.gamma = 0.99
+        self.gamma = args.gamma
         self.num_bins = args.num_bins
         self.sparsity = args.sparsity
         self.seq_len = args.seq_len
