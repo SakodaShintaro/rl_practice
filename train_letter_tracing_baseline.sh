@@ -16,10 +16,11 @@ python3 train.py baseline$suffix \
   --value_range 200.0 \
   --step_limit 40_000 \
   --eval_range 20 \
-  --image_processor_type simple_cnn \
+  --image_processor_type ae \
   --seq_len 1 \
-  --batch_size 16 \
+  --batch_size 32 \
   --learning_rate 1e-4 \
   --render 1 \
   --use_done 0 \
   --gamma 0.0 \
+  --disable_state_predictor 1 \
