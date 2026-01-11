@@ -56,6 +56,10 @@ class FourQuadrantGame:
         self.time_limit = time_limit if time_limit is not None else 3000
         self.start_time = 0
 
+        # クールダウン期間（スコア表示後に判定を無効化する時間、ミリ秒）
+        self.cooldown_duration = 150
+        self.cooldown_end_time = 0
+
         # 現在の正解の区画インデックス
         self.correct_quadrant = 0
 
@@ -73,11 +77,19 @@ class FourQuadrantGame:
         self.score_timer = 0
         self.start_time = pygame.time.get_ticks()
 
+        # クールダウン期間を設定（スコア表示が終わってから少し待つ）
+        self.cooldown_end_time = pygame.time.get_ticks() + self.cooldown_duration
+
     def handle_events(self):
         """イベント処理"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
+
+        # クールダウン期間中は判定しない
+        current_time = pygame.time.get_ticks()
+        if current_time < self.cooldown_end_time:
+            return True
 
         # マウスボタンの状態を取得
         mouse_pressed = pygame.mouse.get_pressed()[0]
