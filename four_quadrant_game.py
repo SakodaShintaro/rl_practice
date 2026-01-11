@@ -41,10 +41,10 @@ class FourQuadrantGame:
         half_w = self.width // 2
         half_h = self.height // 2
         self.quadrants = [
-            pygame.Rect(0, 0, half_w, half_h),           # 左上
-            pygame.Rect(half_w, 0, half_w, half_h),      # 右上
-            pygame.Rect(0, half_h, half_w, half_h),      # 左下
-            pygame.Rect(half_w, half_h, half_w, half_h), # 右下
+            pygame.Rect(0, 0, half_w, half_h),  # 左上
+            pygame.Rect(half_w, 0, half_w, half_h),  # 右上
+            pygame.Rect(0, half_h, half_w, half_h),  # 左下
+            pygame.Rect(half_w, half_h, half_w, half_h),  # 右下
         ]
 
         # スコア表示
@@ -79,14 +79,13 @@ class FourQuadrantGame:
             if event.type == pygame.QUIT:
                 return False
 
-            # スコア表示中はマウス操作を無効化
-            if self.show_score:
-                continue
+        # マウスボタンの状態を取得
+        mouse_pressed = pygame.mouse.get_pressed()[0]
 
-            # マウスボタンが押された
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:  # 左クリック
-                    self._on_click(event.pos)
+        # スコア表示中でなく、マウスボタンが押されている場合は判定
+        if not self.show_score and mouse_pressed:
+            pos = pygame.mouse.get_pos()
+            self._on_click(pos)
 
         return True
 
@@ -103,7 +102,7 @@ class FourQuadrantGame:
         if clicked_quadrant == self.correct_quadrant:
             self.score = 1.0  # 正解
         else:
-            self.score = -1.0  # 不正解
+            self.score = 0.0  # 不正解
 
         # スコア表示モードに移行
         self.show_score = True
@@ -113,16 +112,9 @@ class FourQuadrantGame:
         """ゲーム状態の更新"""
         # スコア表示中の場合
         if self.show_score:
-            # 1秒経過したら次の問題へ
+            # 一定時間経過したら次の問題へ
             if pygame.time.get_ticks() - self.score_timer > 500:
                 self.new_question()
-        else:
-            # 制限時間チェック
-            if pygame.time.get_ticks() - self.start_time > self.time_limit:
-                # 時間切れは不正解扱い
-                self.score = -1.0
-                self.show_score = True
-                self.score_timer = pygame.time.get_ticks()
 
     def draw(self):
         """画面描画"""
