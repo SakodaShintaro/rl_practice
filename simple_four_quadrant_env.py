@@ -207,7 +207,7 @@ class SimpleFourQuadrantEnv(gym.Env):
         )
 
         # テキスト描画
-        score_text = f"{self.current_score:.1f}"
+        score_text = f"{self.current_score:.2f}"
 
         # フォントサイズを調整してテキストを中央に配置
         font_size = 36

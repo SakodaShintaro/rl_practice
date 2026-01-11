@@ -172,7 +172,7 @@ class FourQuadrantGame:
 
         # スコア値
         score_font = pygame.font.Font(None, 36)
-        score_text = f"{self.score:.1f}"
+        score_text = f"{self.score:.2f}"
         score_text_surface = score_font.render(score_text, True, self.BLACK)
         score_text_rect = score_text_surface.get_rect(
             center=(self.width // 2, self.height // 2 + 15)
