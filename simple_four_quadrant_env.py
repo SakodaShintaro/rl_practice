@@ -96,7 +96,7 @@ class SimpleFourQuadrantEnv(gym.Env):
 
         # クリック判定（ボタンが押された→離されたとき）
         reward = 0.0
-        if self.prev_button_state and not current_button_state:
+        if (self.prev_button_state and not current_button_state) or True:
             # どの区画がクリックされたか判定
             clicked_quadrant = None
             for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
