@@ -20,8 +20,8 @@ class SimpleFourQuadrantEnv(gym.Env):
         self.render_mode = render_mode
 
         # 固定値
-        self.width = 96
-        self.height = 96
+        self.width = 192
+        self.height = 192
 
         # 色定義 (RGB)
         self.WHITE = np.array([255, 255, 255], dtype=np.uint8)
