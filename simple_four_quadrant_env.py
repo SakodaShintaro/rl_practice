@@ -94,9 +94,9 @@ class SimpleFourQuadrantEnv(gym.Env):
         # ボタンの状態を判定
         current_button_state = button_state > 0.5
 
-        # クリック判定（ボタンが押された→離されたとき）
-        reward = 0.0
-        if (self.prev_button_state and not current_button_state) or True:
+        # クリック判定（ボタンが押されている間）
+        reward = -0.5
+        if current_button_state:
             # どの区画がクリックされたか判定
             clicked_quadrant = None
             for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
@@ -108,7 +108,7 @@ class SimpleFourQuadrantEnv(gym.Env):
             if clicked_quadrant == self.correct_quadrant:
                 reward = 1.0
             else:
-                reward = -0.1
+                reward = 0.0
 
             # 新しい問題を生成
             self.correct_quadrant = random.randint(0, 3)
