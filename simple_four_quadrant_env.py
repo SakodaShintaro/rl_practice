@@ -9,6 +9,7 @@ import random
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from PIL import Image, ImageDraw, ImageFont
 
 
 class SimpleFourQuadrantEnv(gym.Env):
@@ -27,6 +28,8 @@ class SimpleFourQuadrantEnv(gym.Env):
         self.WHITE = np.array([255, 255, 255], dtype=np.uint8)
         self.BLACK = np.array([0, 0, 0], dtype=np.uint8)
         self.RED = np.array([255, 0, 0], dtype=np.uint8)
+        self.SCORE_BG = np.array([255, 255, 200], dtype=np.uint8)
+        self.SCORE_BORDER = np.array([200, 150, 0], dtype=np.uint8)
 
         # 4分割の矩形を定義 (x, y, w, h)
         half_w = self.width // 2
@@ -62,6 +65,12 @@ class SimpleFourQuadrantEnv(gym.Env):
         # マウスボタンの状態
         self.prev_button_state = False
 
+        # スコア表示関連
+        self.show_score = False
+        self.current_score = 0.0
+        self.score_display_duration = 3
+        self.score_timer = 0
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -69,6 +78,9 @@ class SimpleFourQuadrantEnv(gym.Env):
         self.correct_quadrant = random.randint(0, 3)
         self.step_count = 0
         self.prev_button_state = False
+        self.show_score = False
+        self.current_score = 0.0
+        self.score_timer = 0
 
         # 初期観測を取得
         observation = self._get_observation()
@@ -94,9 +106,21 @@ class SimpleFourQuadrantEnv(gym.Env):
         # ボタンの状態を判定
         current_button_state = button_state > 0.5
 
-        # クリック判定（ボタンが押されている間）
-        reward = -0.5
-        if current_button_state:
+        # スコア表示タイマーの更新
+        if self.show_score:
+            self.score_timer += 1
+            if self.score_timer >= self.score_display_duration:
+                self.show_score = False
+                self.score_timer = 0
+
+        # スコア表示中は報酬0、そうでなければデフォルト-0.5
+        if self.show_score:
+            reward = 0.0
+        else:
+            reward = -0.5
+
+        # クリック判定（ボタンが押されている間、かつスコア表示中でない場合）
+        if current_button_state and not self.show_score:
             # どの区画がクリックされたか判定
             clicked_quadrant = None
             for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
@@ -109,6 +133,11 @@ class SimpleFourQuadrantEnv(gym.Env):
                 reward = 1.0
             else:
                 reward = 0.0
+
+            # スコア表示モードに移行
+            self.current_score = reward
+            self.show_score = True
+            self.score_timer = 0
 
             # 新しい問題を生成
             self.correct_quadrant = random.randint(0, 3)
@@ -136,19 +165,67 @@ class SimpleFourQuadrantEnv(gym.Env):
         # 白背景の画像を作成
         image = np.full((self.height, self.width, 3), self.WHITE, dtype=np.uint8)
 
-        # 各区画を描画
-        for i, (x, y, w, h) in enumerate(self.quadrants):
-            if i == self.correct_quadrant:
-                # 正解の区画は赤色で塗りつぶし
-                image[y : y + h, x : x + w] = self.RED
-            else:
-                # それ以外は枠線だけ描く（黒い線）
-                image[y, x : x + w] = self.BLACK
-                image[y + h - 1, x : x + w] = self.BLACK
-                image[y : y + h, x] = self.BLACK
-                image[y : y + h, x + w - 1] = self.BLACK
+        if self.show_score:
+            # スコア表示
+            self._draw_score(image)
+        else:
+            # 各区画を描画
+            for i, (x, y, w, h) in enumerate(self.quadrants):
+                if i == self.correct_quadrant:
+                    # 正解の区画は赤色で塗りつぶし
+                    image[y : y + h, x : x + w] = self.RED
+                else:
+                    # それ以外は枠線だけ描く（黒い線）
+                    image[y, x : x + w] = self.BLACK
+                    image[y + h - 1, x : x + w] = self.BLACK
+                    image[y : y + h, x] = self.BLACK
+                    image[y : y + h, x + w - 1] = self.BLACK
 
         return image
+
+    def _draw_score(self, image):
+        """スコアを画面中央に表示"""
+        # PILで描画
+        pil_image = Image.fromarray(image)
+        draw = ImageDraw.Draw(pil_image)
+
+        # スコア表示用の矩形（黄色い背景）
+        score_box_width = 150
+        score_box_height = 80
+        score_box_x = (self.width - score_box_width) // 2
+        score_box_y = (self.height - score_box_height) // 2
+
+        # 背景（薄い黄色）
+        draw.rectangle(
+            [
+                score_box_x,
+                score_box_y,
+                score_box_x + score_box_width,
+                score_box_y + score_box_height,
+            ],
+            fill=tuple(self.SCORE_BG),
+            outline=tuple(self.SCORE_BORDER),
+            width=2,
+        )
+
+        # テキスト描画
+        score_text = f"{self.current_score:.1f}"
+
+        # フォントサイズを調整してテキストを中央に配置
+        font_size = 36
+        font = ImageFont.load_default()
+
+        # テキストの位置を計算（中央揃え）
+        text_bbox = draw.textbbox((0, 0), score_text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        text_x = self.width // 2 - text_width // 2
+        text_y = self.height // 2 - text_height // 2
+
+        draw.text((text_x, text_y), score_text, fill=tuple(self.BLACK), font=font)
+
+        # PILイメージをnumpy配列に戻す
+        image[:] = np.array(pil_image)
 
     def render(self):
         """レンダリング"""
