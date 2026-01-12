@@ -10,6 +10,11 @@ import random
 import numpy as np
 import pygame
 
+# 状態定数
+STATE_PLAYING = "PLAYING"
+STATE_SHOW_SCORE = "SHOW_SCORE"
+STATE_WAITING = "WAITING"
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -47,10 +52,12 @@ class FourQuadrantGame:
             pygame.Rect(half_w, half_h, half_w, half_h),  # 右下
         ]
 
-        # スコア表示
-        self.show_score = False
+        # 状態管理
+        self.state = STATE_PLAYING
         self.score = 0.0
-        self.score_timer = 0
+        self.state_timer = 0
+        self.score_duration = 500
+        self.waiting_duration = 200
 
         # 制限時間（ミリ秒）
         self.time_limit = time_limit if time_limit is not None else 3000
@@ -72,9 +79,9 @@ class FourQuadrantGame:
         self.correct_quadrant = random.randint(0, 3)
 
         # 状態をリセット
-        self.show_score = False
+        self.state = STATE_PLAYING
         self.score = 0.0
-        self.score_timer = 0
+        self.state_timer = 0
         self.start_time = pygame.time.get_ticks()
 
         # クールダウン期間を設定（スコア表示が終わってから少し待つ）
@@ -94,8 +101,14 @@ class FourQuadrantGame:
         # マウスボタンの状態を取得
         mouse_pressed = pygame.mouse.get_pressed()[0]
 
-        # スコア表示中でなく、マウスボタンが押されている場合は判定
-        if not self.show_score and mouse_pressed:
+        # 状態に応じた処理
+        if self.state == STATE_WAITING and mouse_pressed:
+            # 赤色なし状態でクリックされた場合
+            self.score = -0.5
+            self.state = STATE_SHOW_SCORE
+            self.state_timer = pygame.time.get_ticks()
+        elif self.state == STATE_PLAYING and mouse_pressed:
+            # 通常状態でクリックされた場合
             pos = pygame.mouse.get_pos()
             self._on_click(pos)
 
@@ -117,25 +130,34 @@ class FourQuadrantGame:
             self.score = -0.01  # 不正解
 
         # スコア表示モードに移行
-        self.show_score = True
-        self.score_timer = pygame.time.get_ticks()
+        self.state = STATE_SHOW_SCORE
+        self.state_timer = pygame.time.get_ticks()
 
     def update(self):
         """ゲーム状態の更新"""
-        # スコア表示中の場合
-        if self.show_score:
-            # 一定時間経過したら次の問題へ
-            if pygame.time.get_ticks() - self.score_timer > 500:
-                self.new_question()
+        current_time = pygame.time.get_ticks()
+
+        if self.state == STATE_SHOW_SCORE:
+            # スコア表示中の場合
+            if current_time - self.state_timer > self.score_duration:
+                self.state = STATE_WAITING
+                self.state_timer = current_time
+        elif self.state == STATE_WAITING:
+            # 赤色なし状態の場合
+            if current_time - self.state_timer > self.waiting_duration:
+                self.state = STATE_PLAYING
 
     def draw(self):
         """画面描画"""
         # 背景を白で塗りつぶし
         self.screen.fill(self.WHITE)
 
-        if self.show_score:
+        if self.state == STATE_SHOW_SCORE:
             # スコア表示
             self._draw_score()
+        elif self.state == STATE_WAITING:
+            # 赤色なし状態（全て白）
+            pass
         else:
             # 各区画を描画
             for i, rect in enumerate(self.quadrants):

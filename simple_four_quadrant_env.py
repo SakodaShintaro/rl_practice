@@ -11,6 +11,11 @@ import numpy as np
 from gymnasium import spaces
 from PIL import Image, ImageDraw, ImageFont
 
+# 状態定数
+STATE_PLAYING = "PLAYING"
+STATE_SHOW_SCORE = "SHOW_SCORE"
+STATE_WAITING = "WAITING"
+
 
 class SimpleFourQuadrantEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
@@ -65,11 +70,12 @@ class SimpleFourQuadrantEnv(gym.Env):
         # マウスボタンの状態
         self.prev_button_state = False
 
-        # スコア表示関連
-        self.show_score = False
+        # 状態管理
+        self.state = STATE_PLAYING
         self.current_score = 0.0
-        self.score_display_duration = 3
-        self.score_timer = 0
+        self.state_timer = 0
+        self.score_duration = 3
+        self.waiting_duration = 1
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -78,9 +84,9 @@ class SimpleFourQuadrantEnv(gym.Env):
         self.correct_quadrant = random.randint(0, 3)
         self.step_count = 0
         self.prev_button_state = False
-        self.show_score = False
+        self.state = STATE_PLAYING
         self.current_score = 0.0
-        self.score_timer = 0
+        self.state_timer = 0
 
         # 初期観測を取得
         observation = self._get_observation()
@@ -106,18 +112,32 @@ class SimpleFourQuadrantEnv(gym.Env):
         # ボタンの状態を判定
         current_button_state = button_state > 0.5
 
-        # スコア表示中かどうかで処理を分岐
-        if self.show_score:
+        reward = 0.0
+
+        # 状態に応じた処理
+        if self.state == STATE_SHOW_SCORE:
             # スコア表示中の処理
-            self.score_timer += 1
-            if self.score_timer >= self.score_display_duration:
-                self.show_score = False
-                self.score_timer = 0
-                # スコア表示が終わったら新しい問題を生成
+            self.state_timer += 1
+            if self.state_timer >= self.score_duration:
+                self.state = STATE_WAITING
+                self.state_timer = 0
+        elif self.state == STATE_WAITING:
+            # 赤色なし状態の処理
+            self.state_timer += 1
+
+            # クリック判定（ボタンが押されている間）
+            if current_button_state:
+                # 赤色なし状態でクリックされたらペナルティ
+                self.current_score = -0.5
+                self.state = STATE_SHOW_SCORE
+                self.state_timer = 0
+                reward = self.current_score
+            elif self.state_timer >= self.waiting_duration:
+                # 一定時間経過したら赤色を表示（新しい問題）
+                self.state = STATE_PLAYING
                 self.correct_quadrant = random.randint(0, 3)
-            reward = 0.0
         else:
-            # スコア表示中でない場合の処理
+            # 通常状態の処理中はなにもしないことにペナルティ
             reward = -0.5
 
             # クリック判定（ボタンが押されている間）
@@ -137,8 +157,8 @@ class SimpleFourQuadrantEnv(gym.Env):
 
                 # スコア表示モードに移行
                 self.current_score = reward
-                self.show_score = True
-                self.score_timer = 0
+                self.state = STATE_SHOW_SCORE
+                self.state_timer = 0
 
         # ボタンの状態を更新
         self.prev_button_state = current_button_state
@@ -163,9 +183,12 @@ class SimpleFourQuadrantEnv(gym.Env):
         # 白背景の画像を作成
         image = np.full((self.height, self.width, 3), self.WHITE, dtype=np.uint8)
 
-        if self.show_score:
+        if self.state == STATE_SHOW_SCORE:
             # スコア表示
             self._draw_score(image)
+        elif self.state == STATE_WAITING:
+            # 赤色なし状態（全て白）
+            pass
         else:
             # 各区画を描画
             for i, (x, y, w, h) in enumerate(self.quadrants):
