@@ -248,7 +248,7 @@ class GenericGUIEnv(gym.Env):
             self.mouse_button_down = False
 
         # 少し待機（アプリケーションの処理を待つ）
-        time.sleep(0.016)  # 約60fps
+        time.sleep(0.032)
 
         # 観測を取得
         current_screen = self._get_observation()
