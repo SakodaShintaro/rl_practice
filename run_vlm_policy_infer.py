@@ -27,7 +27,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value_bins", type=int, default=51)
     parser.add_argument("--value_min", type=float, default=-10.0)
     parser.add_argument("--value_max", type=float, default=10.0)
-    parser.add_argument("--euler_steps", type=int, default=5)
     parser.add_argument("--action_horizon", type=int, default=8)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--use_quantization", type=int, default=0, choices=[0, 1])
@@ -125,7 +124,6 @@ def main() -> None:
         value_bins=args.value_bins,
         value_min=args.value_min,
         value_max=args.value_max,
-        euler_steps=args.euler_steps,
         gamma=args.gamma,
         dacer_loss_weight=args.dacer_loss_weight,
     )

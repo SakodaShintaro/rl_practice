@@ -71,7 +71,6 @@ class OffPolicyAgent:
                 value_bins=args.num_bins,
                 value_min=-args.value_range,
                 value_max=+args.value_range,
-                euler_steps=5,
                 gamma=args.gamma,
                 dacer_loss_weight=args.dacer_loss_weight,
             ).to(self.device)

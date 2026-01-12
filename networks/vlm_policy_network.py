@@ -32,7 +32,6 @@ class VLMPolicyNetwork(nn.Module):
         value_bins: int,
         value_min: float,
         value_max: float,
-        euler_steps: int,
         gamma: float,
         dacer_loss_weight: float,
     ) -> None:
@@ -45,7 +44,7 @@ class VLMPolicyNetwork(nn.Module):
         self.value_bins = value_bins
         self.value_min = value_min
         self.value_max = value_max
-        self.euler_steps = euler_steps
+        self.euler_steps = 1
         self.gamma = gamma
         self.dacer_loss_weight = dacer_loss_weight
         if self.value_bins <= 1:
