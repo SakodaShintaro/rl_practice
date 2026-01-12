@@ -1,12 +1,10 @@
 import numpy as np
 import torch
 from torch import optim
+from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
-from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
-from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.actor_critic_with_action_value import Network
-from networks.sparse_utils import apply_masks_during_training
-from networks.weight_project import get_initial_norms, weight_project
+from networks.vlm_policy_network import VLMPolicyNetwork
 from replay_buffer import ReplayBuffer
 from reward_processor import RewardProcessor
 
@@ -30,17 +28,57 @@ class OffPolicyAgent:
 
         self.learning_starts = args.learning_starts
         self.batch_size = args.batch_size
-        self.use_weight_projection = args.use_weight_projection
-        self.apply_masks_during_training = args.apply_masks_during_training
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
 
         # Sequence observation management
         self.seq_len = args.seq_len
 
-        self.network = Network(observation_space.shape, action_dim=self.action_dim, args=args).to(
-            self.device
-        )
+        if args.network_class == "vlm_policy":
+            if args.use_quantization:
+                bnb_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                )
+            else:
+                bnb_config = None
+            model = AutoModelForImageTextToText.from_pretrained(
+                args.vlm_model_id,
+                quantization_config=bnb_config,
+                dtype=torch.bfloat16,
+                device_map="auto",
+                cache_dir="cache",
+            )
+            processor = AutoProcessor.from_pretrained(
+                args.vlm_model_id,
+                cache_dir="cache",
+            )
+            self.network = VLMPolicyNetwork(
+                action_dim=self.action_dim,
+                seq_len=args.seq_len,
+                action_horizon=1,
+                observation_space_shape=observation_space.shape,
+                image_processor_type=args.image_processor_type,
+                target_layer_idx=args.target_layer_idx,
+                model=model,
+                processor=processor,
+                use_lora=True,
+                task_prompt="",
+                action_hidden_dim=args.actor_hidden_dim,
+                value_hidden_dim=args.critic_hidden_dim,
+                value_bins=args.num_bins,
+                value_min=-args.value_range,
+                value_max=+args.value_range,
+                euler_steps=5,
+                gamma=args.gamma,
+                dacer_loss_weight=args.dacer_loss_weight,
+            ).to(self.device)
+        else:
+            self.network = Network(
+                observation_space.shape, action_dim=self.action_dim, args=args
+            ).to(self.device)
         self.rnn_state = self.network.init_state().to(self.device)
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
@@ -58,28 +96,7 @@ class OffPolicyAgent:
         )
 
         # Initialize gradient norm targets
-        self.monitoring_targets = {
-            "total": self.network,
-            "actor": self.network.policy_head,
-            "critic": self.network.value_head,
-            "state_predictor": self.network.prediction_head.state_predictor,
-        }
 
-        # Initialize weight projection if enabled
-        self.weight_projection_norms = {}
-        if args.use_weight_projection:
-            self.weight_projection_norms["actor"] = get_initial_norms(self.network.policy_head)
-            self.weight_projection_norms["critic"] = get_initial_norms(self.network.value_head)
-            self.weight_projection_norms["state_predictor"] = get_initial_norms(
-                self.network.prediction_head.state_predictor
-            )
-
-        self.metrics_computers = {
-            "state": StatisticalMetricsComputer(),
-            "actor": StatisticalMetricsComputer(),
-            "critic": StatisticalMetricsComputer(),
-            "state_predictor": StatisticalMetricsComputer(),
-        }
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
     @torch.inference_mode()
@@ -116,31 +133,32 @@ class OffPolicyAgent:
 
         # inference
         latest_data = self.rb.get_latest(self.seq_len)
-        output_enc, self.rnn_state, _ = self.network.encoder.forward(
+        infer_dict = self.network.infer(
             latest_data.observations,
             latest_data.obs_z,
             latest_data.actions,
             latest_data.rewards,
             self.rnn_state,
         )
+        self.rnn_state = infer_dict["rnn_state"]
 
         # action
         if global_step < self.learning_starts:
             action = self.action_space.sample()
         else:
-            action, _ = self.network.policy_head.get_action(output_enc)
-            action = action[0].cpu().numpy()
+            action = infer_dict["action"][0].cpu().numpy()
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
         self.prev_action = action
 
         # predict next state
-        action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
-        next_image, next_reward = self.network.predict_next_state(
-            output_enc, action_tensor.unsqueeze(0)
-        )
-        info_dict["next_image"] = next_image
-        info_dict["next_reward"] = next_reward
+        if hasattr(self.network, "predict_next_state"):
+            action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
+            next_image, next_reward = self.network.predict_next_state(
+                infer_dict["x"], action_tensor.unsqueeze(0)
+            )
+            info_dict["next_image"] = next_image
+            info_dict["next_reward"] = next_reward
 
         return action, info_dict
 
@@ -193,34 +211,6 @@ class OffPolicyAgent:
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
 
-        # Gradient and parameter norms
-        for key, value in self.monitoring_targets.items():
-            info_dict[f"gradients/{key}"] = compute_gradient_norm(value)
-            info_dict[f"parameters/{key}"] = compute_parameter_norm(value)
-
         self.optimizer.step()
-
-        # Apply weight projection after optimizer step
-        if self.use_weight_projection:
-            weight_project(self.network.policy_head, self.weight_projection_norms["actor"])
-            weight_project(self.network.value_head, self.weight_projection_norms["critic"])
-            weight_project(
-                self.network.prediction_head.state_predictor,
-                self.weight_projection_norms["state_predictor"],
-            )
-
-        # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
-        if self.apply_masks_during_training:
-            apply_masks_during_training(self.network.policy_head)
-            apply_masks_during_training(self.network.value_head)
-            apply_masks_during_training(self.network.prediction_head.state_predictor)
-
-        # Feature metrics
-        for feature_name, feature in activation_dict.items():
-            info_dict[f"activation_norms/{feature_name}"] = feature.norm(dim=1).mean().item()
-
-            result_dict = self.metrics_computers[feature_name](feature.detach())
-            for key, value in result_dict.items():
-                info_dict[f"{key}/{feature_name}"] = value
 
         return info_dict

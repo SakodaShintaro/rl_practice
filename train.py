@@ -70,7 +70,16 @@ def parse_args() -> argparse.Namespace:
         ],
     )
     parser.add_argument(
-        "--agent_type", type=str, default="on_policy", choices=["off_policy", "on_policy"]
+        "--agent_type",
+        type=str,
+        default="on_policy",
+        choices=["off_policy", "on_policy"],
+    )
+    parser.add_argument(
+        "--network_class",
+        type=str,
+        default="actor_critic",
+        choices=["actor_critic", "vlm_policy"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -132,6 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--disable_state_predictor", type=int, default=0, choices=[0, 1])
     parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
     parser.add_argument("--denoising_time", type=float, default=1.0)
+    parser.add_argument("--vlm_model_id", type=str, default="Qwen/Qwen3-VL-2B-Instruct")
 
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")

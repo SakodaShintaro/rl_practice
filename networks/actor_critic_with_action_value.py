@@ -146,6 +146,16 @@ class Network(nn.Module):
             "rnn_state": rnn_state,  # (B, ...)
         }
 
+    def infer(
+        self,
+        s_seq: torch.Tensor,  # (B, T, C, H, W)
+        obs_z_seq: torch.Tensor,  # (B, T, C', H', W')
+        a_seq: torch.Tensor,  # (B, T, action_dim)
+        r_seq: torch.Tensor,  # (B, T, 1)
+        rnn_state: torch.Tensor,
+    ) -> dict:
+        return self.forward(s_seq, obs_z_seq, a_seq, r_seq, rnn_state, None)
+
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
         obs_curr = data.observations[:, :-1]
         obs_z_curr = data.obs_z[:, :-1]
