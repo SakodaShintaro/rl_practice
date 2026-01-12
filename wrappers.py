@@ -61,7 +61,13 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "FourQuadrant-v0":
-        env = SimpleFourQuadrantEnv(render_mode="rgb_array")
+        reward_detector = create_score_reward_detector()
+        env = GenericGUIEnv(
+            reward_detector=reward_detector,
+            render_mode="rgb_array",
+            window_title="Four Quadrant Game",
+        )
+        # env = SimpleFourQuadrantEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
