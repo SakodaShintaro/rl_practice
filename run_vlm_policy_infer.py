@@ -102,7 +102,7 @@ def main() -> None:
         args.model_id,
         quantization_config=bnb_config,
         dtype=torch.bfloat16,
-        device_map="auto",
+        device_map={"": "cuda:0"},
         cache_dir=str(args.cache_dir),
         local_files_only=bool(args.local_files_only),
     )

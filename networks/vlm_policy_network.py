@@ -51,9 +51,9 @@ class VLMPolicyNetwork(nn.Module):
         if self.value_bins <= 1:
             raise ValueError("value_bins must be > 1 for HLGauss-based value modeling.")
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device
         self.model = model
+        device = next(model.parameters()).device
+        self.device = device
         self.processor = processor
         if use_lora:
             lora_config = LoraConfig(
