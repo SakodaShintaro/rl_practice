@@ -48,7 +48,7 @@ class OffPolicyAgent:
                 args.vlm_model_id,
                 quantization_config=bnb_config,
                 dtype=torch.bfloat16,
-                device_map="auto",
+                device_map={"": "cuda:0"},
                 cache_dir="cache",
             )
             processor = AutoProcessor.from_pretrained(
