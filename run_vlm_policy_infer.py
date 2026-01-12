@@ -24,7 +24,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_id", type=str, default="Qwen/Qwen3-VL-2B-Instruct")
     parser.add_argument("--task_prompt", type=str, default="")
     parser.add_argument("--cache_dir", type=Path, default=Path("cache"))
-    parser.add_argument("--local_files_only", type=int, default=1, choices=[0, 1])
     parser.add_argument("--value_bins", type=int, default=51)
     parser.add_argument("--value_min", type=float, default=-10.0)
     parser.add_argument("--value_max", type=float, default=10.0)
@@ -104,12 +103,10 @@ def main() -> None:
         dtype=torch.bfloat16,
         device_map={"": "cuda:0"},
         cache_dir=str(args.cache_dir),
-        local_files_only=bool(args.local_files_only),
     )
     processor = AutoProcessor.from_pretrained(
         args.model_id,
         cache_dir=str(args.cache_dir),
-        local_files_only=bool(args.local_files_only),
     )
 
     policy = VLMPolicyNetwork(
