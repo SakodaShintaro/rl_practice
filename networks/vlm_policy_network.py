@@ -227,31 +227,25 @@ class VLMPolicyNetwork(nn.Module):
         self,
         image: torch.Tensor,  # (B, T, C, H, W)
         text: list[list[str]],  # (B, T)
-        action: torch.Tensor,  # (B, H, action_dim)
     ) -> tuple[torch.Tensor, dict, dict]:
-        batch_size = action.size(0)
-        device = action.device
+        batch_size = image.size(0)
+        device = image.device
 
-        # Policy rollout (Euler) to get pi
-        pi = torch.zeros_like(action)
-        dt = 1.0 / float(self.euler_steps)
-        for _ in range(self.euler_steps):
-            pi_hidden = self._encode(image, text, pi, False)
-            velocity = self.action_head(pi_hidden)
-            pi = pi + dt * velocity
+        # Policy rollout
+        action = self._infer_action(image, text)  # (B, action_horizon, action_dim)
 
         # Actor loss (-Q)
         for param in self.value_head.parameters():
             param.requires_grad_(False)
-        critic_pi_hidden = self._encode(image, text, pi, True)
-        critic_pi_logits = self.value_head(critic_pi_hidden)
-        critic_pi = self.hl_gauss_loss(critic_pi_logits).unsqueeze(-1)
-        actor_loss = -critic_pi.mean()
+        critic_hidden = self._encode(image, text, action, True)
+        critic_logits = self.value_head(critic_hidden)
+        critic = self.hl_gauss_loss(critic_logits).unsqueeze(-1)
+        actor_loss = -critic.mean()
         for param in self.value_head.parameters():
             param.requires_grad_(True)
 
         # DACER-like loss (adapted to action horizon)
-        actions = pi.clone().detach()
+        actions = action.clone().detach()
         actions.requires_grad = True
         eps = 1e-4
         t = (torch.rand((batch_size, 1, 1), device=device)) * (1 - eps) + eps
@@ -284,7 +278,7 @@ class VLMPolicyNetwork(nn.Module):
 
         activations_dict = {
             "actor": actor_hidden,
-            "critic": critic_pi_hidden,
+            "critic": critic_hidden,
         }
 
         info_dict = {
@@ -305,7 +299,6 @@ class VLMPolicyNetwork(nn.Module):
         value_output = self.value_head(value_hidden)
         return self.hl_gauss_loss(value_output, target_q.view(-1))
 
-    @torch.inference_mode()
     def _infer_action(
         self,
         image: torch.Tensor,  # (B, T, C, H, W)
@@ -314,7 +307,11 @@ class VLMPolicyNetwork(nn.Module):
         self.model.eval()
         batch_size = image.size(0)
         device = image.device
-        action = torch.zeros((batch_size, self.action_horizon, self.action_dim), device=device)
+        normal = torch.distributions.Normal(
+            torch.zeros((batch_size, self.action_horizon, self.action_dim), device=device),
+            torch.ones((batch_size, self.action_horizon, self.action_dim), device=device),
+        )
+        action = normal.sample().to(device)
         dt = 1.0 / float(self.euler_steps)
         for _ in range(self.euler_steps):
             action_hidden = self._encode(image, text, action, False)
@@ -345,26 +342,23 @@ class VLMPolicyNetwork(nn.Module):
     ) -> dict:
         text_seq = self._build_text_seq(r_seq)
         action_seq = self._infer_action(s_seq, text_seq)
-        value = self._infer_action_value(s_seq, text_seq, action_seq)
         action_hidden = self._encode(s_seq, text_seq, action_seq, False)
         x = action_hidden[:, -1, :]
         a_logp = torch.zeros((s_seq.size(0), 1), device=s_seq.device)
         return {
             "action": action_seq[:, -1, :],
             "a_logp": a_logp,
-            "value": value,
+            "value": torch.zeros((s_seq.size(0), 1), device=s_seq.device),
             "x": x,
             "rnn_state": rnn_state,
         }
 
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
         obs_curr = data.observations[:, :-1]
-        actions_curr = self._slice_actions(data.actions[:, :-1])
+        actions_curr = data.actions[:, :-1]
         rewards_curr = data.rewards[:, :-1]
         text_curr = self._build_text_seq(rewards_curr)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(
-            obs_curr, text_curr, actions_curr
-        )
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(obs_curr, text_curr)
         critic_loss = self._compute_value_loss(obs_curr, text_curr, actions_curr, target_value)
         total_loss = critic_loss + actor_loss
         activations_dict = {
@@ -395,17 +389,6 @@ class VLMPolicyNetwork(nn.Module):
         for b in range(rewards_cpu.shape[0]):
             row = []
             for t in range(rewards_cpu.shape[1]):
-                row.append(f"reward {float(rewards_cpu[b, t, 0]):.3f}")
+                row.append(f"reward {float(rewards_cpu[b, t, 0]):.2f}")
             text_seq.append(row)
         return text_seq
-
-    def _slice_actions(self, actions: torch.Tensor) -> torch.Tensor:
-        horizon = self.action_horizon
-        if actions.size(1) >= horizon:
-            return actions[:, -horizon:, :]
-        pad = torch.zeros(
-            (actions.size(0), horizon - actions.size(1), actions.size(2)),
-            device=actions.device,
-            dtype=actions.dtype,
-        )
-        return torch.cat([pad, actions], dim=1)
