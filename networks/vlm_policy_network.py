@@ -342,14 +342,13 @@ class VLMPolicyNetwork(nn.Module):
     ) -> dict:
         text_seq = self._build_text_seq(r_seq)
         action_seq = self._infer_action(s_seq, text_seq)
-        value = self._infer_action_value(s_seq, text_seq, action_seq)
         action_hidden = self._encode(s_seq, text_seq, action_seq, False)
         x = action_hidden[:, -1, :]
         a_logp = torch.zeros((s_seq.size(0), 1), device=s_seq.device)
         return {
             "action": action_seq[:, -1, :],
             "a_logp": a_logp,
-            "value": value,
+            "value": torch.zeros((s_seq.size(0), 1), device=s_seq.device),
             "x": x,
             "rnn_state": rnn_state,
         }
@@ -390,6 +389,6 @@ class VLMPolicyNetwork(nn.Module):
         for b in range(rewards_cpu.shape[0]):
             row = []
             for t in range(rewards_cpu.shape[1]):
-                row.append(f"reward {float(rewards_cpu[b, t, 0]):.3f}")
+                row.append(f"reward {float(rewards_cpu[b, t, 0]):.2f}")
             text_seq.append(row)
         return text_seq
