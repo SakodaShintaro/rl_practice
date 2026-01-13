@@ -141,7 +141,7 @@ class AverageRewardEarlyStopWrapper(gym.Wrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        self.window_size = 25
+        self.window_size = 20
         self.recent_rewards = []
 
     def reset(self, **kwargs):
