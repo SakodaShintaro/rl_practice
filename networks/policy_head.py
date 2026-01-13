@@ -67,7 +67,7 @@ class DiffusionPolicy(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
-        self.step_num = 5
+        self.step_num = 1
         self.denoising_time = denoising_time
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.sparse_mask = (
