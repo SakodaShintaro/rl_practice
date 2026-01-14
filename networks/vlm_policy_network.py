@@ -47,8 +47,6 @@ class VLMPolicyNetwork(nn.Module):
         self.euler_steps = 1
         self.gamma = gamma
         self.dacer_loss_weight = dacer_loss_weight
-        if self.value_bins <= 1:
-            raise ValueError("value_bins must be > 1 for HLGauss-based value modeling.")
 
         self.model = model
         device = next(model.parameters()).device
@@ -91,12 +89,13 @@ class VLMPolicyNetwork(nn.Module):
             nn.Linear(value_hidden_dim, value_bins),
         )
         self.num_bins = value_bins
-        self.hl_gauss_loss = HLGaussLoss(
-            min_value=self.value_min,
-            max_value=self.value_max,
-            num_bins=self.num_bins,
-            clamp_to_range=True,
-        )
+        if self.num_bins > 1:
+            self.hl_gauss_loss = HLGaussLoss(
+                min_value=self.value_min,
+                max_value=self.value_max,
+                num_bins=self.num_bins,
+                clamp_to_range=True,
+            )
 
         self._dummy_state = torch.zeros(1, 1, 1)
 
@@ -239,7 +238,10 @@ class VLMPolicyNetwork(nn.Module):
             param.requires_grad_(False)
         critic_hidden = self._encode(image, text, action, True)
         critic_logits = self.value_head(critic_hidden)
-        critic = self.hl_gauss_loss(critic_logits).unsqueeze(-1)
+        if self.num_bins > 1:
+            critic = self.hl_gauss_loss(critic_logits).unsqueeze(-1)
+        else:
+            critic = critic_logits.unsqueeze(-1)
         actor_loss = -critic.mean()
         for param in self.value_head.parameters():
             param.requires_grad_(True)
@@ -256,7 +258,10 @@ class VLMPolicyNetwork(nn.Module):
         def calc_target(actions_local):
             q_hidden = self._encode(image, text, actions_local, True)
             q_logits = self.value_head(q_hidden)
-            q_values = self.hl_gauss_loss(q_logits).unsqueeze(-1)
+            if self.num_bins > 1:
+                q_values = self.hl_gauss_loss(q_logits).unsqueeze(-1)
+            else:
+                q_values = q_logits.unsqueeze(-1)
             q_grad = torch.autograd.grad(
                 outputs=q_values.sum(),
                 inputs=actions_local,
@@ -297,7 +302,10 @@ class VLMPolicyNetwork(nn.Module):
     ) -> torch.Tensor:
         value_hidden = self._encode(image, text, action, True)
         value_output = self.value_head(value_hidden)
-        return self.hl_gauss_loss(value_output, target_q.view(-1))
+        if self.num_bins > 1:
+            return self.hl_gauss_loss(value_output, target_q.view(-1))
+        else:
+            return F.mse_loss(value_output.view(-1), target_q.view(-1))
 
     def _infer_action(
         self,
@@ -329,7 +337,10 @@ class VLMPolicyNetwork(nn.Module):
         self.model.eval()
         value_hidden = self._encode(image, text, action, True)
         value_output = self.value_head(value_hidden)
-        return self.hl_gauss_loss(value_output).unsqueeze(-1)
+        if self.num_bins > 1:
+            return self.hl_gauss_loss(value_output).unsqueeze(-1)
+        else:
+            return value_output.unsqueeze(-1)
 
     @torch.inference_mode()
     def infer(
