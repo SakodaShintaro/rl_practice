@@ -4,7 +4,6 @@ import minigrid
 import numpy as np
 
 from carla_leaderboard_env import CARLALeaderboardEnv
-from generic_gui_env import GenericGUIEnv, create_score_reward_detector
 from memory_maze_gym_wrapper import MemoryMazeGymWrapper
 from simple_four_quadrant_env import SimpleFourQuadrantEnv
 
@@ -50,6 +49,7 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "LetterTracing-v0":
+        from generic_gui_env import GenericGUIEnv, create_score_reward_detector
         reward_detector = create_score_reward_detector()
         env = GenericGUIEnv(
             reward_detector=reward_detector,
