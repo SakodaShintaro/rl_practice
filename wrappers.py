@@ -28,6 +28,7 @@ def make_env(env_id: str) -> gym.Env:
         env = env.env  # Unwrap the original TimeLimit wrapper
         env = gym.wrappers.TimeLimit(env, max_episode_steps=1000 * REPEAT)
         env = CarRacingRewardFixWrapper(env)
+        env = CarRacingActionWrapper(env)
         env = ActionRepeatWrapper(env, repeat=REPEAT)
         env = AverageRewardEarlyStopWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -193,6 +194,30 @@ class CarRacingRewardFixWrapper(gym.Wrapper):
             reward += 100
 
         return obs, reward, terminated, truncated, info
+
+
+class CarRacingActionWrapper(gym.ActionWrapper):
+    """
+    Convert 2D action space (steer, gas_or_brake) to 3D action space (steer, gas, brake).
+    - steer: [-1, +1] (unchanged)
+    - gas_or_brake: [-1, +1]
+      - positive: gas=value, brake=0
+      - negative: gas=0, brake=abs(value)
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.action_space = gym.spaces.Box(
+            low=np.array([-1.0, -1.0]).astype(np.float32),
+            high=np.array([+1.0, +1.0]).astype(np.float32),
+        )
+
+    def action(self, action):
+        steer = action[0]
+        gas_or_brake = action[1]
+        gas = np.maximum(gas_or_brake, 0.0)
+        brake = np.maximum(-gas_or_brake, 0.0)
+        return np.array([steer, gas, brake], dtype=np.float32)
 
 
 class ResizeObs(gym.ObservationWrapper):
