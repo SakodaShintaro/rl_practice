@@ -162,10 +162,7 @@ class OnPolicyAgent:
 
         # value
         value = result_dict["value"]
-        if self.num_bins > 1 and self.network_class not in [
-            "vlm_actor_critic_with_state_value",
-            "vlm_actor_critic_with_action_value",
-        ]:
+        if self.num_bins > 1 and self.network_class not in ["vlm_actor_critic_with_state_value"]:
             value = self.network.hl_gauss_loss(value)
         value = value.item()
         self.prev_value = value

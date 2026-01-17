@@ -82,7 +82,6 @@ def parse_args() -> argparse.Namespace:
         choices=[
             "actor_critic_with_state_value",
             "actor_critic_with_action_value",
-            "vlm_actor_critic_with_action_value",
             "vlm_actor_critic_with_state_value",
         ],
     )

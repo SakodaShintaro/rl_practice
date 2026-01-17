@@ -4,7 +4,6 @@ from torch import optim
 from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
 from networks.actor_critic_with_action_value import Network
-from networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
 from replay_buffer import ReplayBuffer
 from reward_processor import RewardProcessor
 
@@ -34,50 +33,12 @@ class OffPolicyAgent:
         # Sequence observation management
         self.seq_len = args.seq_len
 
-        if args.network_class == "vlm_actor_critic_with_action_value":
-            if args.use_quantization:
-                bnb_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_compute_dtype=torch.bfloat16,
-                )
-            else:
-                bnb_config = None
-            model = AutoModelForImageTextToText.from_pretrained(
-                args.vlm_model_id,
-                quantization_config=bnb_config,
-                dtype=torch.bfloat16,
-                device_map={"": "cuda:0"},
-                cache_dir="cache",
-            )
-            processor = AutoProcessor.from_pretrained(
-                args.vlm_model_id,
-                cache_dir="cache",
-            )
-            self.network = VLMActorCriticWithActionValue(
-                action_dim=self.action_dim,
-                seq_len=args.seq_len,
-                action_horizon=1,
-                observation_space_shape=observation_space.shape,
-                image_processor_type=args.image_processor_type,
-                target_layer_idx=args.target_layer_idx,
-                model=model,
-                processor=processor,
-                use_lora=True,
-                task_prompt="",
-                action_hidden_dim=args.actor_hidden_dim,
-                value_hidden_dim=args.critic_hidden_dim,
-                value_bins=args.num_bins,
-                value_min=-args.value_range,
-                value_max=+args.value_range,
-                gamma=args.gamma,
-                dacer_loss_weight=args.dacer_loss_weight,
-            ).to(self.device)
-        else:
+        if args.network_class == "actor_critic_with_action_value":
             self.network = Network(
                 observation_space.shape, action_dim=self.action_dim, args=args
             ).to(self.device)
+        else:
+            raise ValueError(f"Unknown network class: {args.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
