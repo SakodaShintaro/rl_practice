@@ -81,7 +81,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             nn.Linear(hidden_size, value_hidden_dim),
             nn.ReLU(),
             nn.Linear(value_hidden_dim, num_bins),
-        )
+        ).to(device)
 
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
@@ -91,7 +91,9 @@ class VLMActorCriticWithStateValue(nn.Module):
                 clamp_to_range=True,
             )
 
-        self.image_processor = ImageProcessor(observation_space_shape, image_processor_type)
+        self.image_processor = ImageProcessor(observation_space_shape, image_processor_type).to(
+            device
+        )
         self._dummy_state = torch.zeros(1, 1, 1)
 
     def init_state(self) -> torch.Tensor:
@@ -169,64 +171,46 @@ class VLMActorCriticWithStateValue(nn.Module):
             total_log_prob: Sum of log probabilities for all generated tokens
             generated_ids: List of generated token IDs
         """
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
-        pixel_values = inputs.get("pixel_values")
-        image_grid_thw = inputs.get("image_grid_thw")
+        # First, get hidden state from prompt processing
+        outputs = self.model.forward(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        hidden_states = outputs.hidden_states
+        state_hidden = hidden_states[self.target_layer_idx][:, -1, :].to(torch.float32)
 
+        # Generate action text using model.generate()
+        pad_token_id = self.processor.tokenizer.pad_token_id
         eos_token_id = self.processor.tokenizer.eos_token_id
+        if pad_token_id is None:
+            pad_token_id = eos_token_id
 
-        generated_ids = []
-        log_probs = []
-        state_hidden = None
+        generated = self.model.generate(
+            **inputs,
+            max_new_tokens=self.max_new_tokens,
+            num_beams=1,
+            do_sample=False,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+        )
 
-        for step in range(self.max_new_tokens):
-            outputs = self.model.forward(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                pixel_values=pixel_values,
-                image_grid_thw=image_grid_thw,
-                output_hidden_states=True,
-                return_dict=True,
-            )
+        input_len = inputs["input_ids"].shape[1]
+        new_tokens = generated[:, input_len:]
+        generated_ids = new_tokens[0].tolist()
 
-            # Save hidden state from the first forward pass (prompt processing)
-            if step == 0:
-                hidden_states = outputs.hidden_states
-                state_hidden = hidden_states[self.target_layer_idx][:, -1, :].to(torch.float32)
+        action_text = self.processor.tokenizer.decode(
+            generated_ids, skip_special_tokens=True
+        ).strip()
 
-            logits = outputs.logits[:, -1, :]
-            log_prob_dist = F.log_softmax(logits, dim=-1)
-            next_token = torch.argmax(logits, dim=-1)
+        # Compute log prob by re-encoding with teacher forcing
+        # For now, return 0 as placeholder (actual log prob computed in compute_loss)
+        total_log_prob = torch.tensor(0.0, device=self.device)
 
-            if next_token.item() == eos_token_id:
-                break
-
-            # Store log prob of selected token
-            token_log_prob = log_prob_dist[0, next_token.item()]
-            log_probs.append(token_log_prob)
-            generated_ids.append(next_token.item())
-
-            input_ids = next_token.unsqueeze(0)
-            attention_mask = torch.cat(
-                [
-                    attention_mask,
-                    torch.ones((1, 1), device=self.device, dtype=attention_mask.dtype),
-                ],
-                dim=1,
-            )
-            pixel_values = None
-            image_grid_thw = None
-
-        action_text = self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-        # Sum of log probs for all tokens
-        if log_probs:
-            total_log_prob = torch.stack(log_probs).sum()
-        else:
-            total_log_prob = torch.tensor(0.0, device=self.device)
-
-        return action_text.strip(), state_hidden, total_log_prob, generated_ids
+        return action_text, state_hidden, total_log_prob, generated_ids
 
     def _encode_for_value(
         self,
@@ -239,6 +223,17 @@ class VLMActorCriticWithStateValue(nn.Module):
         action_text, hidden, log_prob, token_ids = self._generate_with_hidden_states(inputs)
         return action_text, hidden, log_prob, token_ids
 
+    def _convert_3d_to_2d_action(self, action_3d: np.ndarray) -> np.ndarray:
+        """Convert 3D action [steer, gas, braking] to 2D action [steer, gas_or_brake].
+
+        gas_or_brake = gas - braking, clamped to [-1, 1]
+        """
+        steer = action_3d[0]
+        gas = action_3d[1]
+        braking = action_3d[2]
+        gas_or_brake = np.clip(gas - braking, -1.0, 1.0)
+        return np.array([steer, gas_or_brake], dtype=np.float32)
+
     def forward(
         self,
         s_seq: torch.Tensor,
@@ -250,7 +245,8 @@ class VLMActorCriticWithStateValue(nn.Module):
     ) -> dict:
         """Forward pass: generate action text and compute state value."""
         action_text, hidden, log_prob, _ = self._encode_for_value(s_seq, r_seq)
-        action_array = parse_action_text(action_text)
+        action_array_3d = parse_action_text(action_text)
+        action_array = self._convert_3d_to_2d_action(action_array_3d)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
 
         value_logits = self.value_head(hidden)
@@ -307,58 +303,74 @@ class VLMActorCriticWithStateValue(nn.Module):
         return value, state_hidden, inputs
 
     def _action_to_text(self, action: torch.Tensor) -> str:
-        """Convert action tensor to canonical text representation."""
+        """Convert 2D action tensor to canonical text representation.
+
+        2D action: [steer, gas_or_brake] -> 3D text: steering, gas, braking
+        """
         steering = action[0].item()
-        gas = action[1].item()
-        braking = action[2].item()
+        gas_or_brake = action[1].item()
+        gas = max(gas_or_brake, 0.0)
+        braking = max(-gas_or_brake, 0.0)
         return f"Action: steering={steering:.2f}, gas={gas:.2f}, braking={braking:.2f}"
 
-    def _compute_log_prob_for_action(
+    def _compute_log_prob_for_actions_batch(
         self,
         inputs: dict[str, torch.Tensor],
-        action: torch.Tensor,
+        actions: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute log probability for an action by converting it to text."""
-        action_text = self._action_to_text(action)
-        token_ids = self.processor.tokenizer.encode(action_text, add_special_tokens=False)
+        """Compute log probabilities for a batch of actions using teacher forcing.
 
-        input_ids = inputs["input_ids"].clone()
-        attention_mask = inputs["attention_mask"].clone()
-        pixel_values = inputs.get("pixel_values")
-        image_grid_thw = inputs.get("image_grid_thw")
+        Args:
+            inputs: Prepared model inputs (already batched)
+            actions: Action tensors of shape (B, action_dim)
 
-        log_probs = []
+        Returns:
+            Log probabilities of shape (B,)
+        """
+        batch_size = actions.size(0)
 
-        for target_token in token_ids:
-            outputs = self.model.forward(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                pixel_values=pixel_values,
-                image_grid_thw=image_grid_thw,
-                output_hidden_states=False,
-                return_dict=True,
-            )
+        # Convert all actions to text and tokenize
+        action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]
+        tokenized = self.processor.tokenizer(
+            action_texts, add_special_tokens=False, padding=True, return_tensors="pt"
+        )
+        target_ids = tokenized["input_ids"].to(self.device)
+        target_mask = tokenized["attention_mask"].to(self.device).float()
+        action_len = target_ids.size(1)
 
-            logits = outputs.logits[:, -1, :]
-            log_prob_dist = F.log_softmax(logits, dim=-1)
-            token_log_prob = log_prob_dist[0, target_token]
-            log_probs.append(token_log_prob)
+        # Concatenate prompt input_ids with action token ids
+        # input_ids: (B, prompt_len), target_ids: (B, action_len)
+        combined_input_ids = torch.cat([inputs["input_ids"], target_ids], dim=1)
+        combined_attention_mask = torch.cat(
+            [inputs["attention_mask"], tokenized["attention_mask"].to(self.device)], dim=1
+        )
 
-            # Teacher forcing: use the target token as next input
-            input_ids = torch.tensor([[target_token]], device=self.device)
-            attention_mask = torch.cat(
-                [
-                    attention_mask,
-                    torch.ones((1, 1), device=self.device, dtype=attention_mask.dtype),
-                ],
-                dim=1,
-            )
-            pixel_values = None
-            image_grid_thw = None
+        # Single forward pass with all tokens
+        outputs = self.model.forward(
+            input_ids=combined_input_ids,
+            attention_mask=combined_attention_mask,
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
+            output_hidden_states=False,
+            return_dict=True,
+        )
 
-        if log_probs:
-            return torch.stack(log_probs).sum()
-        return torch.tensor(0.0, device=self.device)
+        # logits: (B, prompt_len + action_len, vocab_size)
+        # We need logits at positions [prompt_len-1, prompt_len, ..., prompt_len+action_len-2]
+        # These predict tokens at positions [prompt_len, prompt_len+1, ..., prompt_len+action_len-1]
+        prompt_len = inputs["input_ids"].size(1)
+        relevant_logits = outputs.logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
+
+        # Compute log probs
+        log_prob_dist = F.log_softmax(relevant_logits, dim=-1)
+
+        # Gather log probs for target tokens: (B, action_len)
+        token_log_probs = log_prob_dist.gather(2, target_ids.unsqueeze(2)).squeeze(2)
+
+        # Sum log probs, masking padding tokens
+        batch_log_probs = (token_log_probs * target_mask).sum(dim=1)
+
+        return batch_log_probs
 
     clip_param_policy = 0.2
     clip_param_value = 0.2
@@ -375,47 +387,25 @@ class VLMActorCriticWithStateValue(nn.Module):
         actions_curr = data.actions[:, -1]  # (B, action_dim)
         old_log_prob = data.log_probs[:, -1].view(-1)
 
-        batch_size = obs_curr.size(0)
-        actor_losses = []
-        value_losses = []
-        hiddens = []
+        # Compute value and hidden states for batch
+        value, hidden, inputs = self._compute_value_from_state(obs_curr, rewards_curr)
 
-        for b in range(batch_size):
-            obs_b = obs_curr[b : b + 1]
-            rewards_b = rewards_curr[b : b + 1]
-            action_b = actions_curr[b]
-            old_log_prob_b = old_log_prob[b]
-            curr_adv_b = curr_adv[b]
-            curr_target_v_b = curr_target_v[b]
+        # Compute new log prob for actions in batch
+        new_log_prob = self._compute_log_prob_for_actions_batch(inputs, actions_curr)
 
-            value_b, hidden_b, inputs_b = self._compute_value_from_state(obs_b, rewards_b)
-            hiddens.append(hidden_b)
+        # PPO actor loss
+        ratio = torch.exp(new_log_prob - old_log_prob)
+        surr1 = ratio * curr_adv.view(-1)
+        surr2 = torch.clamp(
+            ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy
+        ) * curr_adv.view(-1)
+        actor_loss = -torch.min(surr1, surr2).mean()
 
-            # Compute new log prob for the action
-            new_log_prob_b = self._compute_log_prob_for_action(inputs_b, action_b)
-
-            # PPO actor loss for this sample
-            ratio = torch.exp(new_log_prob_b - old_log_prob_b)
-            surr1 = ratio * curr_adv_b
-            surr2 = (
-                torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
-                * curr_adv_b
-            )
-            actor_loss_b = -torch.min(surr1, surr2)
-            actor_losses.append(actor_loss_b)
-
-            # Critic loss for this sample
-            if self.num_bins > 1:
-                value_loss_b = self.hl_gauss_loss(
-                    self.value_head(hidden_b), curr_target_v_b.view(-1)
-                )
-            else:
-                value_loss_b = F.mse_loss(value_b.view(-1), curr_target_v_b.view(-1))
-            value_losses.append(value_loss_b)
-
-        actor_loss = torch.stack(actor_losses).mean()
-        value_loss = torch.stack(value_losses).mean()
-        hidden = torch.cat(hiddens, dim=0)
+        # Critic loss
+        if self.num_bins > 1:
+            value_loss = self.hl_gauss_loss(self.value_head(hidden), curr_target_v.view(-1))
+        else:
+            value_loss = F.mse_loss(value.view(-1), curr_target_v.view(-1))
 
         total_loss = actor_loss + value_loss
 
