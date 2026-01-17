@@ -64,6 +64,9 @@ class VLMActorCriticWithStateValue(nn.Module):
             self.model = get_peft_model(self.model, create_lora_config())
             self.model.print_trainable_parameters()
 
+        # Enable gradient checkpointing to reduce memory usage
+        self.model.gradient_checkpointing_enable()
+
         hidden_size = int(self.model.config.text_config.hidden_size)
         self.value_head = nn.Sequential(
             nn.Linear(hidden_size, value_hidden_dim),
