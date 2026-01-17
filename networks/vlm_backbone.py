@@ -220,19 +220,47 @@ class QwenVLEncoder(nn.Module):
             self.model = get_peft_model(self.model, create_lora_config())
             self.model.print_trainable_parameters()
 
+        # Enable gradient checkpointing to reduce memory usage
+        self.model.gradient_checkpointing_enable()
+
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
         self.use_pixel_values = use_pixel_values
         if self.use_pixel_values:
             self.out_proj = nn.Linear(1536, out_dim)
-            self.output_dim = out_dim * self.seq_len * 256
         else:
             self.out_proj = nn.Linear(2048, out_dim)
-            self.output_dim = out_dim * (self.seq_len * 66 + 8)
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
         self._dummy_state = torch.zeros(1, 1, 1)
+
+        # Compute output_dim dynamically with dummy forward pass
+        self.output_dim = self._compute_output_dim()
+        torch.cuda.empty_cache()
+
+    @torch.no_grad()
+    def _compute_output_dim(self) -> int:
+        """Compute output dimension by running a dummy forward pass."""
+        dummy_images = torch.zeros(1, self.seq_len, 3, 96, 96, device=self.device)
+        dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
+
+        messages = build_vlm_messages(dummy_images, dummy_rewards, "")
+        model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+
+        if self.use_pixel_values:
+            hidden = model_inputs["pixel_values"]
+            B = 1
+            token_num = hidden.size(0) // B
+            hidden = hidden.view(B, token_num, -1)
+        else:
+            output = self.model.forward(**model_inputs, output_hidden_states=True)
+            hidden = output["hidden_states"][self.target_layer_idx]
+
+        x = hidden.to(torch.float32)
+        x = self.out_proj(x)
+        x = x.flatten(start_dim=1)
+        return x.shape[1]
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
@@ -246,7 +274,7 @@ class QwenVLEncoder(nn.Module):
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         with torch.enable_grad() if self.use_lora else torch.no_grad():
-            messages = build_vlm_messages(images, rewards, ACTION_PROMPT)
+            messages = build_vlm_messages(images, rewards, "")
             model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
 
             if self.use_pixel_values:
