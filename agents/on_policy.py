@@ -69,7 +69,11 @@ class OnPolicyAgent:
         self.reward_processor = RewardProcessor("scaling", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
 
-        if self.network_class == "actor_critic_action_value":
+        if self.network_class == "actor_critic_with_state_value":
+            self.network = StateValueNetwork(observation_space.shape, action_space.shape, args).to(
+                self.device
+            )
+        elif self.network_class == "actor_critic_with_action_value":
             self.network = ActionValueNetwork(
                 observation_space.shape, action_dim=self.action_dim, args=args
             ).to(self.device)
@@ -78,9 +82,7 @@ class OnPolicyAgent:
                 observation_space.shape, action_space.shape, args
             )
         else:
-            self.network = StateValueNetwork(observation_space.shape, action_space.shape, args).to(
-                self.device
-            )
+            raise ValueError(f"Invalid network_class: {self.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
@@ -265,7 +267,11 @@ class OnPolicyAgent:
                 curr_adv = adv[indices[:, -2]]
                 curr_target_v = target_v[indices[:, -2]]
 
-                if self.network_class == "actor_critic_action_value":
+                if self.network_class == "actor_critic_with_state_value":
+                    loss, activations_dict, info_dict = self.network.compute_loss(
+                        data, curr_target_v, curr_adv
+                    )
+                elif self.network_class == "actor_critic_with_action_value":
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v.squeeze(1)
                     )
@@ -274,9 +280,7 @@ class OnPolicyAgent:
                         data, curr_target_v.squeeze(1), curr_adv
                     )
                 else:
-                    loss, activations_dict, info_dict = self.network.compute_loss(
-                        data, curr_target_v, curr_adv
-                    )
+                    raise ValueError(f"Invalid network_class: {self.network_class}")
 
                 sum_action_loss += info_dict.get("actor_loss", 0.0) * len(data.observations)
                 sum_value_loss += info_dict["critic_loss"] * len(data.observations)
