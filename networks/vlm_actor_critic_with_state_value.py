@@ -3,15 +3,19 @@ import argparse
 import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
-from peft import LoraConfig, get_peft_model
-from PIL import Image
-from qwen_vl_utils import process_vision_info
+from peft import get_peft_model
 from torch import nn
 from torch.nn import functional as F
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from .image_processor import ImageProcessor
-from .vlm_backbone import ACTION_PROMPT, parse_action_text
+from .vlm_backbone import (
+    ACTION_PROMPT,
+    build_vlm_messages,
+    create_lora_config,
+    parse_action_text,
+    prepare_vlm_inputs,
+)
 
 
 class VLMActorCriticWithStateValue(nn.Module):
@@ -57,23 +61,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.processor = processor
 
         if use_lora:
-            lora_config = LoraConfig(
-                r=8,
-                lora_alpha=8,
-                lora_dropout=0.1,
-                target_modules=[
-                    "down_proj",
-                    "o_proj",
-                    "k_proj",
-                    "q_proj",
-                    "gate_proj",
-                    "up_proj",
-                    "v_proj",
-                ],
-                use_dora=True,
-                init_lora_weights="gaussian",
-            )
-            self.model = get_peft_model(self.model, lora_config)
+            self.model = get_peft_model(self.model, create_lora_config())
             self.model.print_trainable_parameters()
 
         hidden_size = int(self.model.config.text_config.hidden_size)
@@ -98,66 +86,6 @@ class VLMActorCriticWithStateValue(nn.Module):
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
-
-    def _build_messages(
-        self,
-        images: torch.Tensor,
-        rewards: torch.Tensor,
-    ) -> list[list[dict]]:
-        batch_size, seq_len = images.shape[:2]
-        messages = []
-        for b in range(batch_size):
-            content: list[dict] = []
-            if self.task_prompt:
-                content.append({"type": "text", "text": self.task_prompt})
-            for t in range(seq_len):
-                img_tensor = images[b, t].to(torch.float32)
-                img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
-                img_np = (img_np * 255).astype(np.uint8)
-                content.append({"type": "image", "image": Image.fromarray(img_np)})
-                reward_text = f"reward {float(rewards[b, t, 0]):.2f}"
-                content.append({"type": "text", "text": reward_text})
-            messages.append([{"role": "user", "content": content}])
-        return messages
-
-    def _prepare_inputs(self, messages: list[list[dict]]) -> dict[str, torch.Tensor]:
-        text = self.processor.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-
-        images, videos, video_kwargs = process_vision_info(
-            messages,
-            image_patch_size=16,
-            return_video_kwargs=True,
-            return_video_metadata=True,
-        )
-
-        if videos:
-            videos, video_metadata = zip(*videos)
-            videos, video_metadata = list(videos), list(video_metadata)
-        else:
-            videos = None
-            video_metadata = None
-
-        inputs = self.processor(
-            text=text,
-            images=images,
-            videos=videos,
-            video_metadata=video_metadata,
-            return_tensors="pt",
-            padding=True,
-            **video_kwargs,
-        )
-        inputs.pop("token_type_ids", None)
-        inputs = {
-            k: v.to(self.device).to(torch.bfloat16)
-            if v.dtype.is_floating_point
-            else v.to(self.device)
-            for k, v in inputs.items()
-        }
-        return inputs
 
     def _generate_with_hidden_states(
         self,
@@ -218,8 +146,8 @@ class VLMActorCriticWithStateValue(nn.Module):
         rewards: torch.Tensor,
     ) -> tuple[str, torch.Tensor, torch.Tensor, list[int]]:
         """Encode observation and generate action, returning hidden state and log prob."""
-        messages = self._build_messages(images, rewards)
-        inputs = self._prepare_inputs(messages)
+        messages = build_vlm_messages(images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
         action_text, hidden, log_prob, token_ids = self._generate_with_hidden_states(inputs)
         return action_text, hidden, log_prob, token_ids
 
@@ -279,8 +207,8 @@ class VLMActorCriticWithStateValue(nn.Module):
         Processes the prompt and returns the hidden state from the first forward pass,
         which is the same information available for action generation.
         """
-        messages = self._build_messages(images, rewards)
-        inputs = self._prepare_inputs(messages)
+        messages = build_vlm_messages(images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
 
         outputs = self.model.forward(
             input_ids=inputs["input_ids"],

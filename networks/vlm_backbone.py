@@ -27,6 +27,110 @@ ACTION_PROMPT = (
 )
 
 
+def build_vlm_messages(
+    images: torch.Tensor,
+    rewards: torch.Tensor,
+    task_prompt: str,
+) -> list[list[dict]]:
+    """Build VLM messages from images and rewards.
+
+    Args:
+        images: (B, T, C, H, W) tensor
+        rewards: (B, T, 1) tensor
+        task_prompt: Task prompt string (can be empty)
+
+    Returns:
+        List of message lists for each batch
+    """
+    batch_size, seq_len = images.shape[:2]
+    messages = []
+    for b in range(batch_size):
+        content: list[dict] = []
+        if task_prompt:
+            content.append({"type": "text", "text": task_prompt})
+        for t in range(seq_len):
+            img_tensor = images[b, t].to(torch.float32)
+            img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
+            img_np = (img_np * 255).astype(np.uint8)
+            content.append({"type": "image", "image": Image.fromarray(img_np)})
+            reward_text = f"reward {float(rewards[b, t, 0]):.2f}"
+            content.append({"type": "text", "text": reward_text})
+        messages.append([{"role": "user", "content": content}])
+    return messages
+
+
+def prepare_vlm_inputs(
+    processor: AutoProcessor,
+    messages: list[list[dict]],
+    device: str,
+) -> dict[str, torch.Tensor]:
+    """Prepare VLM model inputs from messages.
+
+    Args:
+        processor: AutoProcessor instance
+        messages: List of message lists
+        device: Target device
+
+    Returns:
+        Dictionary of model inputs
+    """
+    text = processor.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+    images, videos, video_kwargs = process_vision_info(
+        messages,
+        image_patch_size=16,
+        return_video_kwargs=True,
+        return_video_metadata=True,
+    )
+
+    if videos:
+        videos, video_metadata = zip(*videos)
+        videos, video_metadata = list(videos), list(video_metadata)
+    else:
+        videos = None
+        video_metadata = None
+
+    inputs = processor(
+        text=text,
+        images=images,
+        videos=videos,
+        video_metadata=video_metadata,
+        return_tensors="pt",
+        padding=True,
+        **video_kwargs,
+    )
+    inputs.pop("token_type_ids", None)
+    inputs = {
+        k: v.to(device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(device)
+        for k, v in inputs.items()
+    }
+    return inputs
+
+
+def create_lora_config() -> LoraConfig:
+    """Create standard LoRA config for VLM."""
+    return LoraConfig(
+        r=8,
+        lora_alpha=8,
+        lora_dropout=0.1,
+        target_modules=[
+            "down_proj",
+            "o_proj",
+            "k_proj",
+            "q_proj",
+            "gate_proj",
+            "up_proj",
+            "v_proj",
+        ],
+        use_dora=True,
+        init_lora_weights="gaussian",
+    )
+
+
 def parse_action_text(action_text: str) -> np.ndarray:
     """Parse action text and extract steering, gas, braking values.
 
@@ -113,27 +217,7 @@ class QwenVLEncoder(nn.Module):
         )
         self.use_lora = use_lora
         if use_lora:
-            lora_config = LoraConfig(
-                r=8,
-                lora_alpha=8,
-                lora_dropout=0.1,
-                target_modules=[
-                    "down_proj",
-                    "o_proj",
-                    "k_proj",
-                    "q_proj",
-                    "gate_proj",
-                    "up_proj",
-                    "v_proj",
-                ],
-                use_dora=True,
-                init_lora_weights="gaussian",
-            )
-
-            # Apply LoRA to the model
-            self.model = get_peft_model(self.model, lora_config)
-
-            # Print trainable parameters
+            self.model = get_peft_model(self.model, create_lora_config())
             self.model.print_trainable_parameters()
 
         self.processor = AutoProcessor.from_pretrained(model_id)
@@ -153,67 +237,6 @@ class QwenVLEncoder(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
 
-    def _build_messages(self, images: torch.Tensor, rewards: torch.Tensor) -> list[list[dict]]:
-        batch_size = images.shape[0]
-        seq_len = images.shape[1]
-        messages = []
-
-        for b in range(batch_size):
-            frames = []
-            for t in range(seq_len):
-                img_tensor = images[b, t].to(torch.float32)
-                img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
-                img_np = (img_np * 255).astype(np.uint8)
-                frames.append(Image.fromarray(img_np))
-
-            # content = [{"type": "video", "video": frames, "fps": self.video_fps}]
-            content = [{"type": "image", "image": frame} for frame in frames]
-            # content.append(
-            #     {"type": "text", "text": f"The previous reward is {rewards[b, -1].item():.3f}."}
-            # )
-            # content.append({"type": "text", "text": ACTION_PROMPT})
-            messages.append([{"role": "user", "content": content}])
-
-        return messages
-
-    def _prepare_inputs(self, messages: list[list[dict]]):
-        text = self.processor.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-
-        images, videos, video_kwargs = process_vision_info(
-            messages,
-            image_patch_size=16,
-            return_video_kwargs=True,
-            return_video_metadata=True,
-        )
-
-        if videos is not None:
-            videos, video_metadata = zip(*videos)
-            videos, video_metadata = list(videos), list(video_metadata)
-        else:
-            video_metadata = None
-
-        inputs = self.processor(
-            text=text,
-            images=images,
-            videos=videos,
-            video_metadata=video_metadata,
-            return_tensors="pt",
-            padding=True,
-            **video_kwargs,
-        )
-        inputs.pop("token_type_ids", None)
-        inputs = {
-            k: v.to(self.device).to(torch.bfloat16)
-            if v.dtype.is_floating_point
-            else v.to(self.device)
-            for k, v in inputs.items()
-        }
-        return inputs
-
     def forward(
         self,
         images: torch.Tensor,
@@ -223,8 +246,8 @@ class QwenVLEncoder(nn.Module):
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         with torch.enable_grad() if self.use_lora else torch.no_grad():
-            messages = self._build_messages(images, rewards)
-            model_inputs = self._prepare_inputs(messages)
+            messages = build_vlm_messages(images, rewards, ACTION_PROMPT)
+            model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
 
             if self.use_pixel_values:
                 hidden = model_inputs["pixel_values"]
@@ -245,7 +268,7 @@ class QwenVLEncoder(nn.Module):
 
     @torch.no_grad()
     def _generate_action_text(self, conversation) -> str:
-        model_inputs = self._prepare_inputs([conversation])
+        model_inputs = prepare_vlm_inputs(self.processor, [conversation], self.device)
 
         pad_token_id = self.processor.tokenizer.pad_token_id
         eos_token_id = self.processor.tokenizer.eos_token_id
