@@ -27,40 +27,37 @@ class VLMActorCriticWithStateValue(nn.Module):
 
     def __init__(
         self,
-        *,
         observation_space_shape: tuple[int, ...],
-        action_dim: int,
-        seq_len: int,
-        model: nn.Module,
-        processor: AutoProcessor,
-        use_lora: bool,
-        task_prompt: str,
-        value_hidden_dim: int,
-        target_layer_idx: int,
-        max_new_tokens: int,
-        num_bins: int,
-        value_min: float,
-        value_max: float,
-        gamma: float,
-        image_processor_type: str,
+        action_space_shape: tuple[int, ...],
+        args: argparse.Namespace,
     ) -> None:
         super().__init__()
-        self.action_dim = action_dim
-        self.seq_len = seq_len
-        self.task_prompt = task_prompt
-        self.target_layer_idx = target_layer_idx
-        self.max_new_tokens = max_new_tokens
-        self.num_bins = num_bins
-        self.value_min = value_min
-        self.value_max = value_max
-        self.gamma = gamma
+        self.action_dim = action_space_shape[0]
+        self.seq_len = args.seq_len
+        self.task_prompt = ACTION_PROMPT
+        self.target_layer_idx = args.target_layer_idx
+        self.max_new_tokens = 128
+        self.num_bins = args.num_bins
+        self.value_min = -args.value_range
+        self.value_max = +args.value_range
+        self.gamma = args.gamma
 
-        self.model = model
-        device = next(model.parameters()).device
+        # Load model and processor
+        assert torch.cuda.is_available(), "CUDA is required for VLM training"
+        device = "cuda"
+        attn_impl = "flash_attention_2"
+
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            args.vlm_model_id,
+            torch_dtype=torch.bfloat16,
+            attn_implementation=attn_impl,
+            cache_dir="./cache",
+            device_map=device,
+        )
+        self.processor = AutoProcessor.from_pretrained(args.vlm_model_id, cache_dir="./cache")
         self.device = device
-        self.processor = processor
 
-        if use_lora:
+        if args.use_lora:
             self.model = get_peft_model(self.model, create_lora_config())
             self.model.print_trainable_parameters()
 
@@ -69,9 +66,9 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         hidden_size = int(self.model.config.text_config.hidden_size)
         self.value_head = nn.Sequential(
-            nn.Linear(hidden_size, value_hidden_dim),
+            nn.Linear(hidden_size, args.critic_hidden_dim),
             nn.ReLU(),
-            nn.Linear(value_hidden_dim, num_bins),
+            nn.Linear(args.critic_hidden_dim, self.num_bins),
         ).to(device)
 
         if self.num_bins > 1:
@@ -82,9 +79,9 @@ class VLMActorCriticWithStateValue(nn.Module):
                 clamp_to_range=True,
             ).to(device)
 
-        self.image_processor = ImageProcessor(observation_space_shape, image_processor_type).to(
-            device
-        )
+        self.image_processor = ImageProcessor(
+            observation_space_shape, args.image_processor_type
+        ).to(device)
         self._dummy_state = torch.zeros(1, 1, 1)
 
     def init_state(self) -> torch.Tensor:
@@ -343,41 +340,3 @@ class VLMActorCriticWithStateValue(nn.Module):
         curr_continue = 1 - dones_next
 
         return curr_reward + curr_continue * self.gamma * next_value
-
-
-def create_vlm_actor_critic_network(
-    observation_space_shape: tuple[int, ...],
-    action_space_shape: tuple[int, ...],
-    args: argparse.Namespace,
-) -> VLMActorCriticWithStateValue:
-    """Factory function to create VLMActorCriticWithStateValue from args."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-
-    model = AutoModelForImageTextToText.from_pretrained(
-        args.vlm_model_id,
-        dtype=torch.bfloat16,
-        _attn_implementation=attn_impl,
-        cache_dir="./cache",
-        device_map=device,
-    )
-
-    processor = AutoProcessor.from_pretrained(args.vlm_model_id, cache_dir="./cache")
-
-    return VLMActorCriticWithStateValue(
-        observation_space_shape=observation_space_shape,
-        action_dim=action_space_shape[0],
-        seq_len=args.seq_len,
-        model=model,
-        processor=processor,
-        use_lora=bool(args.use_lora),
-        task_prompt=ACTION_PROMPT,
-        value_hidden_dim=args.critic_hidden_dim,
-        target_layer_idx=args.target_layer_idx,
-        max_new_tokens=128,
-        num_bins=args.num_bins,
-        value_min=-args.value_range,
-        value_max=+args.value_range,
-        gamma=args.gamma,
-        image_processor_type=args.image_processor_type,
-    )

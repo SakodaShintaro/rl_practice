@@ -5,7 +5,7 @@ from torch import nn, optim
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from networks.actor_critic_with_action_value import Network as ActionValueNetwork
 from networks.actor_critic_with_state_value import Network as StateValueNetwork
-from networks.vlm_actor_critic_with_state_value import create_vlm_actor_critic_network
+from networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue
 from replay_buffer import ReplayBuffer, ReplayBufferData
 from reward_processor import RewardProcessor
 
@@ -78,7 +78,7 @@ class OnPolicyAgent:
                 observation_space.shape, action_dim=self.action_dim, args=args
             ).to(self.device)
         elif self.network_class == "vlm_actor_critic_with_state_value":
-            self.network = create_vlm_actor_critic_network(
+            self.network = VLMActorCriticWithStateValue(
                 observation_space.shape, action_space.shape, args
             )
         else:
