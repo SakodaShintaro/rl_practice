@@ -3,11 +3,9 @@ import torch
 from torch import nn, optim
 
 from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
-from metrics.statistical_metrics_computer import StatisticalMetricsComputer
 from networks.actor_critic_with_action_value import Network as ActionValueNetwork
 from networks.actor_critic_with_state_value import Network as StateValueNetwork
-from networks.sparse_utils import apply_masks_during_training
-from networks.weight_project import get_initial_norms, weight_project
+from networks.vlm_actor_critic_with_state_value import create_vlm_actor_critic_network
 from replay_buffer import ReplayBuffer, ReplayBufferData
 from reward_processor import RewardProcessor
 
@@ -61,7 +59,7 @@ class OnPolicyAgent:
         self.batch_size = args.batch_size
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
-        self.use_action_value = args.use_action_value
+        self.network_class = args.network_class
         self.action_norm_penalty = args.action_norm_penalty
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
@@ -71,10 +69,14 @@ class OnPolicyAgent:
         self.reward_processor = RewardProcessor("scaling", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
 
-        if self.use_action_value:
+        if self.network_class == "actor_critic_action_value":
             self.network = ActionValueNetwork(
                 observation_space.shape, action_dim=self.action_dim, args=args
             ).to(self.device)
+        elif self.network_class == "vlm_actor_critic":
+            self.network = create_vlm_actor_critic_network(
+                observation_space.shape, action_space.shape, args
+            )
         else:
             self.network = StateValueNetwork(observation_space.shape, action_space.shape, args).to(
                 self.device
@@ -94,30 +96,6 @@ class OnPolicyAgent:
 
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
-
-        # Initialize gradient norm targets
-        self.monitoring_targets = {
-            "total": self.network,
-            "actor": self.network.policy_head,
-            "critic": self.network.value_head,
-            "state_predictor": self.network.prediction_head.state_predictor,
-        }
-
-        # Initialize weight projection if enabled
-        self.weight_projection_norms = {}
-        if args.use_weight_projection:
-            self.weight_projection_norms["actor"] = get_initial_norms(self.network.policy_head)
-            self.weight_projection_norms["critic"] = get_initial_norms(self.network.value_head)
-            self.weight_projection_norms["state_predictor"] = get_initial_norms(
-                self.network.prediction_head.state_predictor
-            )
-
-        self.metrics_computers = {
-            "state": StatisticalMetricsComputer(),
-            "actor": StatisticalMetricsComputer(),
-            "critic": StatisticalMetricsComputer(),
-            "state_predictor": StatisticalMetricsComputer(),
-        }
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0
@@ -189,10 +167,13 @@ class OnPolicyAgent:
         info_dict["value"] = value
 
         # predict next state
-        action_tensor = result_dict["action"]
-        next_image, next_reward = self.network.predict_next_state(result_dict["x"], action_tensor)
-        info_dict["next_image"] = next_image
-        info_dict["next_reward"] = next_reward
+        if self.network_class != "vlm_actor_critic":
+            action_tensor = result_dict["action"]
+            next_image, next_reward = self.network.predict_next_state(
+                result_dict["x"], action_tensor
+            )
+            info_dict["next_image"] = next_image
+            info_dict["next_reward"] = next_reward
 
         return action, info_dict
 
@@ -281,16 +262,20 @@ class OnPolicyAgent:
                 curr_adv = adv[indices[:, -2]]
                 curr_target_v = target_v[indices[:, -2]]
 
-                if self.use_action_value:
+                if self.network_class == "actor_critic_action_value":
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v.squeeze(1)
+                    )
+                elif self.network_class == "vlm_actor_critic":
+                    loss, activations_dict, info_dict = self.network.compute_loss(
+                        data, curr_target_v.squeeze(1), curr_adv
                     )
                 else:
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v, curr_adv
                     )
 
-                sum_action_loss += info_dict["actor_loss"] * len(data.observations)
+                sum_action_loss += info_dict.get("actor_loss", 0.0) * len(data.observations)
                 sum_value_loss += info_dict["critic_loss"] * len(data.observations)
 
                 self.optimizer.zero_grad()
@@ -299,39 +284,15 @@ class OnPolicyAgent:
 
                 # Collect metrics on the first batch only
                 if is_first_batch:
-                    # Gradient and parameter norms
-                    for key, value in self.monitoring_targets.items():
-                        metrics_dict[f"gradients/{key}"] = compute_gradient_norm(value)
-                        metrics_dict[f"parameters/{key}"] = compute_parameter_norm(value)
-
                     # Feature metrics
                     for feature_name, feature in activations_dict.items():
                         metrics_dict[f"activation_norms/{feature_name}"] = (
                             feature.norm(dim=1).mean().item()
                         )
 
-                        result_dict = self.metrics_computers[feature_name](feature.detach())
-                        for key, value in result_dict.items():
-                            metrics_dict[f"{key}/{feature_name}"] = value
-
                     is_first_batch = False
 
                 self.optimizer.step()
-
-                # Apply weight projection after optimizer step
-                if self.use_weight_projection:
-                    weight_project(self.network.policy_head, self.weight_projection_norms["actor"])
-                    weight_project(self.network.value_head, self.weight_projection_norms["critic"])
-                    weight_project(
-                        self.network.prediction_head.state_predictor,
-                        self.weight_projection_norms["state_predictor"],
-                    )
-
-                # Apply sparsity masks after optimizer step to ensure pruned weights stay zero
-                if self.apply_masks_during_training:
-                    apply_masks_during_training(self.network.policy_head)
-                    apply_masks_during_training(self.network.value_head)
-                    apply_masks_during_training(self.network.prediction_head.state_predictor)
 
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity

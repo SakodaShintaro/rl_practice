@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         "--network_class",
         type=str,
         default="actor_critic",
-        choices=["actor_critic", "vlm_policy"],
+        choices=["actor_critic", "actor_critic_action_value", "vlm_policy", "vlm_actor_critic"],
     )
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
@@ -149,7 +149,6 @@ def parse_args() -> argparse.Namespace:
 
     # for on_policy
     parser.add_argument("--buffer_capacity", type=int, default=4096)
-    parser.add_argument("--use_action_value", type=int, default=0, choices=[0, 1])
     parser.add_argument(
         "--policy_type", type=str, default="Categorical", choices=["Beta", "Categorical"]
     )
