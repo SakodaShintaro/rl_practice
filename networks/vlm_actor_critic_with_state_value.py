@@ -49,7 +49,7 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         self.model = AutoModelForImageTextToText.from_pretrained(
             args.vlm_model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation=attn_impl,
             cache_dir="./cache",
             device_map=device,
