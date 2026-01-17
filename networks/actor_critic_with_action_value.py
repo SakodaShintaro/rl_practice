@@ -98,7 +98,9 @@ class Network(nn.Module):
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
         self.detach_predictor = args.detach_predictor
-        self.disable_state_predictor = args.disable_state_predictor
+        # VLMエンコーダーのときは状態予測を無効化
+        is_vlm_encoder = args.encoder in ["qwenvl", "mmmamba"]
+        self.disable_state_predictor = args.disable_state_predictor or is_vlm_encoder
 
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
