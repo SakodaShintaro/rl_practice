@@ -216,6 +216,7 @@ class CarRacingActionWrapper(gym.ActionWrapper):
     def action(self, action):
         steer = action[0]
         gas_or_brake = action[1]
+        gas_or_brake *= 0.25  # scale down
         gas = np.maximum(gas_or_brake, 0.0)
         brake = np.maximum(-gas_or_brake, 0.0)
         return np.array([steer, gas, brake], dtype=np.float32)
