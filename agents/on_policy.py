@@ -73,7 +73,7 @@ class OnPolicyAgent:
             self.network = ActionValueNetwork(
                 observation_space.shape, action_dim=self.action_dim, args=args
             ).to(self.device)
-        elif self.network_class == "vlm_actor_critic":
+        elif self.network_class == "vlm_actor_critic_with_state_value":
             self.network = create_vlm_actor_critic_network(
                 observation_space.shape, action_space.shape, args
             )
@@ -160,14 +160,17 @@ class OnPolicyAgent:
 
         # value
         value = result_dict["value"]
-        if self.num_bins > 1:
+        if self.num_bins > 1 and self.network_class not in [
+            "vlm_actor_critic_with_state_value",
+            "vlm_actor_critic_with_action_value",
+        ]:
             value = self.network.hl_gauss_loss(value)
         value = value.item()
         self.prev_value = value
         info_dict["value"] = value
 
         # predict next state
-        if self.network_class != "vlm_actor_critic":
+        if self.network_class != "vlm_actor_critic_with_state_value":
             action_tensor = result_dict["action"]
             next_image, next_reward = self.network.predict_next_state(
                 result_dict["x"], action_tensor
@@ -266,7 +269,7 @@ class OnPolicyAgent:
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v.squeeze(1)
                     )
-                elif self.network_class == "vlm_actor_critic":
+                elif self.network_class == "vlm_actor_critic_with_state_value":
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v.squeeze(1), curr_adv
                     )

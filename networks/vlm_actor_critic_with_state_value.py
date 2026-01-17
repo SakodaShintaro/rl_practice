@@ -89,7 +89,7 @@ class VLMActorCriticWithStateValue(nn.Module):
                 max_value=self.value_max,
                 num_bins=self.num_bins,
                 clamp_to_range=True,
-            )
+            ).to(device)
 
         self.image_processor = ImageProcessor(observation_space_shape, image_processor_type).to(
             device
