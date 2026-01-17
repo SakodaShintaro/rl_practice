@@ -469,7 +469,7 @@ def create_vlm_actor_critic_network(
         task_prompt=ACTION_PROMPT,
         value_hidden_dim=args.critic_hidden_dim,
         target_layer_idx=args.target_layer_idx,
-        max_new_tokens=512,
+        max_new_tokens=128,
         num_bins=args.num_bins,
         value_min=-args.value_range,
         value_max=+args.value_range,
