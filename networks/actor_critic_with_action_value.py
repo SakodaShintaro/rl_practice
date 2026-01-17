@@ -44,7 +44,7 @@ class Network(nn.Module):
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=action_dim,
-                temporal_model_type=args.temporal_model_type,
+                temporal_model_type="transformer",
                 use_image_only=True,
             )
         elif args.encoder == "temporal_only":
@@ -54,7 +54,7 @@ class Network(nn.Module):
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
                 action_dim=action_dim,
-                temporal_model_type=args.temporal_model_type,
+                temporal_model_type="transformer",
                 use_image_only=False,
             )
         elif args.encoder == "qwenvl":

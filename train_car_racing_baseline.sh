@@ -10,7 +10,6 @@ python3 train.py baseline$suffix \
   --action_norm_penalty 1.0 \
   --target_score 800.0 \
   --encoder spatial_temporal \
-  --temporal_model_type transformer \
   --num_bins 1 \
   --value_range 200.0 \
   --step_limit 40_000 \
