@@ -11,7 +11,7 @@ import imageio
 import numpy as np
 import torch
 
-from networks.vlm import MMMambaEncoder, QwenVLEncoder, parse_action_text
+from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
 from utils import concat_images, convert_to_uint8
 from wrappers import make_env
 

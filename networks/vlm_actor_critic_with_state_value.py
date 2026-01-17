@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from .image_processor import ImageProcessor
-from .vlm import ACTION_PROMPT, parse_action_text
+from .vlm_backbone import ACTION_PROMPT, parse_action_text
 
 
 class VLMActorCriticWithStateValue(nn.Module):

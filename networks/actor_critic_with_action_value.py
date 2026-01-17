@@ -12,7 +12,7 @@ from networks.policy_head import DiffusionPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.reward_processor import RewardProcessor
 from networks.value_head import ActionValueHead
-from networks.vlm import MMMambaEncoder, QwenVLEncoder
+from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder
 
 
 class Network(nn.Module):
