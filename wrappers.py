@@ -50,6 +50,7 @@ def make_env(env_id: str) -> gym.Env:
 
     elif env_id == "LetterTracing-v0":
         from generic_gui_env import GenericGUIEnv, create_score_reward_detector
+
         reward_detector = create_score_reward_detector()
         env = GenericGUIEnv(
             reward_detector=reward_detector,
