@@ -4,7 +4,7 @@ from torch import optim
 from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
 from networks.actor_critic_with_action_value import Network
-from networks.vlm_policy_network import VLMPolicyNetwork
+from networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
 from replay_buffer import ReplayBuffer
 from reward_processor import RewardProcessor
 
@@ -34,7 +34,7 @@ class OffPolicyAgent:
         # Sequence observation management
         self.seq_len = args.seq_len
 
-        if args.network_class == "vlm_policy":
+        if args.network_class == "vlm_actor_critic_with_action_value":
             if args.use_quantization:
                 bnb_config = BitsAndBytesConfig(
                     load_in_4bit=True,
@@ -55,7 +55,7 @@ class OffPolicyAgent:
                 args.vlm_model_id,
                 cache_dir="cache",
             )
-            self.network = VLMPolicyNetwork(
+            self.network = VLMActorCriticWithActionValue(
                 action_dim=self.action_dim,
                 seq_len=args.seq_len,
                 action_horizon=1,

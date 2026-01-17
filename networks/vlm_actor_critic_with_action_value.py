@@ -11,7 +11,7 @@ from transformers import AutoProcessor
 from .image_processor import ImageProcessor
 
 
-class VLMPolicyNetwork(nn.Module):
+class VLMActorCriticWithActionValue(nn.Module):
     """VLM-based policy (and optional action value) network."""
 
     def __init__(

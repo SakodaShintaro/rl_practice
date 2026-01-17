@@ -7,7 +7,7 @@ import torch
 from PIL import Image
 from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
-from networks.vlm_policy_network import VLMPolicyNetwork
+from networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
 
 
 def parse_args() -> argparse.Namespace:
@@ -108,7 +108,7 @@ def main() -> None:
         cache_dir=str(args.cache_dir),
     )
 
-    policy = VLMPolicyNetwork(
+    policy = VLMActorCriticWithActionValue(
         action_dim=3,
         seq_len=args.seq_len,
         action_horizon=args.action_horizon,
