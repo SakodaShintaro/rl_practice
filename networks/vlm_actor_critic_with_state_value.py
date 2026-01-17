@@ -197,39 +197,6 @@ class VLMActorCriticWithStateValue(nn.Module):
             "action_text": action_text,
         }
 
-    def _compute_value_from_state(
-        self,
-        images: torch.Tensor,
-        rewards: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-        """Compute value from state hidden (before action generation).
-
-        Processes the prompt and returns the hidden state from the first forward pass,
-        which is the same information available for action generation.
-        """
-        messages = build_vlm_messages(images, rewards, self.task_prompt)
-        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
-
-        outputs = self.model.forward(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            pixel_values=inputs.get("pixel_values"),
-            image_grid_thw=inputs.get("image_grid_thw"),
-            output_hidden_states=True,
-            return_dict=True,
-        )
-
-        hidden_states = outputs.hidden_states
-        state_hidden = hidden_states[self.target_layer_idx][:, -1, :].to(torch.float32)
-
-        value_logits = self.value_head(state_hidden)
-        if self.num_bins > 1:
-            value = self.hl_gauss_loss(value_logits).unsqueeze(-1)
-        else:
-            value = value_logits
-
-        return value, state_hidden, inputs
-
     def _action_to_text(self, action: torch.Tensor) -> str:
         """Convert 2D action tensor to canonical text representation.
 
@@ -241,23 +208,29 @@ class VLMActorCriticWithStateValue(nn.Module):
         braking = max(-gas_or_brake, 0.0)
         return f"Action: steering={steering:.2f}, gas={gas:.2f}, braking={braking:.2f}"
 
-    def _compute_log_prob_for_actions_batch(
+    def _compute_value_and_log_prob(
         self,
-        inputs: dict[str, torch.Tensor],
+        images: torch.Tensor,
+        rewards: torch.Tensor,
         actions: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute log probabilities for a batch of actions using teacher forcing.
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute value and log prob in a single forward pass.
 
         Args:
-            inputs: Prepared model inputs (already batched)
-            actions: Action tensors of shape (B, action_dim)
+            images: (B, T, C, H, W)
+            rewards: (B, T, 1)
+            actions: (B, action_dim)
 
         Returns:
-            Log probabilities of shape (B,)
+            value: (B, 1) or (B, num_bins)
+            hidden: (B, hidden_size)
+            log_probs: (B,)
         """
         batch_size = actions.size(0)
+        messages = build_vlm_messages(images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
 
-        # Convert all actions to text and tokenize
+        # Tokenize actions
         action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]
         tokenized = self.processor.tokenizer(
             action_texts, add_special_tokens=False, padding=True, return_tensors="pt"
@@ -265,40 +238,40 @@ class VLMActorCriticWithStateValue(nn.Module):
         target_ids = tokenized["input_ids"].to(self.device)
         target_mask = tokenized["attention_mask"].to(self.device).float()
         action_len = target_ids.size(1)
+        prompt_len = inputs["input_ids"].size(1)
 
-        # Concatenate prompt input_ids with action token ids
-        # input_ids: (B, prompt_len), target_ids: (B, action_len)
+        # Concatenate prompt + action tokens
         combined_input_ids = torch.cat([inputs["input_ids"], target_ids], dim=1)
         combined_attention_mask = torch.cat(
             [inputs["attention_mask"], tokenized["attention_mask"].to(self.device)], dim=1
         )
 
-        # Single forward pass with all tokens
+        # Single forward pass with hidden states
         outputs = self.model.forward(
             input_ids=combined_input_ids,
             attention_mask=combined_attention_mask,
             pixel_values=inputs.get("pixel_values"),
             image_grid_thw=inputs.get("image_grid_thw"),
-            output_hidden_states=False,
+            output_hidden_states=True,
             return_dict=True,
         )
 
-        # logits: (B, prompt_len + action_len, vocab_size)
-        # We need logits at positions [prompt_len-1, prompt_len, ..., prompt_len+action_len-2]
-        # These predict tokens at positions [prompt_len, prompt_len+1, ..., prompt_len+action_len-1]
-        prompt_len = inputs["input_ids"].size(1)
+        # Value: from prompt's last hidden state (before action tokens)
+        hidden_states = outputs.hidden_states
+        state_hidden = hidden_states[self.target_layer_idx][:, prompt_len - 1, :].to(torch.float32)
+        value_logits = self.value_head(state_hidden)
+        if self.num_bins > 1:
+            value = self.hl_gauss_loss(value_logits).unsqueeze(-1)
+        else:
+            value = value_logits
+
+        # Log prob: from logits predicting action tokens
         relevant_logits = outputs.logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
-
-        # Compute log probs
         log_prob_dist = F.log_softmax(relevant_logits, dim=-1)
-
-        # Gather log probs for target tokens: (B, action_len)
         token_log_probs = log_prob_dist.gather(2, target_ids.unsqueeze(2)).squeeze(2)
-
-        # Sum log probs, masking padding tokens
         batch_log_probs = (token_log_probs * target_mask).sum(dim=1)
 
-        return batch_log_probs
+        return value, state_hidden, batch_log_probs
 
     clip_param_policy = 0.2
     clip_param_value = 0.2
@@ -309,17 +282,16 @@ class VLMActorCriticWithStateValue(nn.Module):
         curr_target_v: torch.Tensor,
         curr_adv: torch.Tensor,
     ) -> tuple[torch.Tensor, dict, dict]:
-        """Compute PPO actor loss and critic loss."""
+        """Compute PPO actor loss and critic loss in a single forward pass."""
         obs_curr = data.observations[:, :-1]
         rewards_curr = data.rewards[:, :-1]
         actions_curr = data.actions[:, -1]  # (B, action_dim)
         old_log_prob = data.log_probs[:, -1].view(-1)
 
-        # Compute value and hidden states for batch
-        value, hidden, inputs = self._compute_value_from_state(obs_curr, rewards_curr)
-
-        # Compute new log prob for actions in batch
-        new_log_prob = self._compute_log_prob_for_actions_batch(inputs, actions_curr)
+        # Single forward pass for value and log prob
+        value, hidden, new_log_prob = self._compute_value_and_log_prob(
+            obs_curr, rewards_curr, actions_curr
+        )
 
         # PPO actor loss
         ratio = torch.exp(new_log_prob - old_log_prob)
@@ -353,9 +325,11 @@ class VLMActorCriticWithStateValue(nn.Module):
         """Compute target value for TD learning."""
         obs_next = data.observations[:, 1:]
         rewards_next = data.rewards[:, 1:]
+        actions_next = data.actions[:, -1]  # Use current action as dummy
         dones_next = data.dones[:, -1].flatten()
 
-        _, hidden_next, _ = self._compute_value_from_state(obs_next, rewards_next)
+        # Use _compute_value_and_log_prob, ignore log_prob
+        _, hidden_next, _ = self._compute_value_and_log_prob(obs_next, rewards_next, actions_next)
         value_logits_next = self.value_head(hidden_next)
         if self.num_bins > 1:
             next_value = self.hl_gauss_loss(value_logits_next)
