@@ -78,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--network_class",
         type=str,
-        default="actor_critic_with_state_value",
+        default="actor_critic_with_action_value",
         choices=[
             "actor_critic_with_state_value",
             "actor_critic_with_action_value",
