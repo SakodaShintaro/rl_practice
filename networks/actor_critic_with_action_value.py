@@ -113,28 +113,21 @@ class Network(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
-    def forward(
+    @torch.inference_mode()
+    def infer(
         self,
         s_seq: torch.Tensor,  # (B, T, C, H, W)
-        obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
+        obs_z_seq: torch.Tensor,  # (B, T, C', H', W')
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
-        action: torch.Tensor | None,  # (B, action_dim) or None
+        rnn_state: torch.Tensor,
     ) -> dict:
-        """Forward pass compatible with actor_critic_with_state_value interface.
-
-        This method encodes the sequence and returns action and action-value.
-        """
         x, rnn_state, action_text = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
         )  # (B, hidden_dim)
 
         # Get action from policy_head
-        if action is None:
-            action, a_logp = self.policy_head.get_action(x)
-        else:
-            _, a_logp = self.policy_head.get_action(x)
+        action, a_logp = self.policy_head.get_action(x)
 
         # Get action-value from value_head
         q_dict = self.value_head(x, action)
@@ -147,16 +140,6 @@ class Network(nn.Module):
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (B, ...)
         }
-
-    def infer(
-        self,
-        s_seq: torch.Tensor,  # (B, T, C, H, W)
-        obs_z_seq: torch.Tensor,  # (B, T, C', H', W')
-        a_seq: torch.Tensor,  # (B, T, action_dim)
-        r_seq: torch.Tensor,  # (B, T, 1)
-        rnn_state: torch.Tensor,
-    ) -> dict:
-        return self.forward(s_seq, obs_z_seq, a_seq, r_seq, rnn_state, None)
 
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
         obs_curr = data.observations[:, :-1]
