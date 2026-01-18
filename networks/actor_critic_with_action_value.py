@@ -249,13 +249,12 @@ class Network(nn.Module):
         for param in self.value_head.parameters():
             param.requires_grad_(False)
 
-        critic_output_dict = self.value_head(state_curr, action)
-        critic_output = critic_output_dict["output"]
+        advantage_dict = self.value_head.get_advantage(state_curr, action)
+        advantage = advantage_dict["output"]
         if self.num_bins > 1:
-            critic_output = self.hl_gauss_loss(critic_output).unsqueeze(-1)
-        else:
-            critic_output = critic_output.unsqueeze(-1)
-        actor_loss = -critic_output.mean()
+            advantage = self.hl_gauss_loss(advantage)
+        advantage = advantage.view(-1, 1)
+        actor_loss = -advantage.mean()
 
         for param in self.value_head.parameters():
             param.requires_grad_(True)
@@ -301,13 +300,14 @@ class Network(nn.Module):
 
         activations_dict = {
             "actor": actor_output_dict["activation"],
-            "critic": critic_output_dict["activation"],
+            "critic": advantage_dict["activation"],
         }
 
         info_dict = {
             "actor_loss": actor_loss.item(),
             "dacer_loss": dacer_loss.item(),
             "log_pi": log_pi.mean().item(),
+            "advantage": advantage.mean().item(),
         }
 
         return total_actor_loss, activations_dict, info_dict
@@ -337,6 +337,7 @@ class Network(nn.Module):
             "actor_loss": actor_loss.item(),
             "dacer_loss": 0.0,
             "log_pi": log_pi.mean().item(),
+            "advantage": advantage.mean().item(),
         }
 
         return actor_loss, activations_dict, info_dict
