@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--image_processor_type", type=str, default="simple_cnn", choices=["simple_cnn", "ae"]
     )
+    parser.add_argument(
+        "--policy_type",
+        type=str,
+        default="diffusion",
+        choices=["beta", "categorical", "diffusion"],
+    )
     parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument("--use_quantization", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_lora", type=int, default=1, choices=[0, 1])
@@ -147,12 +153,6 @@ def parse_args() -> argparse.Namespace:
 
     # for on_policy
     parser.add_argument("--buffer_capacity", type=int, default=4096)
-    parser.add_argument(
-        "--policy_type",
-        type=str,
-        default="diffusion",
-        choices=["beta", "categorical", "diffusion"],
-    )
 
     return parser.parse_args()
 
