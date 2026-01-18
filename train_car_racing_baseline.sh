@@ -7,6 +7,7 @@ cd $(dirname $0)
 python3 train.py baseline$suffix \
   --env_id CarRacing-v3 \
   --agent_type off_policy \
+  --network_class actor_critic_with_action_value \
   --action_norm_penalty 1.0 \
   --target_score 800.0 \
   --encoder spatial_temporal \
