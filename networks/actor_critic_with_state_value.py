@@ -81,9 +81,9 @@ class Network(nn.Module):
             sparsity=0.0,
         )
 
-        if args.policy_type == "Beta":
+        if args.policy_type == "beta":
             self.policy_head = BetaPolicy(hidden_dim, self.action_dim)
-        elif args.policy_type == "Categorical":
+        elif args.policy_type == "categorical":
             self.policy_head = CategoricalPolicy(hidden_dim, self.action_dim)
         else:
             raise ValueError("Invalid policy type")

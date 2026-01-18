@@ -20,4 +20,4 @@ python3 train.py baseline$suffix \
   --batch_size 32 \
   --learning_rate 1e-4 \
   --buffer_capacity 2048 \
-  --policy_type Beta \
+  --policy_type beta \

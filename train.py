@@ -148,7 +148,10 @@ def parse_args() -> argparse.Namespace:
     # for on_policy
     parser.add_argument("--buffer_capacity", type=int, default=4096)
     parser.add_argument(
-        "--policy_type", type=str, default="Categorical", choices=["Beta", "Categorical"]
+        "--policy_type",
+        type=str,
+        default="diffusion",
+        choices=["beta", "categorical", "diffusion"],
     )
 
     return parser.parse_args()
