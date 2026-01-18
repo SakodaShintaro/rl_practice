@@ -117,7 +117,6 @@ class Network(nn.Module):
         self.detach_predictor = args.detach_predictor
         # CFGRLパラメータ
         self.condition_drop_prob = 0.1
-        self.advantage_threshold = 0.0
         # VLMエンコーダーのときは状態予測を無効化
         is_vlm_encoder = args.encoder in ["qwenvl", "mmmamba"]
         self.disable_state_predictor = args.disable_state_predictor or is_vlm_encoder
@@ -382,8 +381,9 @@ class Network(nn.Module):
                 advantage = self.hl_gauss_loss(advantage)
             advantage = advantage.view(-1)
 
-            # I = 1 if A >= ε else 0
-            condition = (advantage >= self.advantage_threshold).long()
+            # I = 1 if A >= median else 0 (中央値を閾値として使用)
+            threshold = advantage.median()
+            condition = (advantage >= threshold).long()
 
             # condition_drop_probの確率でunconditional (I=2)に
             drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
