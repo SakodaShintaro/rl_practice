@@ -47,6 +47,8 @@ class StateValueHead(nn.Module):
 
 
 class ActionValueHead(nn.Module):
+    """Dueling Architecture: Q(s,a) = V(s) + A(s,a)"""
+
     def __init__(
         self,
         in_channels: int,
@@ -58,10 +60,19 @@ class ActionValueHead(nn.Module):
     ) -> None:
         super().__init__()
         mid_dim = in_channels + action_dim
-        self.fc_in = nn.Linear(mid_dim, hidden_dim)
-        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
-        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.fc_out = nn.Linear(hidden_dim, num_bins)
+
+        # Value stream: V(s) - 状態のみに依存
+        self.v_fc_in = nn.Linear(in_channels, hidden_dim)
+        self.v_fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
+        self.v_norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.v_fc_out = nn.Linear(hidden_dim, num_bins)
+
+        # Advantage stream: A(s,a) - 状態と行動に依存
+        self.a_fc_in = nn.Linear(mid_dim, hidden_dim)
+        self.a_fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
+        self.a_norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.a_fc_out = nn.Linear(hidden_dim, num_bins)
+
         self.apply(weights_init_)
 
         self.sparse_mask = (
@@ -71,15 +82,23 @@ class ActionValueHead(nn.Module):
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
         result_dict = {}
 
-        x = torch.cat([x, a], dim=1)
-        x = self.fc_in(x)
+        # Value stream: V(s)
+        v = self.v_fc_in(x)
+        v = self.v_fc_mid(v)
+        v = self.v_norm(v)
+        v_out = self.v_fc_out(v)  # (B, num_bins)
 
-        x = self.fc_mid(x)
-        x = self.norm(x)
+        # Advantage stream: A(s,a)
+        xa = torch.cat([x, a], dim=1)
+        adv = self.a_fc_in(xa)
+        adv = self.a_fc_mid(adv)
+        adv = self.a_norm(adv)
+        adv_out = self.a_fc_out(adv)  # (B, num_bins)
 
-        result_dict["activation"] = x
+        result_dict["activation"] = torch.cat([v, adv], dim=1)
 
-        output = self.fc_out(x)
+        # Q(s,a) = V(s) + A(s,a) in logit space
+        output = v_out + adv_out
         result_dict["output"] = output
 
         return result_dict
