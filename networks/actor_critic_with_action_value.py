@@ -234,28 +234,28 @@ class Network(nn.Module):
     def _compute_actor_loss(self, state_curr):
         if self.detach_actor:
             state_curr = state_curr.detach()
-        pi, log_pi = self.policy_head.get_action(state_curr)
+        action, log_pi = self.policy_head.get_action(state_curr)
 
         for param in self.value_head.parameters():
             param.requires_grad_(False)
 
-        critic_pi_output_dict = self.value_head(state_curr, pi)
-        critic_pi = critic_pi_output_dict["output"]
+        critic_output_dict = self.value_head(state_curr, action)
+        critic_output = critic_output_dict["output"]
         if self.num_bins > 1:
-            critic_pi = self.hl_gauss_loss(critic_pi).unsqueeze(-1)
+            critic_output = self.hl_gauss_loss(critic_output).unsqueeze(-1)
         else:
-            critic_pi = critic_pi.unsqueeze(-1)
-        actor_loss = -critic_pi.mean()
+            critic_output = critic_output.unsqueeze(-1)
+        actor_loss = -critic_output.mean()
 
         for param in self.value_head.parameters():
             param.requires_grad_(True)
 
         # DACER2 loss (https://arxiv.org/abs/2505.23426)
-        actions = pi.clone().detach()
+        actions = action.clone().detach()
         actions.requires_grad = True
         eps = 1e-4
-        device = pi.device
-        batch_size = pi.shape[0]
+        device = action.device
+        batch_size = action.shape[0]
         t = (torch.rand((batch_size, 1), device=device)) * (1 - eps) + eps
         c = 0.4
         d = -1.8
@@ -291,7 +291,7 @@ class Network(nn.Module):
 
         activations_dict = {
             "actor": actor_output_dict["activation"],
-            "critic": critic_pi_output_dict["activation"],
+            "critic": critic_output_dict["activation"],
         }
 
         info_dict = {
