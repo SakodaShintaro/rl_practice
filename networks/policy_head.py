@@ -150,6 +150,10 @@ class BetaPolicy(nn.Module):
             "activation": policy_x,
         }
 
+    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        result = self.forward(x, None)
+        return result["action"], result["a_logp"]
+
 
 class CategoricalPolicy(nn.Module):
     def __init__(self, hidden_dim: int, action_dim: int) -> None:

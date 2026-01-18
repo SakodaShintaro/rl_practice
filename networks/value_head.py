@@ -102,3 +102,16 @@ class ActionValueHead(nn.Module):
         result_dict["output"] = output
 
         return result_dict
+
+    def get_advantage(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
+        result_dict = {}
+
+        xa = torch.cat([x, a], dim=1)
+        adv = self.a_fc_in(xa)
+        adv = self.a_fc_mid(adv)
+        adv = self.a_norm(adv)
+        result_dict["activation"] = adv
+        adv_out = self.a_fc_out(adv)  # (B, num_bins)
+        result_dict["output"] = adv_out
+
+        return result_dict

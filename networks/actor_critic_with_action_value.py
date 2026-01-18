@@ -8,7 +8,7 @@ from hl_gauss_pytorch import HLGaussLoss
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from networks.image_processor import ImageProcessor
-from networks.policy_head import DiffusionPolicy
+from networks.policy_head import BetaPolicy, DiffusionPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.reward_processor import RewardProcessor
 from networks.value_head import ActionValueHead
@@ -71,14 +71,21 @@ class Network(nn.Module):
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
-        self.policy_head = DiffusionPolicy(
-            state_dim=self.encoder.output_dim,
-            action_dim=action_dim,
-            hidden_dim=args.actor_hidden_dim,
-            block_num=args.actor_block_num,
-            denoising_time=args.denoising_time,
-            sparsity=args.sparsity,
-        )
+        self.policy_type = args.policy_type
+        if self.policy_type == "diffusion":
+            self.policy_head = DiffusionPolicy(
+                state_dim=self.encoder.output_dim,
+                action_dim=action_dim,
+                hidden_dim=args.actor_hidden_dim,
+                block_num=args.actor_block_num,
+                denoising_time=args.denoising_time,
+                sparsity=args.sparsity,
+            )
+        elif self.policy_type == "beta":
+            self.policy_head = BetaPolicy(
+                hidden_dim=self.encoder.output_dim,
+                action_dim=action_dim,
+            )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=action_dim,
@@ -158,7 +165,10 @@ class Network(nn.Module):
         critic_loss, critic_activations, critic_info = self._compute_critic_loss(
             state_curr, action_curr, target_value
         )
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
+        if self.policy_type == "diffusion":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
+        elif self.policy_type == "beta":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(state_curr)
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
@@ -301,6 +311,35 @@ class Network(nn.Module):
         }
 
         return total_actor_loss, activations_dict, info_dict
+
+    def _compute_actor_loss_pg(self, state_curr):
+        if self.detach_actor:
+            state_curr = state_curr.detach()
+
+        policy_output = self.policy_head.forward(state_curr, None)
+        action = policy_output["action"]
+        log_pi = policy_output["a_logp"]
+
+        advantage_dict = self.value_head.get_advantage(state_curr, action)
+        advantage = advantage_dict["output"]
+        if self.num_bins > 1:
+            advantage = self.hl_gauss_loss(advantage)
+        advantage = advantage.view(-1, 1)
+
+        actor_loss = -(log_pi * advantage.detach()).mean()
+
+        activations_dict = {
+            "actor": policy_output["activation"],
+            "critic": advantage_dict["activation"],
+        }
+
+        info_dict = {
+            "actor_loss": actor_loss.item(),
+            "dacer_loss": 0.0,
+            "log_pi": log_pi.mean().item(),
+        }
+
+        return actor_loss, activations_dict, info_dict
 
     def _compute_sequence_loss(self, data, state_curr):
         if self.disable_state_predictor:
