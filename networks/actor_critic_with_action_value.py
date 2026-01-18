@@ -319,6 +319,7 @@ class Network(nn.Module):
         policy_output = self.policy_head.forward(state_curr, None)
         action = policy_output["action"]
         log_pi = policy_output["a_logp"]
+        entropy = policy_output["entropy"]
 
         advantage_dict = self.value_head.get_advantage(state_curr, action)
         advantage = advantage_dict["output"]
@@ -326,7 +327,7 @@ class Network(nn.Module):
             advantage = self.hl_gauss_loss(advantage)
         advantage = advantage.view(-1, 1)
 
-        actor_loss = -(log_pi * advantage.detach()).mean()
+        actor_loss = -(log_pi * advantage.detach()).mean() - 0.02 * entropy.mean()
 
         activations_dict = {
             "actor": policy_output["activation"],
@@ -338,6 +339,7 @@ class Network(nn.Module):
             "dacer_loss": 0.0,
             "log_pi": log_pi.mean().item(),
             "advantage": advantage.mean().item(),
+            "entropy": entropy.mean().item(),
         }
 
         return actor_loss, activations_dict, info_dict
