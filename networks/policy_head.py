@@ -116,6 +116,120 @@ class DiffusionPolicy(nn.Module):
         return action, dummy_log_p
 
 
+class CFGDiffusionPolicy(nn.Module):
+    """
+    Classifier Free Guidance対応のDiffusion Policy (CFGRL/pistar06)
+
+    学習時: 条件I（positive/negative）をcondition_drop_probの確率でドロップして学習
+    推論時: β（cfgrl_beta）でガイダンスの強さを調整
+    """
+
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        hidden_dim: int,
+        block_num: int,
+        denoising_time: float,
+        sparsity: float,
+        cfgrl_beta: float,
+    ) -> None:
+        super().__init__()
+        self.cfgrl_beta = cfgrl_beta
+        time_embedding_size = 256
+        condition_embedding_size = 64
+        # 条件Iの埋め込み: 0=negative, 1=positive, 2=unconditional(dropout)
+        self.condition_embedding = nn.Embedding(3, condition_embedding_size)
+
+        self.fc_in = nn.Linear(
+            state_dim + action_dim + time_embedding_size + condition_embedding_size, hidden_dim
+        )
+        self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.fc_out = nn.Linear(hidden_dim, action_dim)
+        self.action_dim = action_dim
+        self.step_num = 1
+        self.denoising_time = denoising_time
+        self.t_embedder = TimestepEmbedder(time_embedding_size)
+        self.sparse_mask = (
+            None if sparsity == 0.0 else apply_one_shot_pruning(self, overall_sparsity=sparsity)
+        )
+
+    def forward(
+        self,
+        a: torch.Tensor,
+        t: torch.Tensor,
+        state: torch.Tensor,
+        condition: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            a: action (B, action_dim)
+            t: timestep (B,)
+            state: state embedding (B, state_dim)
+            condition: 条件I (B,) - 0=negative, 1=positive, 2=unconditional
+        """
+        result_dict = {}
+
+        t_emb = self.t_embedder(t)
+        cond_emb = self.condition_embedding(condition)  # (B, condition_embedding_size)
+        x = torch.cat([a, t_emb, state, cond_emb], 1)
+        x = self.fc_in(x)
+
+        x = self.fc_mid(x)
+        x = self.norm(x)
+
+        result_dict["activation"] = x
+
+        x = self.fc_out(x)
+        result_dict["output"] = x
+        return result_dict
+
+    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        CFGを使った推論
+
+        推論式: v = (1 - β) * v_uncond + β * v_positive
+        βが大きいほどpositiveなアドバンテージ方向にガイダンスが強くなる
+        """
+        bs = x.size(0)
+        device = x.device
+
+        normal = torch.distributions.Normal(
+            torch.zeros((bs, self.action_dim), device=device),
+            torch.ones((bs, self.action_dim), device=device),
+        )
+        action = normal.sample()
+        action = torch.clamp(action, -3.0, 3.0)
+        dt = self.denoising_time / self.step_num
+
+        curr_time = torch.zeros((bs), device=device)
+
+        # 条件ラベル: 1=positive, 2=unconditional
+        cond_positive = torch.ones((bs,), dtype=torch.long, device=device)
+        cond_uncond = torch.full((bs,), 2, dtype=torch.long, device=device)
+
+        for _ in range(self.step_num):
+            # positive条件での速度
+            v_positive_dict = self.forward(action, curr_time, x, cond_positive)
+            v_positive = v_positive_dict["output"]
+
+            # unconditional条件での速度
+            v_uncond_dict = self.forward(action, curr_time, x, cond_uncond)
+            v_uncond = v_uncond_dict["output"]
+
+            # CFGによる速度の合成
+            v = (1 - self.cfgrl_beta) * v_uncond + self.cfgrl_beta * v_positive
+
+            action = action + dt * v
+            curr_time += dt
+
+        action = torch.tanh(action)
+
+        dummy_log_p = torch.zeros((bs, 1), device=device)
+        return action, dummy_log_p
+
+
 class BetaPolicy(nn.Module):
     def __init__(self, hidden_dim: int, action_dim: int) -> None:
         super().__init__()

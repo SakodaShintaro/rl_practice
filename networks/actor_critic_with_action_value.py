@@ -8,7 +8,7 @@ from hl_gauss_pytorch import HLGaussLoss
 
 from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from networks.image_processor import ImageProcessor
-from networks.policy_head import BetaPolicy, DiffusionPolicy
+from networks.policy_head import BetaPolicy, CFGDiffusionPolicy, DiffusionPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.reward_processor import RewardProcessor
 from networks.value_head import ActionValueHead
@@ -86,6 +86,16 @@ class Network(nn.Module):
                 hidden_dim=self.encoder.output_dim,
                 action_dim=action_dim,
             )
+        elif self.policy_type == "cfgrl":
+            self.policy_head = CFGDiffusionPolicy(
+                state_dim=self.encoder.output_dim,
+                action_dim=action_dim,
+                hidden_dim=args.actor_hidden_dim,
+                block_num=args.actor_block_num,
+                denoising_time=args.denoising_time,
+                sparsity=args.sparsity,
+                cfgrl_beta=1.5,
+            )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=action_dim,
@@ -105,6 +115,9 @@ class Network(nn.Module):
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
         self.detach_predictor = args.detach_predictor
+        # CFGRLパラメータ
+        self.condition_drop_prob = 0.1
+        self.advantage_threshold = 0.0
         # VLMエンコーダーのときは状態予測を無効化
         is_vlm_encoder = args.encoder in ["qwenvl", "mmmamba"]
         self.disable_state_predictor = args.disable_state_predictor or is_vlm_encoder
@@ -169,6 +182,10 @@ class Network(nn.Module):
             actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
         elif self.policy_type == "beta":
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(state_curr)
+        elif self.policy_type == "cfgrl":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
+                state_curr, action_curr
+            )
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
@@ -340,6 +357,74 @@ class Network(nn.Module):
             "log_pi": log_pi.mean().item(),
             "advantage": advantage.mean().item(),
             "entropy": entropy.mean().item(),
+        }
+
+        return actor_loss, activations_dict, info_dict
+
+    def _compute_actor_loss_cfgrl(self, state_curr, action_curr):
+        """
+        CFGRL/pistar06方式の条件付き教師あり学習
+
+        アドバンテージが閾値以上なら I=1 (positive)、そうでなければ I=0 (negative)
+        condition_drop_probの確率で条件をドロップ (I=2, unconditional)
+        """
+        if self.detach_actor:
+            state_curr = state_curr.detach()
+
+        batch_size = state_curr.shape[0]
+        device = state_curr.device
+
+        # アドバンテージを計算して条件Iを決定
+        with torch.no_grad():
+            advantage_dict = self.value_head.get_advantage(state_curr, action_curr)
+            advantage = advantage_dict["output"]
+            if self.num_bins > 1:
+                advantage = self.hl_gauss_loss(advantage)
+            advantage = advantage.view(-1)
+
+            # I = 1 if A >= ε else 0
+            condition = (advantage >= self.advantage_threshold).long()
+
+            # condition_drop_probの確率でunconditional (I=2)に
+            drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
+            condition = torch.where(drop_mask, torch.full_like(condition, 2), condition)
+
+        # Flow Matching for conditional policy
+        eps = 1e-4
+        t = torch.rand((batch_size, 1), device=device) * (1 - eps) + eps
+
+        # ノイズからaction_currへの補間
+        noise = torch.randn_like(action_curr)
+        noise = torch.clamp(noise, -3.0, 3.0)
+        a_t = (1.0 - t) * noise + t * action_curr
+
+        # 条件付きでvelocityを予測
+        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr, condition)
+        v_pred = actor_output_dict["output"]
+
+        # ターゲットvelocity: action_curr - noise
+        v_target = action_curr - noise
+
+        # Flow Matching loss
+        actor_loss = F.mse_loss(v_pred, v_target)
+
+        activations_dict = {
+            "actor": actor_output_dict["activation"],
+        }
+
+        # positiveとnegativeの割合を計算
+        positive_ratio = (condition == 1).float().mean().item()
+        negative_ratio = (condition == 0).float().mean().item()
+        uncond_ratio = (condition == 2).float().mean().item()
+
+        info_dict = {
+            "actor_loss": actor_loss.item(),
+            "dacer_loss": 0.0,
+            "log_pi": 0.0,
+            "advantage": advantage.mean().item(),
+            "cfgrl_positive_ratio": positive_ratio,
+            "cfgrl_negative_ratio": negative_ratio,
+            "cfgrl_uncond_ratio": uncond_ratio,
         }
 
         return actor_loss, activations_dict, info_dict

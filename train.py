@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
         "--policy_type",
         type=str,
         default="diffusion",
-        choices=["beta", "categorical", "diffusion"],
+        choices=["beta", "categorical", "diffusion", "cfgrl"],
     )
     parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument("--use_quantization", type=int, default=1, choices=[0, 1])
