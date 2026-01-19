@@ -42,9 +42,8 @@ class SequentialBatchSampler:
 
 
 class OnPolicyAgent:
-    on_policy_epoch = 4
-
     def __init__(self, args, observation_space, action_space) -> None:
+        self.on_policy_epoch = args.on_policy_epoch
         # action properties
         self.action_space = action_space
         self.action_dim = np.prod(action_space.shape)
