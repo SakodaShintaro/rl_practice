@@ -5,7 +5,7 @@ import torch.nn as nn
 from einops import rearrange
 
 from .self_attention import SpatialTransformerBlock
-from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, MambaBlock
+from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, IdentityBlock, MambaBlock
 
 
 class SpatialTemporalBlock(nn.Module):
@@ -27,6 +27,8 @@ class SpatialTemporalBlock(nn.Module):
             self.tempo_block = GRUBlock(hidden_dim)
         elif temporal_model_type == "gdn":
             self.tempo_block = GdnBlock(hidden_dim)
+        elif temporal_model_type == "identity":
+            self.tempo_block = IdentityBlock(hidden_dim)
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = SpatialTransformerBlock(hidden_dim, n_head, space_len)

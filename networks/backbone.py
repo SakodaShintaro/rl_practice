@@ -7,7 +7,7 @@ from .image_processor import ImageProcessor
 from .reward_processor import RewardProcessor
 from .self_attention import get_fourier_embeds_from_coordinates
 from .spatial_temporal_transformer import SpatialTemporalTransformer
-from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, MambaBlock
+from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, IdentityBlock, MambaBlock
 
 
 def init_weights(m):
@@ -167,7 +167,7 @@ class TemporalOnlyEncoder(nn.Module):
         seq_len: シーケンス長
         n_layer: レイヤー数 (GRUならnum_layers、transformerならブロック数)
         action_dim: アクションの次元 (未使用)
-        temporal_model_type: 時系列モデルのタイプ ("gru" or "transformer")
+        temporal_model_type: 時系列モデルのタイプ ("gru", "transformer", "gdn", "mamba", "identity")
         use_image_only: 画像のみを使うか（Falseならaction, rewardも入れる）
     """
 
@@ -210,15 +210,14 @@ class TemporalOnlyEncoder(nn.Module):
             self.blocks = nn.ModuleList([GRUBlock(hidden_dim) for _ in range(n_layer)])
         elif temporal_model_type == "transformer":
             self.blocks = nn.ModuleList(
-                [
-                    CausalTransformerBlock(hidden_dim, n_head, max_seq_len)
-                    for _ in range(n_layer)
-                ]
+                [CausalTransformerBlock(hidden_dim, n_head, max_seq_len) for _ in range(n_layer)]
             )
         elif temporal_model_type == "gdn":
             self.blocks = nn.ModuleList([GdnBlock(hidden_dim) for _ in range(n_layer)])
         elif temporal_model_type == "mamba":
             self.blocks = nn.ModuleList([MambaBlock(hidden_dim) for _ in range(n_layer)])
+        elif temporal_model_type == "identity":
+            self.blocks = nn.ModuleList([IdentityBlock(hidden_dim) for _ in range(n_layer)])
         else:
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
