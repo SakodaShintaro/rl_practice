@@ -7,7 +7,7 @@ from carla_leaderboard_env import CARLALeaderboardEnv
 from memory_maze_gym_wrapper import MemoryMazeGymWrapper
 from simple_four_quadrant_env import SimpleFourQuadrantEnv
 
-REPEAT = 8
+REPEAT = 4
 
 
 def make_env(env_id: str) -> gym.Env:
