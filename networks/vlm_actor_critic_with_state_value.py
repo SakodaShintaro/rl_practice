@@ -11,7 +11,6 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 from .image_processor import ImageProcessor
 from .vlm_backbone import (
     ACTION_PROMPT,
-    build_vlm_messages,
     create_lora_config,
     parse_action_text,
     prepare_vlm_inputs,
@@ -146,8 +145,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         rewards: torch.Tensor,
     ) -> tuple[str, torch.Tensor, torch.Tensor, list[int]]:
         """Encode observation and generate action, returning hidden state and log prob."""
-        messages = build_vlm_messages(images, rewards, self.task_prompt)
-        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
         action_text, hidden, log_prob, token_ids = self._generate_with_hidden_states(inputs)
         return action_text, hidden, log_prob, token_ids
 
@@ -227,8 +225,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             log_probs: (B,)
         """
         batch_size = actions.size(0)
-        messages = build_vlm_messages(images, rewards, self.task_prompt)
-        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
 
         # Tokenize actions
         action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]

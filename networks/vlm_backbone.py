@@ -27,21 +27,24 @@ ACTION_PROMPT = (
 )
 
 
-def build_vlm_messages(
+def prepare_vlm_inputs(
+    processor: AutoProcessor,
     images: torch.Tensor,
     rewards: torch.Tensor,
     task_prompt: str,
-) -> list[list[dict]]:
-    """Build VLM messages from images and rewards.
+) -> dict[str, torch.Tensor]:
+    """Build VLM messages and prepare model inputs.
 
     Args:
+        processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
         rewards: (B, T, 1) tensor
         task_prompt: Task prompt string (can be empty)
 
     Returns:
-        List of message lists for each batch
+        Dictionary of model inputs
     """
+    device = images.device
     batch_size, seq_len = images.shape[:2]
     messages = []
     for b in range(batch_size):
@@ -56,31 +59,14 @@ def build_vlm_messages(
             reward_text = f"reward {float(rewards[b, t, 0]):.2f}"
             content.append({"type": "text", "text": reward_text})
         messages.append([{"role": "user", "content": content}])
-    return messages
 
-
-def prepare_vlm_inputs(
-    processor: AutoProcessor,
-    messages: list[list[dict]],
-    device: str,
-) -> dict[str, torch.Tensor]:
-    """Prepare VLM model inputs from messages.
-
-    Args:
-        processor: AutoProcessor instance
-        messages: List of message lists
-        device: Target device
-
-    Returns:
-        Dictionary of model inputs
-    """
     text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
 
-    images, videos, video_kwargs = process_vision_info(
+    proc_images, videos, video_kwargs = process_vision_info(
         messages,
         image_patch_size=16,
         return_video_kwargs=True,
@@ -96,7 +82,7 @@ def prepare_vlm_inputs(
 
     inputs = processor(
         text=text,
-        images=images,
+        images=proc_images,
         videos=videos,
         video_metadata=video_metadata,
         return_tensors="pt",
@@ -240,8 +226,7 @@ class QwenVLEncoder(nn.Module):
         dummy_images = torch.zeros(1, self.seq_len, 3, 96, 96, device=self.device)
         dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
 
-        messages = build_vlm_messages(dummy_images, dummy_rewards, "")
-        model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+        model_inputs = prepare_vlm_inputs(self.processor, dummy_images, dummy_rewards, "")
 
         output = self.model.forward(**model_inputs, output_hidden_states=True)
         hidden = output["hidden_states"][self.target_layer_idx]
@@ -263,8 +248,7 @@ class QwenVLEncoder(nn.Module):
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         with torch.enable_grad() if self.use_lora else torch.no_grad():
-            messages = build_vlm_messages(images, rewards, "")
-            model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+            model_inputs = prepare_vlm_inputs(self.processor, images, rewards, "")
 
             output = self.model.forward(**model_inputs, output_hidden_states=True)
             hidden = output["hidden_states"][self.target_layer_idx]
@@ -274,6 +258,7 @@ class QwenVLEncoder(nn.Module):
         x = x.flatten(start_dim=1)
 
         return x, rnn_state
+
 
 class MMMambaEncoder(nn.Module):
     """
