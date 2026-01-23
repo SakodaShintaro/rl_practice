@@ -273,37 +273,7 @@ class QwenVLEncoder(nn.Module):
         x = self.out_proj(x)
         x = x.flatten(start_dim=1)
 
-        action_text = self._generate_action_text(messages[0]) if self.output_text else ""
-
-        return x, rnn_state, action_text
-
-    @torch.no_grad()
-    def _generate_action_text(self, conversation) -> str:
-        model_inputs = prepare_vlm_inputs(self.processor, [conversation], self.device)
-
-        pad_token_id = self.processor.tokenizer.pad_token_id
-        eos_token_id = self.processor.tokenizer.eos_token_id
-        if pad_token_id is None:
-            pad_token_id = eos_token_id
-
-        generated = self.model.generate(
-            **model_inputs,
-            max_new_tokens=512,
-            num_beams=1,
-            do_sample=False,
-            eos_token_id=eos_token_id,
-            pad_token_id=pad_token_id,
-        )
-
-        input_len = model_inputs["input_ids"].shape[1]
-        new_tokens = generated[:, input_len:]
-        decoded = self.processor.batch_decode(
-            new_tokens,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )
-        return decoded[0].strip() if decoded else ""
-
+        return x, rnn_state
 
 class MMMambaEncoder(nn.Module):
     """

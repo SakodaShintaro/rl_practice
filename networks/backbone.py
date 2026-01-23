@@ -153,7 +153,7 @@ class SpatialTemporalEncoder(nn.Module):
 
         output = last_frame_emb.flatten(start_dim=1)  # [B, token_num * C']
 
-        return output, rnn_state, ""
+        return output, rnn_state
 
 
 class TemporalOnlyEncoder(nn.Module):
@@ -292,4 +292,4 @@ class TemporalOnlyEncoder(nn.Module):
         # 最後のトークンの表現
         final_repr = sequence[:, -1, :]  # (B, d_model)
 
-        return final_repr, rnn_state, ""
+        return final_repr, rnn_state

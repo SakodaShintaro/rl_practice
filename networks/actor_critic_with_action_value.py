@@ -140,7 +140,7 @@ class Network(nn.Module):
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,
     ) -> dict:
-        x, rnn_state, action_text = self.encoder(
+        x, rnn_state = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
         )  # (B, hidden_dim)
 
@@ -167,7 +167,7 @@ class Network(nn.Module):
         rnn_state_curr = data.rnn_state[:, :-1]  # (B, T-1, ...)
         rnn_state_curr = rnn_state_curr[:, 0]  # (B, ...)
 
-        state_curr, _, _ = self.encoder.forward(
+        state_curr, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
         )  # (B, state_dim)
 
@@ -211,7 +211,7 @@ class Network(nn.Module):
         rewards_next = data.rewards[:, 1:]
         rnn_state_next = data.rnn_state[:, 1:]  # (B, T-1, ...)
         rnn_state_next = rnn_state_next[:, 0]  # (B, ...)
-        state_next, _, _ = self.encoder.forward(
+        state_next, _ = self.encoder.forward(
             obs_next, obs_z_next, actions_next, rewards_next, rnn_state_next
         )
         next_state_actions, _ = self.policy_head.get_action(state_next)
