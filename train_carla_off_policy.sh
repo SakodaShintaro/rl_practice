@@ -18,5 +18,4 @@ python train.py carla_test \
     --seq_len 1 \
     --use_quantization 0 \
     --use_lora 0 \
-    --use_pixel_values 1 \
     --target_layer_idx -1 \

@@ -182,7 +182,6 @@ class QwenVLEncoder(nn.Module):
         output_text: bool,
         use_quantization: bool,
         use_lora: bool,
-        use_pixel_values: bool,
         target_layer_idx: int,
         seq_len: int,
     ) -> None:
@@ -225,11 +224,7 @@ class QwenVLEncoder(nn.Module):
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
-        self.use_pixel_values = use_pixel_values
-        if self.use_pixel_values:
-            self.out_proj = nn.Linear(1536, out_dim)
-        else:
-            self.out_proj = nn.Linear(2048, out_dim)
+        self.out_proj = nn.Linear(2048, out_dim)
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
@@ -248,14 +243,8 @@ class QwenVLEncoder(nn.Module):
         messages = build_vlm_messages(dummy_images, dummy_rewards, "")
         model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
 
-        if self.use_pixel_values:
-            hidden = model_inputs["pixel_values"]
-            B = 1
-            token_num = hidden.size(0) // B
-            hidden = hidden.view(B, token_num, -1)
-        else:
-            output = self.model.forward(**model_inputs, output_hidden_states=True)
-            hidden = output["hidden_states"][self.target_layer_idx]
+        output = self.model.forward(**model_inputs, output_hidden_states=True)
+        hidden = output["hidden_states"][self.target_layer_idx]
 
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
@@ -277,14 +266,8 @@ class QwenVLEncoder(nn.Module):
             messages = build_vlm_messages(images, rewards, "")
             model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
 
-            if self.use_pixel_values:
-                hidden = model_inputs["pixel_values"]
-                B = images.size(0)
-                token_num = hidden.size(0) // B
-                hidden = hidden.view(B, token_num, -1)
-            else:
-                output = self.model.forward(**model_inputs, output_hidden_states=True)
-                hidden = output["hidden_states"][self.target_layer_idx]
+            output = self.model.forward(**model_inputs, output_hidden_states=True)
+            hidden = output["hidden_states"][self.target_layer_idx]
 
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
