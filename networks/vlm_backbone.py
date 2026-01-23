@@ -27,6 +27,60 @@ ACTION_PROMPT = (
 )
 
 
+def load_model(
+    model_id: str, use_quantization: bool, use_lora: bool, device: torch.device
+) -> tuple[nn.Module, AutoProcessor]:
+    """Load Qwen-VL model and processor."""
+    if use_quantization:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    else:
+        bnb_config = None
+
+    model = AutoModelForImageTextToText.from_pretrained(
+        model_id,
+        quantization_config=bnb_config,
+        dtype=torch.bfloat16,
+        _attn_implementation="flash_attention_2",
+        cache_dir="./cache",
+        device_map=device,
+    )
+    if use_lora:
+        lora_config = LoraConfig(
+            r=8,
+            lora_alpha=8,
+            lora_dropout=0.1,
+            target_modules=[
+                "down_proj",
+                "o_proj",
+                "k_proj",
+                "q_proj",
+                "gate_proj",
+                "up_proj",
+                "v_proj",
+            ],
+            use_dora=True,
+            init_lora_weights="gaussian",
+        )
+        model = get_peft_model(model, lora_config)
+        model.print_trainable_parameters()
+
+    # Enable gradient checkpointing to reduce memory usage
+    model.gradient_checkpointing_enable()
+
+    processor = AutoProcessor.from_pretrained(
+        model_id,
+        cache_dir="./cache",
+        device_map=device,
+    )
+
+    return model, processor
+
+
 def prepare_vlm_inputs(
     processor: AutoProcessor,
     images: torch.Tensor,
@@ -97,26 +151,6 @@ def prepare_vlm_inputs(
     return inputs
 
 
-def create_lora_config() -> LoraConfig:
-    """Create standard LoRA config for VLM."""
-    return LoraConfig(
-        r=8,
-        lora_alpha=8,
-        lora_dropout=0.1,
-        target_modules=[
-            "down_proj",
-            "o_proj",
-            "k_proj",
-            "q_proj",
-            "gate_proj",
-            "up_proj",
-            "v_proj",
-        ],
-        use_dora=True,
-        init_lora_weights="gaussian",
-    )
-
-
 def parse_action_text(action_text: str) -> np.ndarray:
     """Parse action text and extract steering, gas, braking values.
 
@@ -174,41 +208,15 @@ class QwenVLEncoder(nn.Module):
         super().__init__()
 
         self.output_text = output_text
+        self.use_lora = use_lora
         self.target_layer_idx = target_layer_idx
         self.seq_len = seq_len
 
-        attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = torch.device("cuda")
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
-        # model_id = "Qwen/Qwen3-VL-2B-Thinking"
-        if use_quantization:
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.bfloat16,
-            )
-        else:
-            bnb_config = None
+        self.model, self.processor = load_model(model_id, use_quantization, use_lora, device)
 
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_id,
-            quantization_config=bnb_config,
-            dtype=torch.bfloat16,
-            _attn_implementation=attn_impl,
-            cache_dir="./cache",
-            device_map=device,
-        )
-        self.use_lora = use_lora
-        if use_lora:
-            self.model = get_peft_model(self.model, create_lora_config())
-            self.model.print_trainable_parameters()
-
-        # Enable gradient checkpointing to reduce memory usage
-        self.model.gradient_checkpointing_enable()
-
-        self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
         self.out_proj = nn.Linear(2048, out_dim)
         self.device = device

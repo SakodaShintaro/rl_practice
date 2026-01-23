@@ -3,15 +3,13 @@ import argparse
 import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
-from peft import get_peft_model
 from torch import nn
 from torch.nn import functional as F
-from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from .image_processor import ImageProcessor
 from .vlm_backbone import (
     ACTION_PROMPT,
-    create_lora_config,
+    load_model,
     parse_action_text,
     prepare_vlm_inputs,
 )
@@ -44,21 +42,14 @@ class VLMActorCriticWithStateValue(nn.Module):
         # Load model and processor
         assert torch.cuda.is_available(), "CUDA is required for VLM training"
         device = "cuda"
-        attn_impl = "flash_attention_2"
 
-        self.model = AutoModelForImageTextToText.from_pretrained(
+        self.model, self.processor = load_model(
             args.vlm_model_id,
-            dtype=torch.bfloat16,
-            attn_implementation=attn_impl,
-            cache_dir="./cache",
-            device_map=device,
+            use_quantization=args.use_quantization,
+            use_lora=args.use_lora,
+            device=device,
         )
-        self.processor = AutoProcessor.from_pretrained(args.vlm_model_id, cache_dir="./cache")
         self.device = device
-
-        if args.use_lora:
-            self.model = get_peft_model(self.model, create_lora_config())
-            self.model.print_trainable_parameters()
 
         # Enable gradient checkpointing to reduce memory usage
         self.model.gradient_checkpointing_enable()
