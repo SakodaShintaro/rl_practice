@@ -150,23 +150,25 @@ def prepare_vlm_inputs(
     return inputs
 
 
-def parse_action_text(action_text: str) -> np.ndarray:
+def parse_action_text(action_text: str) -> tuple[np.ndarray, bool]:
     """Parse action text and extract steer, accel values.
 
     Args:
         action_text: Text in format 'Action: steer=X.XX, accel=X.XX'
 
     Returns:
-        np.ndarray of shape (2,) containing [steer, accel]
+        tuple of (action_array, success)
+        - action_array: np.ndarray of shape (2,) containing [steer, accel]
+        - success: True if both steer and accel were successfully parsed
 
     Example:
         >>> parse_action_text("Action: steer=0.5, accel=0.3")
-        array([0.5, 0.3])
+        (array([0.5, 0.3]), True)
     """
-    steer, accel = 0.0, 0.0
-
     steer_match = re.search(r"steer=([+-]?\d*\.?\d+)", action_text)
     accel_match = re.search(r"accel=([+-]?\d*\.?\d+)", action_text)
+
+    success = steer_match is not None and accel_match is not None
 
     steer = float(steer_match.group(1)) if steer_match else 0.0
     accel = float(accel_match.group(1)) if accel_match else 0.0
@@ -175,7 +177,7 @@ def parse_action_text(action_text: str) -> np.ndarray:
     action_array[0] = np.clip(action_array[0], -1.0, 1.0)
     action_array[1] = np.clip(action_array[1], -1.0, 1.0)
 
-    return action_array
+    return action_array, success
 
 
 class QwenVLEncoder(nn.Module):

@@ -162,7 +162,7 @@ if __name__ == "__main__":
     print(f"  Representation shape: {representation.shape}")
     print(f"  Elapsed time: {mean_time:.1f} ms (±{std_time:.1f} ms)")
     print(f"  Action text: '{action_text}'")
-    action_values = parse_action_text(action_text)
+    action_values, parse_success = parse_action_text(action_text)
     print(
-        f"  Parsed action: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}"
+        f"  Parsed action: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}, success={parse_success}"
     )

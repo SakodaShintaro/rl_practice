@@ -153,9 +153,9 @@ class VLMActorCriticWithStateValue(nn.Module):
         action_text, hidden, log_prob, generated_ids = self._generate_with_hidden_states(inputs)
         print(f"{action_text=}")
 
-        action_array = parse_action_text(action_text)
+        action_array, parse_success = parse_action_text(action_text)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
-        print(f"{action_tensor=}")
+        print(f"{action_tensor=}, {parse_success=}")
 
         value_logits = self.value_head(hidden)
         if self.num_bins > 1:
@@ -176,6 +176,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             "rnn_state": rnn_state,
             "action_text": action_text,
             "action_token_ids": generated_ids,
+            "parse_success": parse_success,
         }
 
     def _action_to_text(self, action: torch.Tensor) -> str:

@@ -74,7 +74,7 @@ class VLMAgent:
 
         _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
         print(f"{action_text=}")
-        action_array = parse_action_text(action_text)
+        action_array, _ = parse_action_text(action_text)
         return action_array
 
 
