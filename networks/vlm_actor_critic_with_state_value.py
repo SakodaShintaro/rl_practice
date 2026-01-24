@@ -38,6 +38,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.value_min = -args.value_range
         self.value_max = +args.value_range
         self.gamma = args.gamma
+        self.use_unsloth = args.use_unsloth
 
         # Load model and processor
         assert torch.cuda.is_available(), "CUDA is required for VLM training"
@@ -48,7 +49,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             use_quantization=args.use_quantization,
             use_lora=args.use_lora,
             device=device,
-            use_unsloth=getattr(args, "use_unsloth", False),
+            use_unsloth=self.use_unsloth,
         )
         self.device = device
 
@@ -235,51 +236,30 @@ class VLMActorCriticWithStateValue(nn.Module):
             [inputs["attention_mask"], tokenized["attention_mask"].to(self.device)], dim=1
         )
 
-        # Single forward pass with hidden states
-        outputs = self.model.forward(
-            input_ids=combined_input_ids,
-            attention_mask=combined_attention_mask,
-            pixel_values=inputs.get("pixel_values"),
-            image_grid_thw=inputs.get("image_grid_thw"),
-            output_hidden_states=True,
-            return_dict=True,
-        )
-
-        # Value: from prompt's last hidden state (before action tokens)
-        hidden_states = getattr(outputs, "hidden_states", None)
-        last_hidden = getattr(outputs, "last_hidden_state", None)
-        if last_hidden is None and isinstance(outputs, (tuple, list)) and outputs:
-            last_hidden = outputs[0]
-
-        if hidden_states is None and last_hidden is None:
-            inner_model = getattr(self.model, "model", None) or getattr(
-                self.model, "base_model", None
+        if self.use_unsloth:
+            outputs = self.model.model.forward(
+                input_ids=combined_input_ids,
+                attention_mask=combined_attention_mask,
+                pixel_values=inputs.get("pixel_values"),
+                image_grid_thw=inputs.get("image_grid_thw"),
+                output_hidden_states=False,
+                return_dict=True,
             )
-            if inner_model is not None:
-                inner_outputs = inner_model.forward(
-                    input_ids=combined_input_ids,
-                    attention_mask=combined_attention_mask,
-                    pixel_values=inputs.get("pixel_values"),
-                    image_grid_thw=inputs.get("image_grid_thw"),
-                    output_hidden_states=True,
-                    return_dict=True,
-                )
-                hidden_states = getattr(inner_outputs, "hidden_states", None)
-                last_hidden = getattr(inner_outputs, "last_hidden_state", None)
-                if last_hidden is None and isinstance(inner_outputs, (tuple, list)) and inner_outputs:
-                    last_hidden = inner_outputs[0]
-
-        if hidden_states is not None:
-            state_hidden = hidden_states[self.target_layer_idx][:, prompt_len - 1, :].to(
-                torch.float32
-            )
-        elif last_hidden is not None:
-            state_hidden = last_hidden[:, prompt_len - 1, :].to(torch.float32)
+            hidden = outputs.last_hidden_state
+            logits = self.model.lm_head(hidden)
         else:
-            raise RuntimeError(
-                "Model did not return hidden states. "
-                "Enable output_hidden_states or update the backend to expose hidden states."
+            outputs = self.model.forward(
+                input_ids=combined_input_ids,
+                attention_mask=combined_attention_mask,
+                pixel_values=inputs.get("pixel_values"),
+                image_grid_thw=inputs.get("image_grid_thw"),
+                output_hidden_states=True,
+                return_dict=True,
             )
+            hidden = outputs.hidden_states[self.target_layer_idx]
+            logits = outputs.logits
+
+        state_hidden = hidden[:, prompt_len - 1, :].to(torch.float32)
         value_logits = self.value_head(state_hidden)
         if self.num_bins > 1:
             value = self.hl_gauss_loss(value_logits).unsqueeze(-1)
@@ -287,7 +267,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             value = value_logits
 
         # Log prob: from logits predicting action tokens
-        relevant_logits = outputs.logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
+        relevant_logits = logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
         log_prob_dist = F.log_softmax(relevant_logits, dim=-1)
         token_log_probs = log_prob_dist.gather(2, target_ids.unsqueeze(2)).squeeze(2)
         batch_log_probs = (token_log_probs * target_mask).sum(dim=1)
