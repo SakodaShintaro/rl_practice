@@ -153,6 +153,8 @@ def parse_args() -> argparse.Namespace:
     # for on_policy
     parser.add_argument("--buffer_capacity", type=int, default=4096)
     parser.add_argument("--on_policy_epoch", type=int, default=10)
+    parser.add_argument("--clip_param_policy", type=float, default=0.2)
+    parser.add_argument("--clip_param_value", type=float, default=0.2)
 
     return parser.parse_args()
 

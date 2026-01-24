@@ -29,6 +29,8 @@ class VLMActorCriticWithStateValue(nn.Module):
         args: argparse.Namespace,
     ) -> None:
         super().__init__()
+        self.clip_param_policy = args.clip_param_policy
+        self.clip_param_value = args.clip_param_value
         self.action_dim = action_space_shape[0]
         self.seq_len = args.seq_len
         self.task_prompt = ACTION_PROMPT
@@ -242,9 +244,6 @@ class VLMActorCriticWithStateValue(nn.Module):
         batch_log_probs = (token_log_probs * target_mask).sum(dim=1)
 
         return value, state_hidden, batch_log_probs
-
-    clip_param_policy = 0.2
-    clip_param_value = 0.2
 
     def compute_loss(
         self,

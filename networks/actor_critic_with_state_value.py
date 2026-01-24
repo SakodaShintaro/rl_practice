@@ -15,9 +15,6 @@ from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder
 
 
 class Network(nn.Module):
-    clip_param_policy = 0.2
-    clip_param_value = 0.2
-
     def __init__(
         self,
         observation_space_shape: tuple[int],
@@ -25,6 +22,8 @@ class Network(nn.Module):
         args: argparse.Namespace,
     ) -> None:
         super().__init__()
+        self.clip_param_policy = args.clip_param_policy
+        self.clip_param_value = args.clip_param_value
         self.action_dim = action_space_shape[0]
         self.num_bins = args.num_bins
         self.observation_space_shape = observation_space_shape
@@ -135,9 +134,7 @@ class Network(nn.Module):
         rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
         action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state = self.encoder(
-            s_seq, obs_z_seq, a_seq, r_seq, rnn_state
-        )  # (B, hidden_dim)
+        x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         value_dict = self.value_head(x)
 
