@@ -32,6 +32,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.action_dim = action_space_shape[0]
         self.seq_len = args.seq_len
         self.task_prompt = ACTION_PROMPT
+        self.episode_prompt = ""
         self.target_layer_idx = args.target_layer_idx
         self.max_new_tokens = 128
         self.num_bins = args.num_bins
@@ -140,7 +141,9 @@ class VLMActorCriticWithStateValue(nn.Module):
         action: torch.Tensor,
     ) -> dict:
         """Forward pass: generate action text and compute state value."""
-        inputs = prepare_vlm_inputs(self.processor, s_seq, r_seq, self.task_prompt)
+        inputs = prepare_vlm_inputs(
+            self.processor, s_seq, r_seq, self.task_prompt + self.episode_prompt
+        )
         action_text, hidden, log_prob, _ = self._generate_with_hidden_states(inputs)
         print(f"{action_text=}")
 
@@ -193,7 +196,9 @@ class VLMActorCriticWithStateValue(nn.Module):
             log_probs: (B,)
         """
         batch_size = actions.size(0)
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(
+            self.processor, images, rewards, self.task_prompt + self.episode_prompt
+        )
 
         # Tokenize actions
         action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]
@@ -301,7 +306,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         Returns:
             Dictionary with training metrics
         """
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, "")
 
         # Tokenize feedback text
         feedback_tokens = self.processor.tokenizer(
@@ -329,6 +334,8 @@ class VLMActorCriticWithStateValue(nn.Module):
         # logits[:, prompt_len-1:-1] predicts tokens at positions prompt_len:end
         logits = outputs.logits[:, prompt_len - 1 : -1, :]
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), target_ids.view(-1))
+
+        self.episode_prompt = feedback_text
 
         return {"feedback_loss": loss}
 
