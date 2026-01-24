@@ -17,7 +17,7 @@ python3 train.py baseline$suffix \
   --eval_range 20 \
   --image_processor_type simple_cnn \
   --seq_len 4 \
-  --batch_size 32 \
+  --batch_size 16 \
   --learning_rate 1e-4 \
   --buffer_capacity 2048 \
   --policy_type beta \
