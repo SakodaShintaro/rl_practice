@@ -32,6 +32,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.action_dim = action_space_shape[0]
         self.seq_len = args.seq_len
         self.task_prompt = ACTION_PROMPT
+        self.episode_prompt = ""
         self.target_layer_idx = args.target_layer_idx
         self.max_new_tokens = 128
         self.num_bins = args.num_bins
@@ -132,27 +133,6 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         return action_text, state_hidden, total_log_prob, generated_ids
 
-    def _encode_for_value(
-        self,
-        images: torch.Tensor,
-        rewards: torch.Tensor,
-    ) -> tuple[str, torch.Tensor, torch.Tensor, list[int]]:
-        """Encode observation and generate action, returning hidden state and log prob."""
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
-        action_text, hidden, log_prob, token_ids = self._generate_with_hidden_states(inputs)
-        return action_text, hidden, log_prob, token_ids
-
-    def _convert_3d_to_2d_action(self, action_3d: np.ndarray) -> np.ndarray:
-        """Convert 3D action [steer, gas, braking] to 2D action [steer, gas_or_brake].
-
-        gas_or_brake = gas - braking, clamped to [-1, 1]
-        """
-        steer = action_3d[0]
-        gas = action_3d[1]
-        braking = action_3d[2]
-        gas_or_brake = np.clip(gas - braking, -1.0, 1.0)
-        return np.array([steer, gas_or_brake], dtype=np.float32)
-
     def forward(
         self,
         s_seq: torch.Tensor,
@@ -163,10 +143,15 @@ class VLMActorCriticWithStateValue(nn.Module):
         action: torch.Tensor,
     ) -> dict:
         """Forward pass: generate action text and compute state value."""
-        action_text, hidden, log_prob, _ = self._encode_for_value(s_seq, r_seq)
-        action_array_3d = parse_action_text(action_text)
-        action_array = self._convert_3d_to_2d_action(action_array_3d)
+        inputs = prepare_vlm_inputs(
+            self.processor, s_seq, r_seq, self.task_prompt + self.episode_prompt
+        )
+        action_text, hidden, log_prob, _ = self._generate_with_hidden_states(inputs)
+        print(f"{action_text=}")
+
+        action_array = parse_action_text(action_text)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
+        print(f"{action_tensor=}")
 
         value_logits = self.value_head(hidden)
         if self.num_bins > 1:
@@ -189,15 +174,10 @@ class VLMActorCriticWithStateValue(nn.Module):
         }
 
     def _action_to_text(self, action: torch.Tensor) -> str:
-        """Convert 2D action tensor to canonical text representation.
-
-        2D action: [steer, gas_or_brake] -> 3D text: steering, gas, braking
-        """
-        steering = action[0].item()
-        gas_or_brake = action[1].item()
-        gas = max(gas_or_brake, 0.0)
-        braking = max(-gas_or_brake, 0.0)
-        return f"Action: steering={steering:.2f}, gas={gas:.2f}, braking={braking:.2f}"
+        """Convert 2D action tensor to canonical text representation."""
+        steer = action[0].item()
+        accel = action[1].item()
+        return f"Action: steer={steer:.2f}, accel={accel:.2f}"
 
     def _compute_value_and_log_prob(
         self,
@@ -218,7 +198,9 @@ class VLMActorCriticWithStateValue(nn.Module):
             log_probs: (B,)
         """
         batch_size = actions.size(0)
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(
+            self.processor, images, rewards, self.task_prompt + self.episode_prompt
+        )
 
         # Tokenize actions
         action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]
@@ -320,6 +302,55 @@ class VLMActorCriticWithStateValue(nn.Module):
         }
 
         return total_loss, activations_dict, info_dict
+
+    def train_with_feedback(
+        self,
+        images: torch.Tensor,
+        rewards: torch.Tensor,
+        feedback_text: str,
+    ) -> dict:
+        """Train VLM with feedback text using next token prediction.
+
+        Args:
+            images: (B, T, C, H, W) observation images
+            rewards: (B, T, 1) rewards
+            feedback_text: Target text to predict
+
+        Returns:
+            Dictionary with training metrics
+        """
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, "")
+
+        # Tokenize feedback text
+        feedback_tokens = self.processor.tokenizer(
+            feedback_text, add_special_tokens=False, return_tensors="pt"
+        )
+        target_ids = feedback_tokens["input_ids"].to(self.device)
+        prompt_len = inputs["input_ids"].size(1)
+
+        # Concatenate prompt + feedback tokens
+        combined_input_ids = torch.cat([inputs["input_ids"], target_ids], dim=1)
+        combined_attention_mask = torch.cat(
+            [inputs["attention_mask"], feedback_tokens["attention_mask"].to(self.device)], dim=1
+        )
+
+        # Forward pass
+        outputs = self.model.forward(
+            input_ids=combined_input_ids,
+            attention_mask=combined_attention_mask,
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
+            return_dict=True,
+        )
+
+        # Compute next token prediction loss for feedback tokens only
+        # logits[:, prompt_len-1:-1] predicts tokens at positions prompt_len:end
+        logits = outputs.logits[:, prompt_len - 1 : -1, :]
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), target_ids.view(-1))
+
+        self.episode_prompt = feedback_text
+
+        return {"feedback_loss": loss}
 
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:

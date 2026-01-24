@@ -193,6 +193,31 @@ class OnPolicyAgent:
 
         return action, info_dict
 
+    def on_episode_end(self, score: float, feedback_text: str) -> dict:
+        info_dict = {}
+
+        # VLM使用時にfeedback textで学習
+        if self.network_class != "vlm_actor_critic_with_state_value":
+            return info_dict
+        if not feedback_text:
+            return info_dict
+
+        latest_data = self.rb.get_latest(self.seq_len)
+        loss_dict = self.network.train_with_feedback(
+            latest_data.observations,
+            latest_data.rewards,
+            feedback_text,
+        )
+
+        self.optimizer.zero_grad()
+        loss_dict["feedback_loss"].backward()
+        nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+        self.optimizer.step()
+
+        info_dict["losses/feedback_loss"] = loss_dict["feedback_loss"].item()
+        print(f"Feedback training loss: {info_dict['losses/feedback_loss']:.4f}")
+        return info_dict
+
     ####################
     # Internal methods #
     ####################

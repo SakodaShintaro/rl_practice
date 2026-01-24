@@ -21,10 +21,9 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
 ACTION_PROMPT = (
     "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
-    "Action space: steering [-1, +1] where -1 is full left and +1 is full right; gas [0, 1]; braking [0, 1]. "
-    "Pick exactly one High Level Action: 'Turn Left', 'Turn Right', 'Go Straight', or 'Slow Down'. Prefer small steering changes (|steering| <= 0.3) and modest gas; use brake only for sharp turns or when drifting off the road. If unsure, choose 'Slow Down'. "
-    "Typical mappings: Turn Left -> steering=-0.20, gas=0.00, braking=0.00; Turn Right -> steering=0.20, gas=0.00, braking=0.00; Go Straight -> steering=0.00, gas=0.01, braking=0.00; Slow Down -> steering=0.00, gas=0.00, braking=0.10. "
-    "Respond in the exact format: 'Action: steering=X.XX, gas=X.XX, braking=X.XX' using decimal values within range."
+    "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
+    "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
+    "Respond in the exact format: 'Action: steer=X.XX, accel=X.XX' using decimal values within range."
 )
 
 
@@ -195,46 +194,29 @@ def prepare_vlm_inputs(
 
 
 def parse_action_text(action_text: str) -> np.ndarray:
-    """Parse action text and extract steering, gas, braking values.
+    """Parse action text and extract steer, accel values.
 
     Args:
-        action_text: Text in format 'Action: steering=X.X, gas=X.X, braking=X.X'
+        action_text: Text in format 'Action: steer=X.XX, accel=X.XX'
 
     Returns:
-        np.ndarray of shape (3,) containing [steering, gas, braking]
+        np.ndarray of shape (2,) containing [steer, accel]
 
     Example:
-        >>> parse_action_text("Action: steering=0.5, gas=0.3, braking=0.0")
-        array([0.5, 0.3, 0.0])
+        >>> parse_action_text("Action: steer=0.5, accel=0.3")
+        array([0.5, 0.3])
     """
-    # Default values in case parsing fails
-    steering, gas, braking = 0.0, 0.0, 0.0
+    steer, accel = 0.0, 0.0
 
-    try:
-        # Extract steering value
-        steering_match = re.search(r"steering=([+-]?\d*\.?\d+)", action_text)
-        if steering_match:
-            steering = float(steering_match.group(1))
+    steer_match = re.search(r"steer=([+-]?\d*\.?\d+)", action_text)
+    accel_match = re.search(r"accel=([+-]?\d*\.?\d+)", action_text)
 
-        # Extract gas value
-        gas_match = re.search(r"gas=([+-]?\d*\.?\d+)", action_text)
-        if gas_match:
-            gas = float(gas_match.group(1))
+    steer = float(steer_match.group(1)) if steer_match else 0.0
+    accel = float(accel_match.group(1)) if accel_match else 0.0
 
-        # Extract braking value
-        braking_match = re.search(r"braking=([+-]?\d*\.?\d+)", action_text)
-        if braking_match:
-            braking = float(braking_match.group(1))
-
-    except (ValueError, AttributeError):
-        # Return default values if parsing fails
-        pass
-
-    # Create array and clamp values using numpy.clip
-    action_array = np.array([steering, gas, braking], dtype=np.float32)
-    action_array[0] = np.clip(action_array[0], -1.0, 1.0)  # steering
-    action_array[1] = np.clip(action_array[1], 0.0, 1.0)  # gas
-    action_array[2] = np.clip(action_array[2], 0.0, 1.0)  # braking
+    action_array = np.array([steer, accel], dtype=np.float32)
+    action_array[0] = np.clip(action_array[0], -1.0, 1.0)
+    action_array[1] = np.clip(action_array[1], -1.0, 1.0)
 
     return action_array
 
