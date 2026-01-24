@@ -62,7 +62,6 @@ class Network(nn.Module):
                 output_text=False,
                 use_quantization=args.use_quantization,
                 use_lora=args.use_lora,
-                use_pixel_values=args.use_pixel_values,
                 target_layer_idx=args.target_layer_idx,
                 seq_len=args.seq_len,
             )
@@ -136,7 +135,7 @@ class Network(nn.Module):
         rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
         action: torch.Tensor | None,  # (B, action_dim) or None
     ) -> tuple:
-        x, rnn_state, action_text = self.encoder(
+        x, rnn_state = self.encoder(
             s_seq, obs_z_seq, a_seq, r_seq, rnn_state
         )  # (B, hidden_dim)
 
@@ -162,7 +161,7 @@ class Network(nn.Module):
         rnn_state_curr = data.rnn_state[:, :-1]
         rnn_state_curr = rnn_state_curr[:, 0]
 
-        state_curr, _, _ = self.encoder.forward(
+        state_curr, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
         )
 

@@ -3,16 +3,13 @@ import argparse
 import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
-from peft import get_peft_model
 from torch import nn
 from torch.nn import functional as F
-from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from .image_processor import ImageProcessor
 from .vlm_backbone import (
     ACTION_PROMPT,
-    build_vlm_messages,
-    create_lora_config,
+    load_model,
     parse_action_text,
     prepare_vlm_inputs,
 )
@@ -45,21 +42,14 @@ class VLMActorCriticWithStateValue(nn.Module):
         # Load model and processor
         assert torch.cuda.is_available(), "CUDA is required for VLM training"
         device = "cuda"
-        attn_impl = "flash_attention_2"
 
-        self.model = AutoModelForImageTextToText.from_pretrained(
+        self.model, self.processor = load_model(
             args.vlm_model_id,
-            dtype=torch.bfloat16,
-            attn_implementation=attn_impl,
-            cache_dir="./cache",
-            device_map=device,
+            use_quantization=args.use_quantization,
+            use_lora=args.use_lora,
+            device=device,
         )
-        self.processor = AutoProcessor.from_pretrained(args.vlm_model_id, cache_dir="./cache")
         self.device = device
-
-        if args.use_lora:
-            self.model = get_peft_model(self.model, create_lora_config())
-            self.model.print_trainable_parameters()
 
         # Enable gradient checkpointing to reduce memory usage
         self.model.gradient_checkpointing_enable()
@@ -146,8 +136,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         rewards: torch.Tensor,
     ) -> tuple[str, torch.Tensor, torch.Tensor, list[int]]:
         """Encode observation and generate action, returning hidden state and log prob."""
-        messages = build_vlm_messages(images, rewards, self.task_prompt)
-        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
         action_text, hidden, log_prob, token_ids = self._generate_with_hidden_states(inputs)
         return action_text, hidden, log_prob, token_ids
 
@@ -227,8 +216,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             log_probs: (B,)
         """
         batch_size = actions.size(0)
-        messages = build_vlm_messages(images, rewards, self.task_prompt)
-        inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
 
         # Tokenize actions
         action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]

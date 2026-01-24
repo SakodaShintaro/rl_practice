@@ -107,7 +107,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument("--use_quantization", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_lora", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--use_pixel_values", type=int, default=0, choices=[0, 1])
     parser.add_argument("--target_layer_idx", type=int, default=-1)
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)

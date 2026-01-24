@@ -27,21 +27,78 @@ ACTION_PROMPT = (
 )
 
 
-def build_vlm_messages(
+def load_model(
+    model_id: str, use_quantization: bool, use_lora: bool, device: torch.device
+) -> tuple[nn.Module, AutoProcessor]:
+    """Load Qwen-VL model and processor."""
+    if use_quantization:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    else:
+        bnb_config = None
+
+    model = AutoModelForImageTextToText.from_pretrained(
+        model_id,
+        quantization_config=bnb_config,
+        dtype=torch.bfloat16,
+        _attn_implementation="flash_attention_2",
+        cache_dir="./cache",
+        device_map=device,
+    )
+    if use_lora:
+        lora_config = LoraConfig(
+            r=8,
+            lora_alpha=8,
+            lora_dropout=0.1,
+            target_modules=[
+                "down_proj",
+                "o_proj",
+                "k_proj",
+                "q_proj",
+                "gate_proj",
+                "up_proj",
+                "v_proj",
+            ],
+            use_dora=True,
+            init_lora_weights="gaussian",
+        )
+        model = get_peft_model(model, lora_config)
+        model.print_trainable_parameters()
+
+    # Enable gradient checkpointing to reduce memory usage
+    model.gradient_checkpointing_enable()
+
+    processor = AutoProcessor.from_pretrained(
+        model_id,
+        cache_dir="./cache",
+        device_map=device,
+    )
+
+    return model, processor
+
+
+def prepare_vlm_inputs(
+    processor: AutoProcessor,
     images: torch.Tensor,
     rewards: torch.Tensor,
     task_prompt: str,
-) -> list[list[dict]]:
-    """Build VLM messages from images and rewards.
+) -> dict[str, torch.Tensor]:
+    """Build VLM messages and prepare model inputs.
 
     Args:
+        processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
         rewards: (B, T, 1) tensor
         task_prompt: Task prompt string (can be empty)
 
     Returns:
-        List of message lists for each batch
+        Dictionary of model inputs
     """
+    device = images.device
     batch_size, seq_len = images.shape[:2]
     messages = []
     for b in range(batch_size):
@@ -56,31 +113,14 @@ def build_vlm_messages(
             reward_text = f"reward {float(rewards[b, t, 0]):.2f}"
             content.append({"type": "text", "text": reward_text})
         messages.append([{"role": "user", "content": content}])
-    return messages
 
-
-def prepare_vlm_inputs(
-    processor: AutoProcessor,
-    messages: list[list[dict]],
-    device: str,
-) -> dict[str, torch.Tensor]:
-    """Prepare VLM model inputs from messages.
-
-    Args:
-        processor: AutoProcessor instance
-        messages: List of message lists
-        device: Target device
-
-    Returns:
-        Dictionary of model inputs
-    """
     text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
 
-    images, videos, video_kwargs = process_vision_info(
+    proc_images, videos, video_kwargs = process_vision_info(
         messages,
         image_patch_size=16,
         return_video_kwargs=True,
@@ -96,7 +136,7 @@ def prepare_vlm_inputs(
 
     inputs = processor(
         text=text,
-        images=images,
+        images=proc_images,
         videos=videos,
         video_metadata=video_metadata,
         return_tensors="pt",
@@ -109,26 +149,6 @@ def prepare_vlm_inputs(
         for k, v in inputs.items()
     }
     return inputs
-
-
-def create_lora_config() -> LoraConfig:
-    """Create standard LoRA config for VLM."""
-    return LoraConfig(
-        r=8,
-        lora_alpha=8,
-        lora_dropout=0.1,
-        target_modules=[
-            "down_proj",
-            "o_proj",
-            "k_proj",
-            "q_proj",
-            "gate_proj",
-            "up_proj",
-            "v_proj",
-        ],
-        use_dora=True,
-        init_lora_weights="gaussian",
-    )
 
 
 def parse_action_text(action_text: str) -> np.ndarray:
@@ -182,54 +202,23 @@ class QwenVLEncoder(nn.Module):
         output_text: bool,
         use_quantization: bool,
         use_lora: bool,
-        use_pixel_values: bool,
         target_layer_idx: int,
         seq_len: int,
     ) -> None:
         super().__init__()
 
         self.output_text = output_text
+        self.use_lora = use_lora
         self.target_layer_idx = target_layer_idx
         self.seq_len = seq_len
 
-        attn_impl = "flash_attention_2" if torch.cuda.is_available() else "eager"
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = torch.device("cuda")
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
-        # model_id = "Qwen/Qwen3-VL-2B-Thinking"
-        if use_quantization:
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.bfloat16,
-            )
-        else:
-            bnb_config = None
+        self.model, self.processor = load_model(model_id, use_quantization, use_lora, device)
 
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_id,
-            quantization_config=bnb_config,
-            dtype=torch.bfloat16,
-            _attn_implementation=attn_impl,
-            cache_dir="./cache",
-            device_map=device,
-        )
-        self.use_lora = use_lora
-        if use_lora:
-            self.model = get_peft_model(self.model, create_lora_config())
-            self.model.print_trainable_parameters()
-
-        # Enable gradient checkpointing to reduce memory usage
-        self.model.gradient_checkpointing_enable()
-
-        self.processor = AutoProcessor.from_pretrained(model_id)
         out_dim = 4
-        self.use_pixel_values = use_pixel_values
-        if self.use_pixel_values:
-            self.out_proj = nn.Linear(1536, out_dim)
-        else:
-            self.out_proj = nn.Linear(2048, out_dim)
+        self.out_proj = nn.Linear(2048, out_dim)
         self.device = device
         self.out_proj = self.out_proj.to(device)
         self.video_fps = 50 / 8
@@ -245,17 +234,10 @@ class QwenVLEncoder(nn.Module):
         dummy_images = torch.zeros(1, self.seq_len, 3, 96, 96, device=self.device)
         dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
 
-        messages = build_vlm_messages(dummy_images, dummy_rewards, "")
-        model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+        model_inputs = prepare_vlm_inputs(self.processor, dummy_images, dummy_rewards, "")
 
-        if self.use_pixel_values:
-            hidden = model_inputs["pixel_values"]
-            B = 1
-            token_num = hidden.size(0) // B
-            hidden = hidden.view(B, token_num, -1)
-        else:
-            output = self.model.forward(**model_inputs, output_hidden_states=True)
-            hidden = output["hidden_states"][self.target_layer_idx]
+        output = self.model.forward(**model_inputs, output_hidden_states=True)
+        hidden = output["hidden_states"][self.target_layer_idx]
 
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
@@ -274,52 +256,16 @@ class QwenVLEncoder(nn.Module):
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         with torch.enable_grad() if self.use_lora else torch.no_grad():
-            messages = build_vlm_messages(images, rewards, "")
-            model_inputs = prepare_vlm_inputs(self.processor, messages, self.device)
+            model_inputs = prepare_vlm_inputs(self.processor, images, rewards, "")
 
-            if self.use_pixel_values:
-                hidden = model_inputs["pixel_values"]
-                B = images.size(0)
-                token_num = hidden.size(0) // B
-                hidden = hidden.view(B, token_num, -1)
-            else:
-                output = self.model.forward(**model_inputs, output_hidden_states=True)
-                hidden = output["hidden_states"][self.target_layer_idx]
+            output = self.model.forward(**model_inputs, output_hidden_states=True)
+            hidden = output["hidden_states"][self.target_layer_idx]
 
         x = hidden.to(torch.float32)
         x = self.out_proj(x)
         x = x.flatten(start_dim=1)
 
-        action_text = self._generate_action_text(messages[0]) if self.output_text else ""
-
-        return x, rnn_state, action_text
-
-    @torch.no_grad()
-    def _generate_action_text(self, conversation) -> str:
-        model_inputs = prepare_vlm_inputs(self.processor, [conversation], self.device)
-
-        pad_token_id = self.processor.tokenizer.pad_token_id
-        eos_token_id = self.processor.tokenizer.eos_token_id
-        if pad_token_id is None:
-            pad_token_id = eos_token_id
-
-        generated = self.model.generate(
-            **model_inputs,
-            max_new_tokens=512,
-            num_beams=1,
-            do_sample=False,
-            eos_token_id=eos_token_id,
-            pad_token_id=pad_token_id,
-        )
-
-        input_len = model_inputs["input_ids"].shape[1]
-        new_tokens = generated[:, input_len:]
-        decoded = self.processor.batch_decode(
-            new_tokens,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )
-        return decoded[0].strip() if decoded else ""
+        return x, rnn_state
 
 
 class MMMambaEncoder(nn.Module):
