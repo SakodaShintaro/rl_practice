@@ -130,16 +130,6 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         return action_text, state_hidden, total_log_prob, generated_ids
 
-    def _encode_for_value(
-        self,
-        images: torch.Tensor,
-        rewards: torch.Tensor,
-    ) -> tuple[str, torch.Tensor, torch.Tensor, list[int]]:
-        """Encode observation and generate action, returning hidden state and log prob."""
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
-        action_text, hidden, log_prob, token_ids = self._generate_with_hidden_states(inputs)
-        return action_text, hidden, log_prob, token_ids
-
     def _convert_3d_to_2d_action(self, action_3d: np.ndarray) -> np.ndarray:
         """Convert 3D action [steer, gas, braking] to 2D action [steer, gas_or_brake].
 
@@ -161,7 +151,9 @@ class VLMActorCriticWithStateValue(nn.Module):
         action: torch.Tensor,
     ) -> dict:
         """Forward pass: generate action text and compute state value."""
-        action_text, hidden, log_prob, _ = self._encode_for_value(s_seq, r_seq)
+        inputs = prepare_vlm_inputs(self.processor, s_seq, r_seq, self.task_prompt)
+        action_text, hidden, log_prob, _ = self._generate_with_hidden_states(inputs)
+
         action_array_3d = parse_action_text(action_text)
         action_array = self._convert_3d_to_2d_action(action_array_3d)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
