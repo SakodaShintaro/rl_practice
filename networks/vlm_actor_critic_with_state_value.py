@@ -285,6 +285,53 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         return total_loss, activations_dict, info_dict
 
+    def train_with_feedback(
+        self,
+        images: torch.Tensor,
+        rewards: torch.Tensor,
+        feedback_text: str,
+    ) -> dict:
+        """Train VLM with feedback text using next token prediction.
+
+        Args:
+            images: (B, T, C, H, W) observation images
+            rewards: (B, T, 1) rewards
+            feedback_text: Target text to predict
+
+        Returns:
+            Dictionary with training metrics
+        """
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+
+        # Tokenize feedback text
+        feedback_tokens = self.processor.tokenizer(
+            feedback_text, add_special_tokens=False, return_tensors="pt"
+        )
+        target_ids = feedback_tokens["input_ids"].to(self.device)
+        prompt_len = inputs["input_ids"].size(1)
+
+        # Concatenate prompt + feedback tokens
+        combined_input_ids = torch.cat([inputs["input_ids"], target_ids], dim=1)
+        combined_attention_mask = torch.cat(
+            [inputs["attention_mask"], feedback_tokens["attention_mask"].to(self.device)], dim=1
+        )
+
+        # Forward pass
+        outputs = self.model.forward(
+            input_ids=combined_input_ids,
+            attention_mask=combined_attention_mask,
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
+            return_dict=True,
+        )
+
+        # Compute next token prediction loss for feedback tokens only
+        # logits[:, prompt_len-1:-1] predicts tokens at positions prompt_len:end
+        logits = outputs.logits[:, prompt_len - 1 : -1, :]
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), target_ids.view(-1))
+
+        return {"feedback_loss": loss}
+
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:
         """Compute target value for TD learning."""
