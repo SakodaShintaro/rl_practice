@@ -342,6 +342,12 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
             )
 
+        feedback_text = ""
+        if args.network_class == "vlm_actor_critic_with_state_value":
+            feedback_text = input("Feedback: ")
+        episode_end_info = agent.on_episode_end(score, feedback_text)
+        wandb.log(episode_end_info)
+
         is_best = score > best_score
 
         if is_best and result_dir is not None:

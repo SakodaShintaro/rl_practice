@@ -193,6 +193,11 @@ class OnPolicyAgent:
 
         return action, info_dict
 
+    def on_episode_end(self, score: float, feedback_text: str) -> dict:
+        info_dict = {}
+        # VLM使用時にここで学習を回す
+        return info_dict
+
     ####################
     # Internal methods #
     ####################

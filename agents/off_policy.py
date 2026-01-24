@@ -141,6 +141,9 @@ class OffPolicyAgent:
     # Internal methods #
     ####################
 
+    def on_episode_end(self, score: float, feedback_text: str) -> dict:
+        return {}
+
     def _train(self, global_step) -> dict:
         info_dict = {}
 
