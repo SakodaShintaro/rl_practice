@@ -15,6 +15,7 @@ from transformers import (
     AutoTokenizer,
     BitsAndBytesConfig,
 )
+from unsloth import FastVisionModel
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
@@ -28,9 +29,51 @@ ACTION_PROMPT = (
 
 
 def load_model(
-    model_id: str, use_quantization: bool, use_lora: bool, device: torch.device
+    model_id: str,
+    use_quantization: bool,
+    use_lora: bool,
+    device: torch.device,
+    use_unsloth: bool,
 ) -> tuple[nn.Module, AutoProcessor]:
     """Load Qwen-VL model and processor."""
+    if use_unsloth:
+        model, tokenizer = FastVisionModel.from_pretrained(
+            model_name=model_id,
+            max_seq_length=16384,
+            load_in_4bit=use_quantization,
+            fast_inference=False,
+            gpu_memory_utilization=0.8,
+        )
+
+        if use_lora:
+            model = FastVisionModel.get_peft_model(
+                model,
+                finetune_vision_layers=True,
+                finetune_language_layers=True,
+                finetune_attention_modules=True,
+                finetune_mlp_modules=True,
+                r=16,
+                lora_alpha=16,
+                lora_dropout=0,
+                bias="none",
+                random_state=3407,
+                use_rslora=False,
+                loftq_config=None,
+                use_gradient_checkpointing="unsloth",
+            )
+
+        processor = AutoProcessor.from_pretrained(
+            model_id,
+            cache_dir="./cache",
+            device_map=device,
+        )
+        if tokenizer is not None and hasattr(tokenizer, "special_tokens_map"):
+            processor.tokenizer = tokenizer
+
+        # Enable gradient checkpointing to reduce memory usage
+        model.gradient_checkpointing_enable()
+        return model, processor
+
     if use_quantization:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -215,7 +258,13 @@ class QwenVLEncoder(nn.Module):
         device = torch.device("cuda")
 
         model_id = "Qwen/Qwen3-VL-2B-Instruct"
-        self.model, self.processor = load_model(model_id, use_quantization, use_lora, device)
+        self.model, self.processor = load_model(
+            model_id,
+            use_quantization,
+            use_lora,
+            device,
+            use_unsloth=False,
+        )
 
         out_dim = 4
         self.out_proj = nn.Linear(2048, out_dim)

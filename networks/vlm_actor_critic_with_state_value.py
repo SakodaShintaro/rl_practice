@@ -48,6 +48,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             use_quantization=args.use_quantization,
             use_lora=args.use_lora,
             device=device,
+            use_unsloth=getattr(args, "use_unsloth", False),
         )
         self.device = device
 
@@ -245,8 +246,40 @@ class VLMActorCriticWithStateValue(nn.Module):
         )
 
         # Value: from prompt's last hidden state (before action tokens)
-        hidden_states = outputs.hidden_states
-        state_hidden = hidden_states[self.target_layer_idx][:, prompt_len - 1, :].to(torch.float32)
+        hidden_states = getattr(outputs, "hidden_states", None)
+        last_hidden = getattr(outputs, "last_hidden_state", None)
+        if last_hidden is None and isinstance(outputs, (tuple, list)) and outputs:
+            last_hidden = outputs[0]
+
+        if hidden_states is None and last_hidden is None:
+            inner_model = getattr(self.model, "model", None) or getattr(
+                self.model, "base_model", None
+            )
+            if inner_model is not None:
+                inner_outputs = inner_model.forward(
+                    input_ids=combined_input_ids,
+                    attention_mask=combined_attention_mask,
+                    pixel_values=inputs.get("pixel_values"),
+                    image_grid_thw=inputs.get("image_grid_thw"),
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                hidden_states = getattr(inner_outputs, "hidden_states", None)
+                last_hidden = getattr(inner_outputs, "last_hidden_state", None)
+                if last_hidden is None and isinstance(inner_outputs, (tuple, list)) and inner_outputs:
+                    last_hidden = inner_outputs[0]
+
+        if hidden_states is not None:
+            state_hidden = hidden_states[self.target_layer_idx][:, prompt_len - 1, :].to(
+                torch.float32
+            )
+        elif last_hidden is not None:
+            state_hidden = last_hidden[:, prompt_len - 1, :].to(torch.float32)
+        else:
+            raise RuntimeError(
+                "Model did not return hidden states. "
+                "Enable output_hidden_states or update the backend to expose hidden states."
+            )
         value_logits = self.value_head(state_hidden)
         if self.num_bins > 1:
             value = self.hl_gauss_loss(value_logits).unsqueeze(-1)

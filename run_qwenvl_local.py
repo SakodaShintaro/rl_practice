@@ -46,6 +46,7 @@ def main() -> None:
         use_quantization=True,
         use_lora=False,
         device="cuda",
+        use_unsloth=False,
     )
 
     messages = build_messages(args, image_paths)

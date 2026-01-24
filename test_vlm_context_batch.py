@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import torch
+import unsloth
 from PIL import Image
 from torchvision import transforms
 
@@ -30,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_quantization", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_lora", type=int, default=0, choices=[0, 1])
     parser.add_argument("--target_layer_idx", type=int, default=-1)
+    parser.add_argument("--use_unsloth", type=int, default=0, choices=[0, 1])
 
     parser.add_argument("--critic_hidden_dim", type=int, default=256)
     parser.add_argument("--num_bins", type=int, default=1)
