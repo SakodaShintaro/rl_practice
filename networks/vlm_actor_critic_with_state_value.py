@@ -130,17 +130,6 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         return action_text, state_hidden, total_log_prob, generated_ids
 
-    def _convert_3d_to_2d_action(self, action_3d: np.ndarray) -> np.ndarray:
-        """Convert 3D action [steer, gas, braking] to 2D action [steer, gas_or_brake].
-
-        gas_or_brake = gas - braking, clamped to [-1, 1]
-        """
-        steer = action_3d[0]
-        gas = action_3d[1]
-        braking = action_3d[2]
-        gas_or_brake = np.clip(gas - braking, -1.0, 1.0)
-        return np.array([steer, gas_or_brake], dtype=np.float32)
-
     def forward(
         self,
         s_seq: torch.Tensor,
@@ -153,10 +142,11 @@ class VLMActorCriticWithStateValue(nn.Module):
         """Forward pass: generate action text and compute state value."""
         inputs = prepare_vlm_inputs(self.processor, s_seq, r_seq, self.task_prompt)
         action_text, hidden, log_prob, _ = self._generate_with_hidden_states(inputs)
+        print(f"{action_text=}")
 
-        action_array_3d = parse_action_text(action_text)
-        action_array = self._convert_3d_to_2d_action(action_array_3d)
+        action_array = parse_action_text(action_text)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
+        print(f"{action_tensor=}")
 
         value_logits = self.value_head(hidden)
         if self.num_bins > 1:
@@ -179,15 +169,10 @@ class VLMActorCriticWithStateValue(nn.Module):
         }
 
     def _action_to_text(self, action: torch.Tensor) -> str:
-        """Convert 2D action tensor to canonical text representation.
-
-        2D action: [steer, gas_or_brake] -> 3D text: steering, gas, braking
-        """
-        steering = action[0].item()
-        gas_or_brake = action[1].item()
-        gas = max(gas_or_brake, 0.0)
-        braking = max(-gas_or_brake, 0.0)
-        return f"Action: steering={steering:.2f}, gas={gas:.2f}, braking={braking:.2f}"
+        """Convert 2D action tensor to canonical text representation."""
+        steer = action[0].item()
+        accel = action[1].item()
+        return f"Action: steer={steer:.2f}, accel={accel:.2f}"
 
     def _compute_value_and_log_prob(
         self,
