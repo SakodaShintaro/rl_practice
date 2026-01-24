@@ -2,7 +2,8 @@ import argparse
 from pathlib import Path
 
 from qwen_vl_utils import process_vision_info
-from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
+from networks.vlm_backbone import load_model
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,12 +41,12 @@ def main() -> None:
     if not image_paths:
         raise FileNotFoundError(f"No images found in {args.images_dir}")
 
-    model = Qwen3VLForConditionalGeneration.from_pretrained(
+    model, processor = load_model(
         "Qwen/Qwen3-VL-2B-Instruct",
-        dtype="auto",
-        device_map="auto",
+        use_quantization=True,
+        use_lora=False,
+        device="cuda",
     )
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-2B-Instruct")
 
     messages = build_messages(args, image_paths)
 
@@ -54,6 +55,7 @@ def main() -> None:
         tokenize=False,
         add_generation_prompt=True,
     )
+    print(f"{text=}")
 
     images, videos, video_kwargs = process_vision_info(
         messages,
