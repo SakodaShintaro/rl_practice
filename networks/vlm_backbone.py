@@ -21,8 +21,7 @@ from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 ACTION_PROMPT = (
     "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
     "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
-    "Pick exactly one High Level Action: 'Turn Left', 'Turn Right', 'Go Straight', or 'Slow Down'. Prefer small steering changes (|steer| <= 0.3) and modest accel; use negative accel only for sharp turns or when drifting off the road. If unsure, choose 'Slow Down'. "
-    "Typical mappings: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
+    "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
     "Respond in the exact format: 'Action: steer=X.XX, accel=X.XX' using decimal values within range."
 )
 
