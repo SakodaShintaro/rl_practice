@@ -1,6 +1,5 @@
 import argparse
 
-import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
