@@ -27,6 +27,7 @@ class ReplayBufferData:
     actions: torch.Tensor  # (B, T, action_shape)
     log_probs: torch.Tensor  # (B, T)
     values: torch.Tensor  # (B, T)
+    action_token_ids: torch.Tensor  # (B, T, max_token_len)
 
 
 class ReplayBuffer:
@@ -40,12 +41,16 @@ class ReplayBuffer:
         action_shape: tuple[int, ...],
         output_device: torch.device,
         storage_device: torch.device,
+        max_token_len: int,
+        pad_token_id: int,
     ) -> None:
         self.size = size
         self.seq_len = seq_len
         self.action_shape = action_shape
         self.output_device = output_device
         self.storage_device = storage_device
+        self.max_token_len = max_token_len
+        self.pad_token_id = pad_token_id
 
         assert self.seq_len <= self.size, "Replay buffer size must be >= sequence length."
 
@@ -64,6 +69,12 @@ class ReplayBuffer:
         self.actions = init_tensor((size, *action_shape))
         self.log_probs = init_tensor((size, 1))
         self.values = init_tensor((size, 1))
+        self.action_token_ids = torch.full(
+            (size, max_token_len),
+            pad_token_id,
+            dtype=torch.long,
+            device=self.storage_device,
+        )
 
         self.idx = 0
         self.full = False
@@ -87,6 +98,7 @@ class ReplayBuffer:
             self.actions[:curr_size].to(self.output_device, non_blocking=True),
             self.log_probs[:curr_size].to(self.output_device, non_blocking=True),
             self.values[:curr_size].to(self.output_device, non_blocking=True),
+            self.action_token_ids[:curr_size].to(self.output_device, non_blocking=True),
         )
 
     def add(
@@ -99,6 +111,7 @@ class ReplayBuffer:
         action: torch.Tensor,
         log_prob: float,
         value: float,
+        action_token_ids: list[int],
     ) -> None:
         # Copy tensors to buffer storage
         self.observations[self.idx].copy_(obs.reshape(self.observations[self.idx].shape))
@@ -109,6 +122,12 @@ class ReplayBuffer:
         self.actions[self.idx].copy_(action.reshape(self.actions[self.idx].shape))
         self.log_probs[self.idx].fill_(log_prob)
         self.values[self.idx].fill_(value)
+
+        self.action_token_ids[self.idx].fill_(self.pad_token_id)
+        token_len = min(len(action_token_ids), self.max_token_len)
+        self.action_token_ids[self.idx, :token_len] = torch.tensor(
+            action_token_ids[:token_len], dtype=torch.long, device=self.storage_device
+        )
 
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
@@ -128,24 +147,16 @@ class ReplayBuffer:
         )
 
         # Vectorized slicing - much faster than loop + append
-        observations = self.observations[seq_indices]
-        obs_z = self.obs_z[seq_indices]
-        rewards = self.rewards[seq_indices]
-        dones = self.dones[seq_indices]
-        rnn_states = self.rnn_states[seq_indices]
-        actions = self.actions[seq_indices]
-        log_probs = self.log_probs[seq_indices]
-        values = self.values[seq_indices]
-
         return ReplayBufferData(
-            observations.to(self.output_device, non_blocking=True),
-            obs_z.to(self.output_device, non_blocking=True),
-            rewards.to(self.output_device, non_blocking=True),
-            dones.to(self.output_device, non_blocking=True),
-            rnn_states.to(self.output_device, non_blocking=True),
-            actions.to(self.output_device, non_blocking=True),
-            log_probs.to(self.output_device, non_blocking=True),
-            values.to(self.output_device, non_blocking=True),
+            self.observations[seq_indices].to(self.output_device, non_blocking=True),
+            self.obs_z[seq_indices].to(self.output_device, non_blocking=True),
+            self.rewards[seq_indices].to(self.output_device, non_blocking=True),
+            self.dones[seq_indices].to(self.output_device, non_blocking=True),
+            self.rnn_states[seq_indices].to(self.output_device, non_blocking=True),
+            self.actions[seq_indices].to(self.output_device, non_blocking=True),
+            self.log_probs[seq_indices].to(self.output_device, non_blocking=True),
+            self.values[seq_indices].to(self.output_device, non_blocking=True),
+            self.action_token_ids[seq_indices].to(self.output_device, non_blocking=True),
         )
 
     def get_latest(self, seq_len: int) -> ReplayBufferData:
@@ -155,22 +166,14 @@ class ReplayBuffer:
         ) % self.size
 
         # Vectorized slicing
-        observations = self.observations[indices]
-        obs_z = self.obs_z[indices]
-        rewards = self.rewards[indices]
-        dones = self.dones[indices]
-        rnn_states = self.rnn_states[indices]
-        actions = self.actions[indices]
-        log_probs = self.log_probs[indices]
-        values = self.values[indices]
-
         return ReplayBufferData(
-            observations.unsqueeze(0).to(self.output_device, non_blocking=True),
-            obs_z.unsqueeze(0).to(self.output_device, non_blocking=True),
-            rewards.unsqueeze(0).to(self.output_device, non_blocking=True),
-            dones.unsqueeze(0).to(self.output_device, non_blocking=True),
-            rnn_states.unsqueeze(0).to(self.output_device, non_blocking=True),
-            actions.unsqueeze(0).to(self.output_device, non_blocking=True),
-            log_probs.unsqueeze(0).to(self.output_device, non_blocking=True),
-            values.unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.observations[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.obs_z[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.rewards[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.dones[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.rnn_states[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.actions[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.log_probs[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.values[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.action_token_ids[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
         )

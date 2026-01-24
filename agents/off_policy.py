@@ -53,6 +53,8 @@ class OffPolicyAgent:
             action_shape=action_space.shape,
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
+            max_token_len=args.max_token_len,
+            pad_token_id=args.pad_token_id,
         )
 
         # Initialize gradient norm targets
@@ -89,6 +91,7 @@ class OffPolicyAgent:
             torch.from_numpy(self.prev_action).to(self.device),
             0.0,
             0.0,
+            [],
         )
 
         # inference

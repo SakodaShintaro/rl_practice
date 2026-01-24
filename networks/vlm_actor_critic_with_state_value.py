@@ -36,7 +36,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.task_prompt = ACTION_PROMPT
         self.episode_prompt = ""
         self.target_layer_idx = args.target_layer_idx
-        self.max_new_tokens = 128
+        self.max_new_tokens = args.max_token_len
         self.num_bins = args.num_bins
         self.value_min = -args.value_range
         self.value_max = +args.value_range
@@ -79,6 +79,11 @@ class VLMActorCriticWithStateValue(nn.Module):
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
+
+    def get_pad_token_id(self) -> int:
+        pad_token_id = self.processor.tokenizer.pad_token_id
+        eos_token_id = self.processor.tokenizer.eos_token_id
+        return pad_token_id if pad_token_id is not None else eos_token_id
 
     def _generate_with_hidden_states(
         self,
@@ -146,7 +151,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         inputs = prepare_vlm_inputs(
             self.processor, s_seq, r_seq, self.task_prompt + self.episode_prompt
         )
-        action_text, hidden, log_prob, _ = self._generate_with_hidden_states(inputs)
+        action_text, hidden, log_prob, generated_ids = self._generate_with_hidden_states(inputs)
         print(f"{action_text=}")
 
         action_array = parse_action_text(action_text)
@@ -171,6 +176,7 @@ class VLMActorCriticWithStateValue(nn.Module):
             "x": hidden,
             "rnn_state": rnn_state,
             "action_text": action_text,
+            "action_token_ids": generated_ids,
         }
 
     def _action_to_text(self, action: torch.Tensor) -> str:
@@ -183,40 +189,33 @@ class VLMActorCriticWithStateValue(nn.Module):
         self,
         images: torch.Tensor,
         rewards: torch.Tensor,
-        actions: torch.Tensor,
+        action_token_ids: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute value and log prob in a single forward pass.
 
         Args:
             images: (B, T, C, H, W)
             rewards: (B, T, 1)
-            actions: (B, action_dim)
+            action_token_ids: (B, max_token_len) - padded token IDs
 
         Returns:
             value: (B, 1) or (B, num_bins)
             hidden: (B, hidden_size)
             log_probs: (B,)
         """
-        batch_size = actions.size(0)
         inputs = prepare_vlm_inputs(
             self.processor, images, rewards, self.task_prompt + self.episode_prompt
         )
 
-        # Tokenize actions
-        action_texts = [self._action_to_text(actions[b]) for b in range(batch_size)]
-        tokenized = self.processor.tokenizer(
-            action_texts, add_special_tokens=False, padding=True, return_tensors="pt"
-        )
-        target_ids = tokenized["input_ids"].to(self.device)
-        target_mask = tokenized["attention_mask"].to(self.device).float()
-        action_len = target_ids.size(1)
+        # Create attention mask for action tokens (non-padding tokens)
+        pad_token_id = self.get_pad_token_id()
+        target_mask = (action_token_ids != pad_token_id).float()
+        action_len = action_token_ids.size(1)
         prompt_len = inputs["input_ids"].size(1)
 
         # Concatenate prompt + action tokens
-        combined_input_ids = torch.cat([inputs["input_ids"], target_ids], dim=1)
-        combined_attention_mask = torch.cat(
-            [inputs["attention_mask"], tokenized["attention_mask"].to(self.device)], dim=1
-        )
+        combined_input_ids = torch.cat([inputs["input_ids"], action_token_ids], dim=1)
+        combined_attention_mask = torch.cat([inputs["attention_mask"], target_mask.long()], dim=1)
 
         # Single forward pass with hidden states
         outputs = self.model.forward(
@@ -240,7 +239,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         # Log prob: from logits predicting action tokens
         relevant_logits = outputs.logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
         log_prob_dist = F.log_softmax(relevant_logits, dim=-1)
-        token_log_probs = log_prob_dist.gather(2, target_ids.unsqueeze(2)).squeeze(2)
+        token_log_probs = log_prob_dist.gather(2, action_token_ids.unsqueeze(2)).squeeze(2)
         batch_log_probs = (token_log_probs * target_mask).sum(dim=1)
 
         return value, state_hidden, batch_log_probs
@@ -254,12 +253,12 @@ class VLMActorCriticWithStateValue(nn.Module):
         """Compute PPO actor loss and critic loss in a single forward pass."""
         obs_curr = data.observations[:, :-1]
         rewards_curr = data.rewards[:, :-1]
-        actions_curr = data.actions[:, -1]  # (B, action_dim)
+        action_token_ids_curr = data.action_token_ids[:, -1]  # (B, max_token_len)
         old_log_prob = data.log_probs[:, -1].view(-1)
 
         # Single forward pass for value and log prob
         value, hidden, new_log_prob = self._compute_value_and_log_prob(
-            obs_curr, rewards_curr, actions_curr
+            obs_curr, rewards_curr, action_token_ids_curr
         )
 
         # PPO actor loss

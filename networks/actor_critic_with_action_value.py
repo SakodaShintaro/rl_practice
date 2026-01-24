@@ -140,9 +140,7 @@ class Network(nn.Module):
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,
     ) -> dict:
-        x, rnn_state = self.encoder(
-            s_seq, obs_z_seq, a_seq, r_seq, rnn_state
-        )  # (B, hidden_dim)
+        x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         # Get action from policy_head
         action, a_logp = self.policy_head.get_action(x)
@@ -157,6 +155,7 @@ class Network(nn.Module):
             "value": q_value,  # (B, 1) or (B, num_bins)
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (B, ...)
+            "action_token_ids": [],  # empty for non-VLM networks
         }
 
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:

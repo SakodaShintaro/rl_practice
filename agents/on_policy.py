@@ -84,6 +84,10 @@ class OnPolicyAgent:
             raise ValueError(f"Invalid network_class: {self.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
         obs_z_shape = tuple(self.network.image_processor.output_shape)
+
+        self.max_token_len = args.max_token_len
+        self.pad_token_id = args.pad_token_id
+
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
             seq_len=self.seq_len + 1,
@@ -93,6 +97,8 @@ class OnPolicyAgent:
             action_shape=action_space.shape,
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
+            max_token_len=self.max_token_len,
+            pad_token_id=self.pad_token_id,
         )
 
         lr = args.learning_rate
@@ -101,6 +107,7 @@ class OnPolicyAgent:
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0
         self.prev_value = 0.0
+        self.prev_action_token_ids: list[int] = []
 
     @torch.inference_mode()
     def select_action(
@@ -132,6 +139,7 @@ class OnPolicyAgent:
             torch.from_numpy(self.prev_action).to(self.device),
             self.prev_logp,
             self.prev_value,
+            self.prev_action_token_ids,
         )
 
         # inference
@@ -166,6 +174,9 @@ class OnPolicyAgent:
         value = value.item()
         self.prev_value = value
         info_dict["value"] = value
+
+        # action token ids
+        self.prev_action_token_ids = result_dict["action_token_ids"]
 
         # predict next state
         if self.network_class != "vlm_actor_critic_with_state_value":
@@ -237,6 +248,7 @@ class OnPolicyAgent:
         old_a_logp = buffer_data.log_probs.view(-1, 1)
         done = buffer_data.dones.view(-1, 1)
         rnn_states = buffer_data.rnn_state
+        action_token_ids = buffer_data.action_token_ids
 
         bias = torch.tensor(self.action_bias, device=self.device).view(1, -1)
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)
@@ -284,6 +296,7 @@ class OnPolicyAgent:
                     actions=a[indices],
                     log_probs=old_a_logp[indices],
                     values=v[indices],
+                    action_token_ids=action_token_ids[indices],
                 )
                 curr_adv = adv[indices[:, -2]]
                 curr_target_v = target_v[indices[:, -2]]
