@@ -157,6 +157,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clip_param_value", type=float, default=0.2)
     parser.add_argument("--max_token_len", type=int, default=128)
     parser.add_argument("--pad_token_id", type=int, default=0)
+    parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
 
     return parser.parse_args()
 
@@ -346,9 +347,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
             )
 
-        feedback_text = ""
-        if args.network_class == "vlm_actor_critic_with_state_value":
-            feedback_text = input("Feedback: ")
+        feedback_text = input("Feedback: ") if args.use_feedback else ""
         episode_end_info = agent.on_episode_end(score, feedback_text)
         wandb.log(episode_end_info)
 
