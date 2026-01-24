@@ -148,6 +148,7 @@ class Network(nn.Module):
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (B, ...)
             "action_token_ids": [],  # empty for non-VLM networks
+            "parse_success": True,  # always True for non-VLM networks
         }
 
     def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:

@@ -104,10 +104,13 @@ class OnPolicyAgent:
         lr = args.learning_rate
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
+        self.parse_fail_penalty = args.parse_fail_penalty
+
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0
         self.prev_value = 0.0
         self.prev_action_token_ids: list[int] = []
+        self.prev_parse_success = True
 
     @torch.inference_mode()
     def select_action(
@@ -117,10 +120,12 @@ class OnPolicyAgent:
 
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
-        reward_with_penalty = reward - self.action_norm_penalty * action_norm
+        parse_fail_penalty = 0.0 if self.prev_parse_success else self.parse_fail_penalty
+        reward_with_penalty = reward - self.action_norm_penalty * action_norm - parse_fail_penalty
         if not self.normalizing_by_return:
             self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
+        info_dict["parse_fail_penalty"] = parse_fail_penalty
         info_dict["reward_with_penalty"] = reward_with_penalty
         info_dict["processed_reward"] = self.reward_processor.normalize(
             torch.tensor(reward_with_penalty)
@@ -175,8 +180,9 @@ class OnPolicyAgent:
         self.prev_value = value
         info_dict["value"] = value
 
-        # action token ids
+        # action token ids and parse success
         self.prev_action_token_ids = result_dict["action_token_ids"]
+        self.prev_parse_success = result_dict["parse_success"]
 
         # predict next state
         if self.network_class != "vlm_actor_critic_with_state_value":
