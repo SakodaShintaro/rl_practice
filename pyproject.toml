@@ -22,7 +22,6 @@ dependencies = [
     "peft",
     "fschat",
     "sentencepiece",
-    "memory-maze",
     "qwen-vl-utils",
     "bitsandbytes",
     "flash-linear-attention",
