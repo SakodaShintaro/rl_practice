@@ -3,12 +3,16 @@ set -eux
 
 cd $(dirname $0)
 
-pip3 install -r ./requirements.txt
+uv sync
 
-# Install packages that need to be compiled for the current PyTorch version
-# Use --no-build-isolation to ensure compatibility with current environment
-pip3 install mamba-ssm --no-build-isolation
-pip3 install causal-conv1d --no-build-isolation
-pip3 install flash-attn --no-build-isolation
+CARLA_VERSION=0.9.16
+CARLA_WHL="$HOME/CARLA_${CARLA_VERSION}/PythonAPI/carla/dist/carla-${CARLA_VERSION}-cp310-cp310-manylinux_2_31_x86_64.whl"
+
+test -f "$CARLA_WHL" || {
+    echo "CARLA not found. Please download from https://github.com/carla-simulator/carla/releases and extract to \$HOME/CARLA_${CARLA_VERSION}"
+    exit 1
+}
+
+uv pip install "$CARLA_WHL"
 
 sudo apt install -y xdotool wmctrl gnome-screenshot tesseract-ocr
