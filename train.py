@@ -96,6 +96,12 @@ def parse_args() -> argparse.Namespace:
         choices=["spatial_temporal", "temporal_only", "qwenvl", "mmmamba"],
     )
     parser.add_argument(
+        "--temporal_model_type",
+        type=str,
+        default="transformer",
+        choices=["gru", "transformer", "gdn", "mamba", "identity"],
+    )
+    parser.add_argument(
         "--image_processor_type", type=str, default="simple_cnn", choices=["simple_cnn", "ae"]
     )
     parser.add_argument(

@@ -11,6 +11,7 @@ python3 train.py baseline$suffix \
   --action_norm_penalty 1.0 \
   --target_score 800.0 \
   --encoder temporal_only \
+  --temporal_model_type identity \
   --num_bins 1 \
   --value_range 60.0 \
   --step_limit 200_000 \
