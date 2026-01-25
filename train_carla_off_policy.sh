@@ -7,7 +7,7 @@
 
 export TOKENIZERS_PARALLELISM=false
 
-python train.py carla_test \
+uv run python train.py carla_test \
     --env_id CARLA-Leaderboard-v0 \
     --agent_type off_policy \
     --encoder qwenvl \

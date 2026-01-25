@@ -4,7 +4,7 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-python3 train.py pathwise$suffix \
+uv run python train.py pathwise$suffix \
   --env_id MemoryMaze-9x9-v0 \
   --agent_type off_policy \
   --target_score 800.0 \
