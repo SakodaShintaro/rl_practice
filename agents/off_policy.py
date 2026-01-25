@@ -39,6 +39,7 @@ class OffPolicyAgent:
             ).to(self.device)
         else:
             raise ValueError(f"Unknown network class: {args.network_class}")
+        self.network = torch.compile(self.network)
         self.rnn_state = self.network.init_state().to(self.device)
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
