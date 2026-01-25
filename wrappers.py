@@ -3,7 +3,6 @@ import gymnasium as gym
 import minigrid
 import numpy as np
 
-from carla_leaderboard_env import CARLALeaderboardEnv
 from simple_four_quadrant_env import SimpleFourQuadrantEnv
 
 REPEAT = 4
@@ -35,6 +34,8 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "CARLA-Leaderboard-v0":
+        from carla_leaderboard_env import CARLALeaderboardEnv
+
         env = CARLALeaderboardEnv()
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
