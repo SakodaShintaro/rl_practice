@@ -17,6 +17,8 @@ import imageio
 import numpy as np
 import torch
 
+torch.set_float32_matmul_precision("high")
+
 import wandb
 from agents.off_policy import OffPolicyAgent
 from agents.on_policy import OnPolicyAgent
