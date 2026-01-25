@@ -1,7 +1,7 @@
 [project]
 name = "rl-practice"
 version = "0.1.0"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "gymnasium[box2d]",
     "gymnasium[mujoco]",
@@ -37,9 +37,9 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.2/causal_conv1d-1.5.2+cu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl" }
-flash-attn = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl" }
-mamba-ssm = { url = "https://github.com/state-spaces/mamba/releases/download/v2.2.5/mamba_ssm-2.2.5+cu12torch2.6cxx11abiTRUE-cp310-cp310-linux_x86_64.whl" }
+causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.2/causal_conv1d-1.5.2+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+flash-attn = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+mamba-ssm = { url = "https://github.com/state-spaces/mamba/releases/download/v2.2.5/mamba_ssm-2.2.5+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
 
 [tool.ruff]
 line-length = 100
