@@ -6,6 +6,5 @@ wandb/
 .venv
 *.egg-info
 resnet18
-pretrained
 cache
 CLAUDE.md
