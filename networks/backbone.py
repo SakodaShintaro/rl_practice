@@ -84,11 +84,11 @@ class SpatialTemporalEncoder(nn.Module):
         self.output_dim = self.hidden_image_dim * token_num
 
     def init_state(self) -> torch.Tensor:
-        # ブロックのget_rnn_state_size()を使用してstate_sizeを取得
+        # Get state_size using block's get_rnn_state_size()
         state_size = self.spatial_temporal.spatial_temporal_blocks[
             0
         ].tempo_block.get_rnn_state_size()
-        # [1, space_len, state_size, n_layer] (バッチサイズ1)
+        # [1, space_len, state_size, n_layer] (batch size 1)
         return torch.zeros(1, self.space_len, state_size, self.n_layer)
 
     def forward(
@@ -109,7 +109,7 @@ class SpatialTemporalEncoder(nn.Module):
         # images: (B, T, C, H, W) -> encode all frames
         B, T = images.shape[:2]
 
-        # 外部形式 [B, space_len, state_size, n_layer] -> 内部形式 [1, B*space_len, state_size, n_layer]
+        # External format [B, space_len, state_size, n_layer] -> Internal format [1, B*space_len, state_size, n_layer]
         rnn_state_internal = rnn_state.reshape(1, B * self.space_len, -1, self.n_layer)
 
         # Use pre-encoded obs_z if using ae, otherwise encode from images
@@ -142,7 +142,7 @@ class SpatialTemporalEncoder(nn.Module):
             all_embed, rnn_state_internal
         )  # [B, T, S+action_dim+1, C'], [1, B*space_len, state_size, n_layer]
 
-        # 内部形式 [1, B*space_len, state_size, n_layer] -> 外部形式 [B, space_len, state_size, n_layer]
+        # Internal format [1, B*space_len, state_size, n_layer] -> External format [B, space_len, state_size, n_layer]
         rnn_state = rnn_state_internal.reshape(B, self.space_len, -1, self.n_layer)
 
         # Use last timestep's image tokens for final representation
@@ -158,17 +158,17 @@ class SpatialTemporalEncoder(nn.Module):
 
 class TemporalOnlyEncoder(nn.Module):
     """
-    統合された時系列エンコーダー
-    RecurrentEncoderとSimpleTransformerEncoderを統合し、柔軟な設定を可能にする
+    Unified temporal encoder
+    Integrates RecurrentEncoder and SimpleTransformerEncoder for flexible configuration
 
     Args:
-        image_processor: 画像プロセッサのインスタンス
-        reward_processor: 報酬プロセッサのインスタンス
-        seq_len: シーケンス長
-        n_layer: レイヤー数 (GRUならnum_layers、transformerならブロック数)
-        action_dim: アクションの次元 (未使用)
-        temporal_model_type: 時系列モデルのタイプ ("gru", "transformer", "gdn", "mamba", "identity")
-        use_image_only: 画像のみを使うか（Falseならaction, rewardも入れる）
+        image_processor: Image processor instance
+        reward_processor: Reward processor instance
+        seq_len: Sequence length
+        n_layer: Number of layers (num_layers for GRU, block count for transformer)
+        action_dim: Action dimension (unused)
+        temporal_model_type: Temporal model type ("gru", "transformer", "gdn", "mamba", "identity")
+        use_image_only: Whether to use only images (if False, include action and reward)
     """
 
     def __init__(
@@ -192,16 +192,16 @@ class TemporalOnlyEncoder(nn.Module):
         self.image_processor = image_processor
         self.reward_processor = reward_processor
 
-        # 画像特徴量の次元を計算
+        # Calculate image feature dimension
         image_feature_dim = np.prod(self.image_processor.output_shape)
 
-        # 共通の隠れ層サイズ
+        # Common hidden layer size
         self.output_dim = 64
 
-        # image_processor後の共通線形層
+        # Common linear layer after image_processor
         self.lin_hidden_in = nn.Linear(image_feature_dim, self.output_dim)
 
-        # 時系列ブロックのリストを作成
+        # Create list of temporal blocks
         max_seq_len = seq_len if use_image_only else seq_len * 3
         hidden_dim = self.output_dim
         n_head = 8
@@ -222,9 +222,9 @@ class TemporalOnlyEncoder(nn.Module):
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
 
     def init_state(self) -> torch.Tensor:
-        # ブロックのget_rnn_state_size()を使用してstate_sizeを取得
+        # Get state_size using block's get_rnn_state_size()
         state_size = self.blocks[0].get_rnn_state_size()
-        # [1, state_size, n_layer]を返す（バッチサイズ1）
+        # Return [1, state_size, n_layer] (batch size 1)
         return torch.zeros(1, state_size, self.n_layer)
 
     def forward(
@@ -247,7 +247,7 @@ class TemporalOnlyEncoder(nn.Module):
         if self.freeze_image_processor:
             image_features = obs_z.reshape(B * T, *obs_z.shape[2:])  # (B*T, C', H', W')
         else:
-            # 画像を処理
+            # Process images
             all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
             image_features = self.image_processor.encode(all_frames)
 
@@ -257,10 +257,10 @@ class TemporalOnlyEncoder(nn.Module):
         h = h.reshape(B, T, -1)  # (B, T, hidden_size)
 
         if self.use_image_only:
-            # 画像のみ
+            # Image only
             sequence = h  # (B, T, d_model)
         else:
-            # action, rewardを埋め込み
+            # Embed action and reward
             action_emb = get_fourier_embeds_from_coordinates(
                 self.output_dim, actions
             )  # (B, T, action_dim, d_model)
@@ -275,21 +275,21 @@ class TemporalOnlyEncoder(nn.Module):
             sequence = torch.stack([action_emb, reward_emb, h], dim=2)  # (B, T, 3, d_model)
             sequence = sequence.view(B, T * 3, self.output_dim)  # (B, T*3, d_model)
 
-        # 各レイヤーの状態を分割: [B, state_size, n_layer] -> n_layer個の [B, state_size]
+        # Split each layer's state: [B, state_size, n_layer] -> n_layer of [B, state_size]
         layer_states = [rnn_state[:, :, i] for i in range(self.n_layer)]
 
         new_layer_states = []
         for i, block in enumerate(self.blocks):
-            # 外部形式 [B, state_size] -> 内部形式 [1, B, state_size]
+            # External format [B, state_size] -> Internal format [1, B, state_size]
             layer_state_internal = layer_states[i].unsqueeze(0)
             sequence, layer_state_internal = block(sequence, layer_state_internal)
-            # 内部形式 [1, B, state_size] -> 外部形式 [B, state_size]
+            # Internal format [1, B, state_size] -> External format [B, state_size]
             new_layer_states.append(layer_state_internal.squeeze(0))
 
-        # 各レイヤーの状態を結合: n_layer個の [B, state_size] -> [B, state_size, n_layer]
+        # Combine each layer's state: n_layer of [B, state_size] -> [B, state_size, n_layer]
         rnn_state = torch.stack(new_layer_states, dim=-1)
 
-        # 最後のトークンの表現
+        # Representation of last token
         final_repr = sequence[:, -1, :]  # (B, d_model)
 
         return final_repr, rnn_state

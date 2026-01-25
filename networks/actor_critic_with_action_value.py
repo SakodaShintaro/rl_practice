@@ -114,9 +114,9 @@ class Network(nn.Module):
         self.detach_actor = args.detach_actor
         self.detach_critic = args.detach_critic
         self.detach_predictor = args.detach_predictor
-        # CFGRLパラメータ
+        # CFGRL parameters
         self.condition_drop_prob = 0.1
-        # VLMエンコーダーのときは状態予測を無効化
+        # Disable state prediction when using VLM encoder
         is_vlm_encoder = args.encoder in ["qwenvl", "mmmamba"]
         self.disable_state_predictor = args.disable_state_predictor or is_vlm_encoder
 
@@ -361,10 +361,10 @@ class Network(nn.Module):
 
     def _compute_actor_loss_cfgrl(self, state_curr, action_curr):
         """
-        CFGRL/pistar06方式の条件付き教師あり学習
+        CFGRL/pistar06 style conditional supervised learning
 
-        アドバンテージが閾値以上なら I=1 (positive)、そうでなければ I=0 (negative)
-        condition_drop_probの確率で条件をドロップ (I=2, unconditional)
+        I=1 (positive) if advantage >= threshold, otherwise I=0 (negative)
+        Drop condition with condition_drop_prob probability (I=2, unconditional)
         """
         if self.detach_actor:
             state_curr = state_curr.detach()
@@ -372,7 +372,7 @@ class Network(nn.Module):
         batch_size = state_curr.shape[0]
         device = state_curr.device
 
-        # アドバンテージを計算して条件Iを決定
+        # Calculate advantage and determine condition I
         with torch.no_grad():
             advantage_dict = self.value_head.get_advantage(state_curr, action_curr)
             advantage = advantage_dict["output"]
@@ -380,11 +380,11 @@ class Network(nn.Module):
                 advantage = self.hl_gauss_loss(advantage)
             advantage = advantage.view(-1)
 
-            # I = 1 if A >= median else 0 (中央値を閾値として使用)
+            # I = 1 if A >= median else 0 (use median as threshold)
             threshold = advantage.median()
             condition = (advantage >= threshold).long()
 
-            # condition_drop_probの確率でunconditional (I=2)に
+            # Set to unconditional (I=2) with condition_drop_prob probability
             drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
             condition = torch.where(drop_mask, torch.full_like(condition, 2), condition)
 
@@ -392,16 +392,16 @@ class Network(nn.Module):
         eps = 1e-4
         t = torch.rand((batch_size, 1), device=device) * (1 - eps) + eps
 
-        # ノイズからaction_currへの補間
+        # Interpolation from noise to action_curr
         noise = torch.randn_like(action_curr)
         noise = torch.clamp(noise, -3.0, 3.0)
         a_t = (1.0 - t) * noise + t * action_curr
 
-        # 条件付きでvelocityを予測
+        # Predict velocity conditionally
         actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr, condition)
         v_pred = actor_output_dict["output"]
 
-        # ターゲットvelocity: action_curr - noise
+        # Target velocity: action_curr - noise
         v_target = action_curr - noise
 
         # Flow Matching loss
@@ -411,7 +411,7 @@ class Network(nn.Module):
             "actor": actor_output_dict["activation"],
         }
 
-        # positiveとnegativeの割合を計算
+        # Calculate positive and negative ratios
         positive_ratio = (condition == 1).float().mean().item()
         negative_ratio = (condition == 0).float().mean().item()
         uncond_ratio = (condition == 2).float().mean().item()
@@ -430,9 +430,9 @@ class Network(nn.Module):
 
     def _compute_sequence_loss(self, data, state_curr):
         if self.disable_state_predictor:
-            # state_predictorを無効化する場合はダミー損失を返す
+            # Return dummy loss when state_predictor is disabled
             dummy_loss = torch.tensor(0.0, device=state_curr.device, requires_grad=True)
-            # state_currと同じ形状のダミーアクティベーションを返す
+            # Return dummy activation with same shape as state_curr
             activations_dict = {"state_predictor": state_curr}
             info_dict = {"seq_loss": 0.0}
             return dummy_loss, activations_dict, info_dict
@@ -440,10 +440,10 @@ class Network(nn.Module):
         if self.detach_predictor:
             state_curr = state_curr.detach()
 
-        # 最後のactionを取得 (actions[:, -1]がcurrent_stateに対応するaction)
+        # Get last action (actions[:, -1] corresponds to current_state)
         action_curr = data.actions[:, -1]  # (B, action_dim)
 
-        # 次のstateをencodeする
+        # Encode next state
         with torch.no_grad():
             last_obs = data.observations[:, -1]  # (B, C, H, W)
             target_state_next = self.image_processor.encode(last_obs)  # (B, C', H', W')

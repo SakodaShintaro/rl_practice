@@ -118,10 +118,10 @@ class DiffusionPolicy(nn.Module):
 
 class CFGDiffusionPolicy(nn.Module):
     """
-    Classifier Free Guidance対応のDiffusion Policy (CFGRL/pistar06)
+    Diffusion Policy with Classifier Free Guidance (CFGRL/pistar06)
 
-    学習時: 条件I（positive/negative）をcondition_drop_probの確率でドロップして学習
-    推論時: β（cfgrl_beta）でガイダンスの強さを調整
+    Training: Drop condition I (positive/negative) with condition_drop_prob probability
+    Inference: Adjust guidance strength with beta (cfgrl_beta)
     """
 
     def __init__(
@@ -138,7 +138,7 @@ class CFGDiffusionPolicy(nn.Module):
         self.cfgrl_beta = cfgrl_beta
         time_embedding_size = 256
         condition_embedding_size = 64
-        # 条件Iの埋め込み: 0=negative, 1=positive, 2=unconditional(dropout)
+        # Condition I embedding: 0=negative, 1=positive, 2=unconditional(dropout)
         self.condition_embedding = nn.Embedding(3, condition_embedding_size)
 
         self.fc_in = nn.Linear(
@@ -167,7 +167,7 @@ class CFGDiffusionPolicy(nn.Module):
             a: action (B, action_dim)
             t: timestep (B,)
             state: state embedding (B, state_dim)
-            condition: 条件I (B,) - 0=negative, 1=positive, 2=unconditional
+            condition: condition I (B,) - 0=negative, 1=positive, 2=unconditional
         """
         result_dict = {}
 
@@ -187,10 +187,10 @@ class CFGDiffusionPolicy(nn.Module):
 
     def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        CFGを使った推論
+        Inference using CFG
 
-        推論式: v = (1 - β) * v_uncond + β * v_positive
-        βが大きいほどpositiveなアドバンテージ方向にガイダンスが強くなる
+        Inference formula: v = (1 - beta) * v_uncond + beta * v_positive
+        Higher beta increases guidance towards positive advantage direction
         """
         bs = x.size(0)
         device = x.device
@@ -205,20 +205,20 @@ class CFGDiffusionPolicy(nn.Module):
 
         curr_time = torch.zeros((bs), device=device)
 
-        # 条件ラベル: 1=positive, 2=unconditional
+        # Condition labels: 1=positive, 2=unconditional
         cond_positive = torch.ones((bs,), dtype=torch.long, device=device)
         cond_uncond = torch.full((bs,), 2, dtype=torch.long, device=device)
 
         for _ in range(self.step_num):
-            # positive条件での速度
+            # Velocity with positive condition
             v_positive_dict = self.forward(action, curr_time, x, cond_positive)
             v_positive = v_positive_dict["output"]
 
-            # unconditional条件での速度
+            # Velocity with unconditional condition
             v_uncond_dict = self.forward(action, curr_time, x, cond_uncond)
             v_uncond = v_uncond_dict["output"]
 
-            # CFGによる速度の合成
+            # Compose velocity with CFG
             v = (1 - self.cfgrl_beta) * v_uncond + self.cfgrl_beta * v_positive
 
             action = action + dt * v

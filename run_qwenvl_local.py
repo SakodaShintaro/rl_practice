@@ -22,7 +22,7 @@ def build_messages(args: argparse.Namespace, image_paths: list[Path]) -> list[di
         content.append({"type": "video", "video": video_sources})
     else:
         for path in image_paths:
-            content.append({"type": "image", "image": f"file://{path.resolve()}"} )
+            content.append({"type": "image", "image": f"file://{path.resolve()}"})
     content.append({"type": "text", "text": args.prompt})
     return [
         {

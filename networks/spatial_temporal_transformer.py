@@ -68,7 +68,7 @@ class SpatialTemporalTransformer(nn.Module):
         self.space_len = space_len
         self.temporal_model_type = temporal_model_type
 
-        # tempo_emb削除、space_embのみ保持
+        # Removed tempo_emb, keep only space_emb
         self.space_emb = nn.Parameter(torch.zeros(1, 1, space_len, self.hidden_dim))
         nn.init.normal_(self.space_emb.data, mean=0, std=0.02)
 
@@ -120,7 +120,7 @@ class SpatialTemporalTransformer(nn.Module):
             out, new_state = self.spatial_temporal_blocks[i](out, rnn_state[:, :, :, i])
             new_layer_states.append(new_state)
 
-        # 各レイヤーの状態を結合: n_layer個の [1, B*S, state_size] -> [1, B*S, state_size, n_layer]
+        # Combine each layer's state: n_layer of [1, B*S, state_size] -> [1, B*S, state_size, n_layer]
         rnn_state = torch.stack(new_layer_states, dim=-1)
 
         return out, rnn_state

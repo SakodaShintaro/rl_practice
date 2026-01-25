@@ -215,7 +215,7 @@ class OnPolicyAgent:
     def on_episode_end(self, score: float, feedback_text: str) -> dict:
         info_dict = {}
 
-        # VLM使用時にfeedback textで学習
+        # Train with feedback text when using VLM
         if self.network_class != "vlm_actor_critic_with_state_value":
             return info_dict
         if not feedback_text:

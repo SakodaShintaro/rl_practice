@@ -1,8 +1,8 @@
 """
-汎用的なGUI + マウス操作のGymnasium環境ラッパー
+Generic Gymnasium environment wrapper for GUI + mouse operations
 
-PyAutoGuiを使って実際のマウスを操作し、スクリーンショットで画面を取得します。
-これにより、あらゆるGUIアプリケーション（Pygame、ブラウザ、デスクトップアプリなど）に対応できます。
+Uses PyAutoGui to operate the actual mouse and capture screenshots.
+This allows support for any GUI application (Pygame, browser, desktop apps, etc.).
 """
 
 import re
@@ -19,8 +19,8 @@ from PIL import Image
 
 
 def _find_window_region(window_title):
-    """wmctrlでウィンドウを検索し、xwininfoでクライアント領域を取得"""
-    # wmctrlでウィンドウを検索（部分一致）
+    """Search for window with wmctrl and get client area with xwininfo"""
+    # Search window with wmctrl (partial match)
     result = subprocess.run(["wmctrl", "-lG"], capture_output=True, text=True)
     if result.returncode != 0:
         return None
@@ -42,7 +42,7 @@ def _find_window_region(window_title):
     if window_id_hex is None:
         return None
 
-    # xwininfoでクライアント領域の正確な位置とサイズを取得
+    # Get exact position and size of client area with xwininfo
     xwinfo = subprocess.run(
         ["xwininfo", "-id", window_id_hex],
         capture_output=True,
@@ -52,7 +52,7 @@ def _find_window_region(window_title):
     if xwinfo.returncode != 0:
         return None
 
-    # xwininfoの出力をパース
+    # Parse xwininfo output
     abs_x = None
     abs_y = None
     width = None
@@ -72,12 +72,12 @@ def _find_window_region(window_title):
     if None in [abs_x, abs_y, width, height]:
         return None
 
-    # xwininfoのAbsolute座標はクライアント領域の位置を指す
+    # xwininfo Absolute coordinates point to client area position
     return (abs_x, abs_y, width, height, matched_title)
 
 
 def activate_window(window_title):
-    """xdotoolでウィンドウをアクティブ化"""
+    """Activate window with xdotool"""
     search = subprocess.run(
         ["xdotool", "search", "--onlyvisible", "--limit", "1", "--name", window_title],
         capture_output=True,
@@ -92,54 +92,54 @@ def activate_window(window_title):
 
 class GenericGUIEnv(gym.Env):
     """
-    汎用的なGUI環境ラッパー（PyAutoGui使用）
+    Generic GUI environment wrapper (using PyAutoGui)
 
     Action Space: Box(3,)
-        - action[0]: x座標 (0.0 ~ 1.0, 画面幅に対する相対位置)
-        - action[1]: y座標 (0.0 ~ 1.0, 画面高さに対する相対位置)
-        - action[2]: マウスボタン状態 (0.0 ~ 1.0, 1でdown、0でup)
+        - action[0]: x coordinate (0.0 ~ 1.0, relative position to screen width)
+        - action[1]: y coordinate (0.0 ~ 1.0, relative position to screen height)
+        - action[2]: mouse button state (0.0 ~ 1.0, 1 for down, 0 for up)
 
     Observation Space: Box(height, width, 3)
-        - RGB画像 (uint8)
+        - RGB image (uint8)
 
     Reward:
-        - reward_detector関数で検出
+        - Detected by reward_detector function
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
-    # 観測のリサイズサイズ (height, width) or None
+    # Observation resize size (height, width) or None
     resize_shape = None
 
     def __init__(self, reward_detector, render_mode, window_title):
         """
         Args:
-            reward_detector: 報酬検出関数
-                - 引数: (prev_screen: np.ndarray, current_screen: np.ndarray)
-                - 戻り値: float（報酬値）
+            reward_detector: Reward detection function
+                - Arguments: (prev_screen: np.ndarray, current_screen: np.ndarray)
+                - Returns: float (reward value)
             render_mode: "human" or "rgb_array" or None
-            window_title: ウィンドウのタイトル（部分一致）必須
+            window_title: Window title (partial match) required
 
-        注意:
-            - この環境はOSレベルでマウスを操作します
-            - 環境実行中は手動でマウスを動かさないでください
-            - PyAutoGuiの安全機能: マウスを画面左上隅に移動させると緊急停止します
+        Note:
+            - This environment operates mouse at OS level
+            - Do not manually move mouse while environment is running
+            - PyAutoGui safety feature: Moving mouse to top-left corner triggers emergency stop
         """
         super().__init__()
 
         self.reward_detector = reward_detector
         self.render_mode = render_mode
 
-        # PyAutoGuiの設定
-        pyautogui.FAILSAFE = True  # 左上隅で緊急停止
-        pyautogui.PAUSE = 0.01  # コマンド間の待機時間（秒）
+        # PyAutoGui settings
+        pyautogui.FAILSAFE = True  # Emergency stop at top-left corner
+        pyautogui.PAUSE = 0.01  # Wait time between commands (seconds)
 
         if window_title is None:
-            raise ValueError("window_titleは必須です")
+            raise ValueError("window_title is required")
 
         region = _find_window_region(window_title)
         if region is None:
-            # 利用可能なウィンドウのリストを取得して表示
+            # Get and display list of available windows
             wmctrl_result = subprocess.run(
                 ["wmctrl", "-lG"],
                 capture_output=True,
@@ -147,22 +147,22 @@ class GenericGUIEnv(gym.Env):
             )
             window_list = []
             if wmctrl_result.returncode == 0:
-                for line in wmctrl_result.stdout.splitlines()[:10]:  # 最大10個まで
+                for line in wmctrl_result.stdout.splitlines()[:10]:  # Up to 10
                     parts = line.split(None, 6)
                     if len(parts) >= 7:
                         window_list.append(f"  - {parts[6]}")
 
-            available = "\n".join(window_list) if window_list else "  (取得できませんでした)"
+            available = "\n".join(window_list) if window_list else "  (could not retrieve)"
             raise ValueError(
-                f"ウィンドウが見つかりません: '{window_title}'\n"
-                f"wmctrlで検索しましたが見つかりませんでした。\n"
-                f"利用可能なウィンドウ（最大10個）:\n{available}"
+                f"Window not found: '{window_title}'\n"
+                f"Searched with wmctrl but not found.\n"
+                f"Available windows (up to 10):\n{available}"
             )
 
         self.region = tuple(region[:4])
         self.width = region[2]
         self.height = region[3]
-        print(f"ウィンドウを検出: '{region[4]}' at {self.region}")
+        print(f"Window detected: '{region[4]}' at {self.region}")
 
         # Action space: [x, y, button_state]
         self.action_space = spaces.Box(
@@ -181,35 +181,35 @@ class GenericGUIEnv(gym.Env):
             low=0, high=255, shape=(obs_height, obs_width, 3), dtype=np.uint8
         )
 
-        # 前回の画面
+        # Previous screen
         self.prev_screen = None
 
-        # ステップカウンタ（適当なステップごとにエピソードを区切る）
+        # Step counter (split episodes at arbitrary steps)
         self.step_count = 0
 
-        # マウスボタンの状態
+        # Mouse button state
         self.mouse_button_down = False
 
     def reset(self, seed=None, options=None):
         """
-        環境をリセット
+        Reset environment
 
-        注意: この環境はアプリケーションの状態をリセットしません。
-              必要に応じて、手動でアプリケーションをリセットしてください。
+        Note: This environment does not reset application state.
+              Manually reset the application if needed.
         """
         super().reset(seed=seed)
 
-        # 前回画面をリセット
+        # Reset previous screen
         self.prev_screen = None
 
-        # ステップカウンタをリセット
+        # Reset step counter
         self.step_count = 0
 
-        # マウスボタンの状態をリセット
+        # Reset mouse button state
         self.mouse_button_down = False
         pyautogui.mouseUp(button="left")
 
-        # 初期観測を取得
+        # Get initial observation
         observation = self._get_observation()
         self.prev_screen = observation.copy()
 
@@ -218,27 +218,27 @@ class GenericGUIEnv(gym.Env):
 
     def step(self, action):
         """
-        1ステップ実行
+        Execute one step
 
         Args:
             action: [x, y, button_state]
         """
-        # アクションを解釈
+        # Interpret action
         x_norm, y_norm, button_state = action
 
-        # アクションを0.0～1.0の範囲にクリップ
+        # Clip action to 0.0-1.0 range
         x_norm_clipped = np.clip(x_norm, 0.0, 1.0)
         y_norm_clipped = np.clip(y_norm, 0.0, 1.0)
 
-        # 画面座標に変換（region内の相対座標）
+        # Convert to screen coordinates (relative to region)
         region_x, region_y, _, _ = self.region
         x = int(region_x + x_norm_clipped * (self.width - 1))
         y = int(region_y + y_norm_clipped * (self.height - 1))
 
-        # マウスを移動
+        # Move mouse
         pyautogui.moveTo(x, y)
 
-        # マウスボタンの状態を更新
+        # Update mouse button state
         desired_state = button_state > 0.5
         if desired_state and not self.mouse_button_down:
             pyautogui.mouseDown(button="left")
@@ -247,24 +247,24 @@ class GenericGUIEnv(gym.Env):
             pyautogui.mouseUp(button="left")
             self.mouse_button_down = False
 
-        # 少し待機（アプリケーションの処理を待つ）
+        # Wait briefly (for application to process)
         time.sleep(0.032)
 
-        # 観測を取得
+        # Get observation
         current_screen = self._get_observation()
 
-        # 報酬の計算
+        # Calculate reward
         reward = 0.0
         if self.reward_detector is not None and self.prev_screen is not None:
             reward = self.reward_detector(self.prev_screen, current_screen)
 
-        # 前回画面を更新
+        # Update previous screen
         self.prev_screen = current_screen.copy()
 
-        # ステップカウンタをインクリメント
+        # Increment step counter
         self.step_count += 1
 
-        # 終了判定
+        # Check termination
         terminated = False
         truncated = self.step_count >= 200
 
@@ -273,14 +273,14 @@ class GenericGUIEnv(gym.Env):
         return current_screen, reward, terminated, truncated, info
 
     def _get_observation(self):
-        """観測（画面のRGB画像）を取得"""
-        # スクリーンショットを取得
+        """Get observation (RGB image of screen)"""
+        # Capture screenshot
         screenshot = pyautogui.screenshot(region=self.region)
 
-        # numpy配列に変換
+        # Convert to numpy array
         screen_array = np.array(screenshot)
 
-        # リサイズ処理
+        # Resize processing
         if self.resize_shape is not None:
             height, width = self.resize_shape
             screen_array = cv2.resize(screen_array, (width, height), interpolation=cv2.INTER_AREA)
@@ -288,36 +288,36 @@ class GenericGUIEnv(gym.Env):
         return screen_array
 
     def render(self):
-        """レンダリング"""
+        """Rendering"""
         if self.render_mode == "rgb_array":
             return self.prev_screen
         elif self.render_mode == "human":
-            # 実際の画面が表示されているのでレンダリング不要
+            # No rendering needed as actual screen is displayed
             pass
 
     def close(self):
-        """環境をクローズ"""
-        # マウスボタンを離す（既に離されていても問題ない）
+        """Close environment"""
+        # Release mouse button (no problem if already released)
         pyautogui.mouseUp(button="left")
 
 
 def create_score_reward_detector():
     """
-    スコア表示からOCRで報酬を検出する汎用関数
+    Generic function to detect reward from score display using OCR
 
-    Letter Tracing GameとFour Quadrant Game両方で使用可能
+    Can be used for both Letter Tracing Game and Four Quadrant Game
 
     Returns:
-        reward_detector関数
+        reward_detector function
     """
 
     def reward_detector(prev_screen, current_screen):
         """
-        画面からOCRでスコアを検出
+        Detect score from screen using OCR
 
         Args:
-            prev_screen: 前回の画面 (H, W, 3)
-            current_screen: 現在の画面 (H, W, 3)
+            prev_screen: Previous screen (H, W, 3)
+            current_screen: Current screen (H, W, 3)
 
         Returns:
             reward: float
@@ -325,19 +325,19 @@ def create_score_reward_detector():
         if np.all(current_screen == prev_screen):
             return 0.0
         try:
-            # 色ベースでスコア表示領域を検出
-            lower_bound = (240, 240, 180)  # 薄い黄色の下限
-            upper_bound = (255, 255, 220)  # 薄い黄色の上限
+            # Detect score display area based on color
+            lower_bound = (240, 240, 180)  # Light yellow lower bound
+            upper_bound = (255, 255, 220)  # Light yellow upper bound
             mask = np.all(
                 (current_screen >= lower_bound) & (current_screen <= upper_bound),
                 axis=2,
             )
 
-            # マスクから領域を抽出
+            # Extract region from mask
             if not np.any(mask):
                 return 0.0
 
-            # マスクの範囲を取得
+            # Get mask bounds
             rows, cols = np.where(mask)
             if len(rows) == 0:
                 return 0.0
@@ -345,28 +345,28 @@ def create_score_reward_detector():
             y1, y2 = rows.min(), rows.max()
             x1, x2 = cols.min(), cols.max()
 
-            # 領域を少し広げる
+            # Expand region slightly
             margin = 10
             y1 = max(0, y1 - margin)
             y2 = min(current_screen.shape[0], y2 + margin)
             x1 = max(0, x1 - margin)
             x2 = min(current_screen.shape[1], x2 + margin)
 
-            # スコア領域を切り出し
+            # Crop score region
             score_region = current_screen[y1:y2, x1:x2, :]
 
-            # PIL Imageに変換
+            # Convert to PIL Image
             pil_image = Image.fromarray(score_region)
 
-            # OCRで文字列を読み取る
+            # Read text with OCR
             text = pytesseract.image_to_string(pil_image, config="--psm 6").strip()
 
-            # "Score:" キーワードを含むかチェック
+            # Check if "Score:" keyword is included
             score_keyword = "Score:"
             if score_keyword.lower() not in text.lower():
                 return 0.0
 
-            # 数字を抽出（負の数にも対応）
+            # Extract number (supports negative numbers)
             match = re.search(r"(-?\d+\.\d+)", text)
             if match:
                 score = float(match.group(1))
@@ -375,8 +375,8 @@ def create_score_reward_detector():
                 return 0.0
 
         except Exception as e:
-            # OCR失敗時は0を返す
-            print(f"OCRエラー: {e}")
+            # Return 0 on OCR failure
+            print(f"OCR error: {e}")
             return 0.0
 
     return reward_detector

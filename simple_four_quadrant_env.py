@@ -1,7 +1,7 @@
 """
-Four Quadrant Game - Pygameを使わずnumpyで実装
-画面を4分割し、1区画だけ赤色、残りは白色
-赤色クリック→報酬+1、白色クリック→報酬-0.1
+Four Quadrant Game - Implemented with numpy without Pygame
+Screen divided into 4 quadrants, 1 is red, others are white
+Red click -> reward +1, White click -> reward -0.1
 """
 
 import random
@@ -11,7 +11,7 @@ import numpy as np
 from gymnasium import spaces
 from PIL import Image, ImageDraw, ImageFont
 
-# 状態定数
+# State constants
 STATE_PLAYING = "PLAYING"
 STATE_SHOW_SCORE = "SHOW_SCORE"
 STATE_WAITING = "WAITING"
@@ -25,18 +25,18 @@ class SimpleFourQuadrantEnv(gym.Env):
 
         self.render_mode = render_mode
 
-        # 固定値
+        # Fixed values
         self.width = 192
         self.height = 192
 
-        # 色定義 (RGB)
+        # Color definitions (RGB)
         self.WHITE = np.array([255, 255, 255], dtype=np.uint8)
         self.BLACK = np.array([0, 0, 0], dtype=np.uint8)
         self.RED = np.array([255, 0, 0], dtype=np.uint8)
         self.SCORE_BG = np.array([255, 255, 200], dtype=np.uint8)
         self.SCORE_BORDER = np.array([200, 150, 0], dtype=np.uint8)
 
-        # 4分割の矩形を定義 (x, y, w, h)
+        # Define 4 quadrant rectangles (x, y, w, h)
         half_w = self.width // 2
         half_h = self.height // 2
         self.quadrants = [
@@ -53,7 +53,7 @@ class SimpleFourQuadrantEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Observation space: RGB画像
+        # Observation space: RGB image
         self.observation_space = spaces.Box(
             low=0,
             high=255,
@@ -61,16 +61,16 @@ class SimpleFourQuadrantEnv(gym.Env):
             dtype=np.uint8,
         )
 
-        # 現在の正解の区画インデックス
+        # Current correct quadrant index
         self.correct_quadrant = 0
 
-        # ステップカウンタ
+        # Step counter
         self.step_count = 0
 
-        # マウスボタンの状態
+        # Mouse button state
         self.prev_button_state = False
 
-        # 状態管理
+        # State management
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
@@ -80,7 +80,7 @@ class SimpleFourQuadrantEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        # 新しい問題を生成
+        # Generate new problem
         self.correct_quadrant = random.randint(0, 3)
         self.step_count = 0
         self.prev_button_state = False
@@ -88,85 +88,85 @@ class SimpleFourQuadrantEnv(gym.Env):
         self.current_score = 0.0
         self.state_timer = 0
 
-        # 初期観測を取得
+        # Get initial observation
         observation = self._get_observation()
 
         info = {}
         return observation, info
 
     def step(self, action):
-        # ステップカウンタをインクリメント
+        # Increment step counter
         self.step_count += 1
 
-        # アクションを解釈
+        # Interpret action
         x_norm, y_norm, button_state = action
 
-        # アクションを0.0～1.0の範囲にクリップ
+        # Clip action to 0.0-1.0 range
         x_norm = np.clip(x_norm, 0.0, 1.0)
         y_norm = np.clip(y_norm, 0.0, 1.0)
 
-        # 画面座標に変換
+        # Convert to screen coordinates
         x = int(x_norm * (self.width - 1))
         y = int(y_norm * (self.height - 1))
 
-        # ボタンの状態を判定
+        # Determine button state
         current_button_state = button_state > 0.5
 
         reward = 0.0
 
-        # 状態に応じた処理
+        # Process based on state
         if self.state == STATE_SHOW_SCORE:
-            # スコア表示中の処理
+            # Processing during score display
             self.state_timer += 1
             if self.state_timer >= self.score_duration:
                 self.state = STATE_WAITING
                 self.state_timer = 0
         elif self.state == STATE_WAITING:
-            # 赤色なし状態の処理
+            # Processing during no-red state
             self.state_timer += 1
 
-            # クリック判定（ボタンが押されている間）
+            # Click detection (while button is pressed)
             if current_button_state:
-                # 赤色なし状態でクリックされたらペナルティ
+                # Penalty for clicking during no-red state
                 self.current_score = -0.5
                 self.state = STATE_SHOW_SCORE
                 self.state_timer = 0
                 reward = self.current_score
             elif self.state_timer >= self.waiting_duration:
-                # 一定時間経過したら赤色を表示（新しい問題）
+                # Show red after certain time (new problem)
                 self.state = STATE_PLAYING
                 self.correct_quadrant = random.randint(0, 3)
         else:
-            # 通常状態の処理中はなにもしないことにペナルティ
+            # Penalty for doing nothing during normal state
             reward = -0.5
 
-            # クリック判定（ボタンが押されている間）
+            # Click detection (while button is pressed)
             if current_button_state:
-                # どの区画がクリックされたか判定
+                # Determine which quadrant was clicked
                 clicked_quadrant = None
                 for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
                     if qx <= x < qx + qw and qy <= y < qy + qh:
                         clicked_quadrant = i
                         break
 
-                # 報酬を計算
+                # Calculate reward
                 if clicked_quadrant == self.correct_quadrant:
                     reward = 1.0
                 else:
                     reward = -0.01
 
-                # スコア表示モードに移行
+                # Transition to score display mode
                 self.current_score = reward
                 self.state = STATE_SHOW_SCORE
                 self.state_timer = 0
 
-        # ボタンの状態を更新
+        # Update button state
         self.prev_button_state = current_button_state
 
-        # 観測を取得
+        # Get observation
         observation = self._get_observation()
 
-        # 終了判定
+        # Check termination
         terminated = False
         truncated = self.step_count >= 200
 
@@ -175,28 +175,28 @@ class SimpleFourQuadrantEnv(gym.Env):
         return observation, reward, terminated, truncated, info
 
     def _get_observation(self):
-        """観測（画面のRGB画像）を取得"""
+        """Get observation (RGB image of screen)"""
         return self._render_frame()
 
     def _render_frame(self):
-        """画面描画 - numpyで直接生成"""
-        # 白背景の画像を作成
+        """Render frame - generate directly with numpy"""
+        # Create white background image
         image = np.full((self.height, self.width, 3), self.WHITE, dtype=np.uint8)
 
         if self.state == STATE_SHOW_SCORE:
-            # スコア表示
+            # Show score
             self._draw_score(image)
         elif self.state == STATE_WAITING:
-            # 赤色なし状態（全て白）
+            # No-red state (all white)
             pass
         else:
-            # 各区画を描画
+            # Draw each quadrant
             for i, (x, y, w, h) in enumerate(self.quadrants):
                 if i == self.correct_quadrant:
-                    # 正解の区画は赤色で塗りつぶし
+                    # Fill correct quadrant with red
                     image[y : y + h, x : x + w] = self.RED
                 else:
-                    # それ以外は枠線だけ描く（黒い線）
+                    # Draw border only for others (black lines)
                     image[y, x : x + w] = self.BLACK
                     image[y + h - 1, x : x + w] = self.BLACK
                     image[y : y + h, x] = self.BLACK
@@ -205,18 +205,18 @@ class SimpleFourQuadrantEnv(gym.Env):
         return image
 
     def _draw_score(self, image):
-        """スコアを画面中央に表示"""
-        # PILで描画
+        """Display score at center of screen"""
+        # Draw with PIL
         pil_image = Image.fromarray(image)
         draw = ImageDraw.Draw(pil_image)
 
-        # スコア表示用の矩形（黄色い背景）
+        # Rectangle for score display (yellow background)
         score_box_width = 150
         score_box_height = 80
         score_box_x = (self.width - score_box_width) // 2
         score_box_y = (self.height - score_box_height) // 2
 
-        # 背景（薄い黄色）
+        # Background (light yellow)
         draw.rectangle(
             [
                 score_box_x,
@@ -229,14 +229,14 @@ class SimpleFourQuadrantEnv(gym.Env):
             width=2,
         )
 
-        # テキスト描画
+        # Draw text
         score_text = f"{self.current_score:.2f}"
 
-        # フォントサイズを調整してテキストを中央に配置
+        # Adjust font size and center text
         font_size = 36
         font = ImageFont.load_default()
 
-        # テキストの位置を計算（中央揃え）
+        # Calculate text position (center aligned)
         text_bbox = draw.textbbox((0, 0), score_text, font=font)
         text_width = text_bbox[2] - text_bbox[0]
         text_height = text_bbox[3] - text_bbox[1]
@@ -245,13 +245,13 @@ class SimpleFourQuadrantEnv(gym.Env):
 
         draw.text((text_x, text_y), score_text, fill=tuple(self.BLACK), font=font)
 
-        # PILイメージをnumpy配列に戻す
+        # Convert PIL image back to numpy array
         image[:] = np.array(pil_image)
 
     def render(self):
-        """レンダリング"""
+        """Rendering"""
         return self._render_frame()
 
     def close(self):
-        """環境をクローズ"""
+        """Close environment"""
         pass

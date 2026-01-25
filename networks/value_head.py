@@ -61,13 +61,13 @@ class ActionValueHead(nn.Module):
         super().__init__()
         mid_dim = in_channels + action_dim
 
-        # Value stream: V(s) - 状態のみに依存
+        # Value stream: V(s) - depends only on state
         self.v_fc_in = nn.Linear(in_channels, hidden_dim)
         self.v_fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.v_norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.v_fc_out = nn.Linear(hidden_dim, num_bins)
 
-        # Advantage stream: A(s,a) - 状態と行動に依存
+        # Advantage stream: A(s,a) - depends on state and action
         self.a_fc_in = nn.Linear(mid_dim, hidden_dim)
         self.a_fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.a_norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)

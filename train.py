@@ -29,7 +29,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def save_episode_data(video_dir, image_dir, name, bgr_image_list, action_list, reward_list):
-    """エピソードのビデオ、画像、actionとrewardを保存"""
+    """Save episode video, images, actions and rewards"""
     if not bgr_image_list:
         return
 
@@ -37,14 +37,14 @@ def save_episode_data(video_dir, image_dir, name, bgr_image_list, action_list, r
     rgb_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in bgr_image_list]
     imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
-    # 画像として保存
+    # Save as images
     curr_image_dir = image_dir / f"{name}_frames"
     curr_image_dir.mkdir(parents=True, exist_ok=True)
     for idx, img in enumerate(bgr_image_list):
         image_path = curr_image_dir / f"{idx:08d}.png"
         cv2.imwrite(str(image_path), img)
 
-    # actionとrewardをTSVファイルに保存
+    # Save actions and rewards to TSV file
     tsv_path = curr_image_dir / "log.tsv"
     with open(tsv_path, "w", encoding="utf-8") as f:
         f.write("step\t")
@@ -203,7 +203,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         with open(result_dir / "seed.txt", "w") as f:
             f.write(str(seed))
 
-        # git show -sの結果とgit diffの結果を保存
+        # Save git show -s and git diff results
         with open(result_dir / "git_info.txt", "w") as f:
             f.write(f"git show -s:\n{os.popen('git show -s').read()}\n")
             f.write(f"git diff:\n{os.popen('git diff').read()}\n")
@@ -291,7 +291,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             # log
             elapsed_time_sec = time.time() - start_time
             elapsed_time_min = elapsed_time_sec / 60
-            # wandbにログする前にndarrayを除外
+            # Exclude ndarray before logging to wandb
             log_agent_info = {k: v for k, v in agent_info.items() if not isinstance(v, np.ndarray)}
             data_dict = {
                 "global_step": global_step,

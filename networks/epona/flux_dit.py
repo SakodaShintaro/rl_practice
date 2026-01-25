@@ -77,7 +77,7 @@ class FluxDiT(nn.Module):
         B, noise_seq_len, C = noise.shape
         _, cond_seq_len, _ = cond.shape
 
-        # 位置エンコーディングを生成
+        # Generate positional encoding
         noise_pos_id = torch.arange(noise_seq_len, device=noise.device)
         noise_ids = noise_pos_id.unsqueeze(0).expand(B, -1).unsqueeze(-1).float()
 

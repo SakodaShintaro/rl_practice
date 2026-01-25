@@ -11,22 +11,22 @@ from .self_attention import SelfAttention
 
 class BaseTemporalBlock(nn.Module):
     """
-    時系列処理 + MLP の汎用ブロック
+    Generic block for temporal processing + MLP
 
     Args:
-        hidden_dim: 隠れ次元数
-        temporal_layer: 時系列処理を行うレイヤー
+        hidden_dim: Hidden dimension
+        temporal_layer: Layer for temporal processing
     """
 
     def __init__(self, hidden_dim, temporal_layer):
         super().__init__()
         self.hidden_dim = hidden_dim
 
-        # 第1ブロック: Norm + TemporalLayer + Residual
+        # Block 1: Norm + TemporalLayer + Residual
         self.temporal_norm = nn.LayerNorm(hidden_dim)
         self.temporal = temporal_layer
 
-        # 第2ブロック: Norm + MLP + Residual
+        # Block 2: Norm + MLP + Residual
         self.mlp_norm = nn.LayerNorm(hidden_dim)
         self.mlp = nn.Sequential(
             nn.Linear(hidden_dim, 4 * hidden_dim, bias=False),
@@ -36,7 +36,7 @@ class BaseTemporalBlock(nn.Module):
         )
 
     def get_rnn_state_size(self):
-        """rnn_stateのサイズを返す"""
+        """Return size of rnn_state"""
         return self.temporal.get_rnn_state_size()
 
     def forward(
@@ -44,11 +44,11 @@ class BaseTemporalBlock(nn.Module):
         x: torch.Tensor,  # [B, T, C]
         rnn_state: torch.Tensor,  # [1, B, C]
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # 第1ブロック: Norm + TemporalLayer + Residual
+        # Block 1: Norm + TemporalLayer + Residual
         temporal_output, new_rnn_state = self.temporal(self.temporal_norm(x), rnn_state)
         x = x + temporal_output
 
-        # 第2ブロック: Norm + MLP + Residual
+        # Block 2: Norm + MLP + Residual
         x = x + self.mlp(self.mlp_norm(x))
 
         return x, new_rnn_state
@@ -56,29 +56,27 @@ class BaseTemporalBlock(nn.Module):
 
 class CausalAttentionLayer(nn.Module):
     """
-    CausalAttentionによる時系列処理レイヤー
+    Temporal processing layer using CausalAttention
 
     Args:
-        hidden_dim: 隠れ次元数
-        n_head: アテンションヘッド数
-        max_position_embeddings: 最大位置埋め込み数
+        hidden_dim: Hidden dimension
+        n_head: Number of attention heads
+        max_position_embeddings: Maximum position embeddings
     """
 
     def __init__(self, hidden_dim, n_head, max_position_embeddings):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.attn = SelfAttention(
-            hidden_dim, n_head, max_position_embeddings, use_rope=True
-        )
+        self.attn = SelfAttention(hidden_dim, n_head, max_position_embeddings, use_rope=True)
 
-        # Causal maskを登録
+        # Register causal mask
         matrix = torch.tril(torch.ones(max_position_embeddings, max_position_embeddings))
         causal_mask = torch.where(matrix == 0, float("-inf"), matrix)
         causal_mask = torch.where(matrix == 1, 0, causal_mask)
         self.register_buffer("causal_mask", causal_mask.contiguous())
 
     def get_rnn_state_size(self):
-        """状態を使わないのでhidden_dimを返す"""
+        """Return hidden_dim since state is not used"""
         return self.hidden_dim
 
     def forward(
@@ -94,10 +92,10 @@ class CausalAttentionLayer(nn.Module):
 
 class MambaLayer(nn.Module):
     """
-    Mamba2による時系列処理レイヤー
+    Temporal processing layer using Mamba2
 
     Args:
-        hidden_dim: 隠れ次元数
+        hidden_dim: Hidden dimension
     """
 
     def __init__(self, hidden_dim):
@@ -107,7 +105,7 @@ class MambaLayer(nn.Module):
         self.mamba = Mamba2(d_model=hidden_dim, headdim=d_ssm)
 
     def get_rnn_state_size(self):
-        """状態を使わないのでhidden_dimを返す"""
+        """Return hidden_dim since state is not used"""
         return self.hidden_dim
 
     def forward(
@@ -121,10 +119,10 @@ class MambaLayer(nn.Module):
 
 class GRULayer(nn.Module):
     """
-    GRUによる時系列処理レイヤー
+    Temporal processing layer using GRU
 
     Args:
-        hidden_dim: 隠れ次元数
+        hidden_dim: Hidden dimension
     """
 
     def __init__(self, hidden_dim):
@@ -133,7 +131,7 @@ class GRULayer(nn.Module):
         self.gru = nn.GRU(hidden_dim, hidden_dim, num_layers=1, batch_first=True)
 
     def get_rnn_state_size(self):
-        """GRUの状態サイズを返す"""
+        """Return GRU state size"""
         return self.hidden_dim
 
     def forward(
@@ -141,7 +139,7 @@ class GRULayer(nn.Module):
         x: torch.Tensor,  # [B, T, C]
         rnn_state: torch.Tensor,  # [1, B, C]
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # repeat/reshapeで非連続になるケースに備えて contiguous を取る
+        # Make contiguous in case of non-contiguous tensor from repeat/reshape
         rnn_state = rnn_state.contiguous()
         output, new_rnn_state = self.gru(x, rnn_state)
         return output, new_rnn_state
@@ -149,10 +147,10 @@ class GRULayer(nn.Module):
 
 class GatedDeltaNetLayer(nn.Module):
     """
-    GatedDeltaNetによる時系列処理レイヤー
+    Temporal processing layer using GatedDeltaNet
 
     Args:
-        hidden_dim: 隠れ次元数
+        hidden_dim: Hidden dimension
     """
 
     def __init__(self, hidden_dim):
@@ -175,7 +173,7 @@ class GatedDeltaNetLayer(nn.Module):
         self.recurrent_state_shape = (n_head, head_dim, head_v_dim)
         self.recurrent_state_size = math.prod(self.recurrent_state_shape)
 
-        # conv_state: 3つのShortConvolution state (q, k, v)
+        # conv_state: 3 ShortConvolution states (q, k, v)
         self.conv_size = 4
         self.conv_state_shapes = [
             (qk_dim, self.conv_size),  # q_conv1d
@@ -186,11 +184,11 @@ class GatedDeltaNetLayer(nn.Module):
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
 
     def get_rnn_state_size(self):
-        """GatedDeltaNetのキャッシュサイズを返す"""
+        """Return GatedDeltaNet cache size"""
         return self.cache_size
 
     def _flatten_cache(self, cache_dict):
-        """FLACache から取得した辞書を1次元テンソルにフラット化"""
+        """Flatten dictionary from FLACache to 1D tensor"""
         if cache_dict is None:
             return None
 
@@ -198,7 +196,7 @@ class GatedDeltaNetLayer(nn.Module):
         conv_state = cache_dict["conv_state"]  # tuple of 3 tensors
         batch_size = recurrent_state.shape[0]
 
-        # recurrent_state/conv_state をバッチ毎にフラット化
+        # Flatten recurrent_state/conv_state per batch
         recurrent_flat = recurrent_state.reshape(batch_size, -1).to(torch.float32)
         conv_flat = torch.cat(
             [c.reshape(batch_size, -1).to(torch.float32) for c in conv_state], dim=-1
@@ -208,7 +206,7 @@ class GatedDeltaNetLayer(nn.Module):
         return cache_flat.unsqueeze(0)  # [1, B, cache_size]
 
     def _unflatten_cache(self, cache_flat, batch_size, device, dtype):
-        """1次元テンソルを FLACache 用の辞書に復元"""
+        """Restore 1D tensor to dictionary for FLACache"""
         if cache_flat is None:
             return None
 
@@ -225,15 +223,15 @@ class GatedDeltaNetLayer(nn.Module):
                 repeat = math.ceil(batch_size / current_batch)
                 cache_flat = cache_flat.repeat(repeat, 1)[:batch_size]
 
-        # ゼロ tensor かチェック（初期状態）
+        # Check if zero tensor (initial state)
         if torch.all(cache_flat == 0):
             return None
 
-        # recurrent_state を復元
+        # Restore recurrent_state
         recurrent_flat = cache_flat[:, : self.recurrent_state_size]
         recurrent_state = recurrent_flat.view(batch_size, *self.recurrent_state_shape).to(dtype)
 
-        # conv_state を復元
+        # Restore conv_state
         conv_flat = cache_flat[:, self.recurrent_state_size :]
         conv_tensors = []
         offset = 0
@@ -249,7 +247,7 @@ class GatedDeltaNetLayer(nn.Module):
             "ffn_state": (),
         }
 
-        # FLACache を作成
+        # Create FLACache
         fla_cache = FLACache()
         fla_cache.update(cache_dict)
 
@@ -262,8 +260,8 @@ class GatedDeltaNetLayer(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, T, C = x.shape
 
-        # GatedDeltaNetはtraining時にseq_len <= 64だとエラーが出るため、
-        # 必要に応じてパディングして65以上にする
+        # GatedDeltaNet throws error when seq_len <= 64 during training,
+        # so pad to 65 or more if needed
         if T <= 64:
             padding = torch.zeros(B, 65 - T, C, device=x.device, dtype=x.dtype)
             x_padded = torch.cat([x, padding], dim=1)
@@ -272,19 +270,19 @@ class GatedDeltaNetLayer(nn.Module):
             x_padded = x
             need_unpad = False
 
-        # rnn_state をデフラット化して FLACache を作成
+        # Unflatten rnn_state to create FLACache
         past_key_values = self._unflatten_cache(rnn_state, B, x.device, x.dtype)
 
-        # GatedDeltaNet を実行
+        # Run GatedDeltaNet
         gdn_output, _, new_cache = self.gdn(
             x_padded, past_key_values=past_key_values, use_cache=True
         )
 
-        # パディングを除去
+        # Remove padding
         if need_unpad:
             gdn_output = gdn_output[:, :T, :]
 
-        # 新しい cache をフラット化
+        # Flatten new cache
         if new_cache is not None and len(new_cache) > 0:
             new_cache_dict = new_cache[0]
             new_rnn_state = self._flatten_cache(new_cache_dict)
@@ -296,10 +294,10 @@ class GatedDeltaNetLayer(nn.Module):
 
 class IdentityLayer(nn.Module):
     """
-    何もしない時系列処理レイヤー（比較用）
+    Identity temporal processing layer (for comparison)
 
     Args:
-        hidden_dim: 隠れ次元数
+        hidden_dim: Hidden dimension
     """
 
     def __init__(self, hidden_dim):
@@ -307,7 +305,7 @@ class IdentityLayer(nn.Module):
         self.hidden_dim = hidden_dim
 
     def get_rnn_state_size(self):
-        """状態を使わないのでhidden_dimを返す"""
+        """Return hidden_dim since state is not used"""
         return self.hidden_dim
 
     def forward(
@@ -318,9 +316,9 @@ class IdentityLayer(nn.Module):
         return x, rnn_state
 
 
-# 互換性のためのエイリアス
+# Aliases for compatibility
 def CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings):
-    """因果的なTransformerブロック（RoPEあり、内部でcausal maskを適用）"""
+    """Causal Transformer block (with RoPE, applies causal mask internally)"""
     return BaseTemporalBlock(
         hidden_dim,
         CausalAttentionLayer(hidden_dim, n_head, max_position_embeddings),
@@ -328,39 +326,39 @@ def CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings):
 
 
 def MambaBlock(hidden_dim):
-    """Mamba状態空間モデルブロック（Transformerブロックと同じ構造）"""
+    """Mamba state space model block (same structure as Transformer block)"""
     return BaseTemporalBlock(hidden_dim, MambaLayer(hidden_dim))
 
 
 def GRUBlock(hidden_dim):
-    """GRUブロック（Transformerブロックと同じ構造）"""
+    """GRU block (same structure as Transformer block)"""
     return BaseTemporalBlock(hidden_dim, GRULayer(hidden_dim))
 
 
 def GdnBlock(hidden_dim):
-    """GatedDeltaNetブロック（Transformerブロックと同じ構造）"""
+    """GatedDeltaNet block (same structure as Transformer block)"""
     return BaseTemporalBlock(hidden_dim, GatedDeltaNetLayer(hidden_dim))
 
 
 def IdentityBlock(hidden_dim):
-    """何もしないブロック（比較用）"""
+    """Identity block (for comparison)"""
     return BaseTemporalBlock(hidden_dim, IdentityLayer(hidden_dim))
 
 
 if __name__ == "__main__":
-    # networksディレクトリで直接実行できるようにimportパスを調整
+    # Adjust import path to run directly from networks directory
     import sys
     from pathlib import Path
 
-    # 親ディレクトリ（rl_practice）をsys.pathに追加
+    # Add parent directory (rl_practice) to sys.path
     current_dir = Path(__file__).parent
     parent_dir = current_dir.parent
     sys.path.insert(0, str(parent_dir))
 
-    # 相対importではなく絶対importで再読み込み
+    # Reload with absolute import instead of relative import
     from networks.self_attention import SelfAttention
 
-    # 動作確認
+    # Verification
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -373,9 +371,7 @@ if __name__ == "__main__":
 
     # CausalTransformerBlock
     print("\n=== CausalTransformerBlock ===")
-    block = CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings).to(
-        device
-    )
+    block = CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings).to(device)
     rnn_state = torch.zeros(1, B, block.get_rnn_state_size(), device=device)
     out, new_rnn_state = block(x, rnn_state)
     print(f"output shape: {out.shape}")

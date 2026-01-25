@@ -40,7 +40,7 @@ if __name__ == "__main__":
     num_images = args.num_images
     batch_size = args.batch_size
 
-    # 画像の前処理用のtransform
+    # Transform for image preprocessing
     transform = transforms.Compose(
         [
             transforms.ToPILImage(),
@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     print(f"Loaded {len(image_list)} images from {images_dir}")
 
-    # 画像をシーケンスとして結合し、GPUに移動
+    # Combine images as sequence and move to GPU
     image_list = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in image_list]
     image_list = [transform(image) for image in image_list]
     images_sequence = torch.stack(image_list)  # shape: (sequence_length, 3, height, width)
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     print(f"Images sequence shape: {images_sequence.shape}")
     print(f"Using device: {device}")
 
-    # エンコーダーの初期化
+    # Initialize encoder
     print("\nInitializing Encoder...")
     observation_space_shape = (3, 96, 96)
     seq_len = images_sequence.shape[0]

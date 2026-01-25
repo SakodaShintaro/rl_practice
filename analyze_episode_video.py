@@ -1,5 +1,5 @@
 """
-QwenVLを使用してエピソード動画を解析し、失敗原因や反省点をテキスト生成するスクリプト
+Script for analyzing episode videos using QwenVL to generate text about failure causes and lessons learned
 """
 
 import argparse
@@ -22,13 +22,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_episode_scores(video_dir):
-    """log_episode.tsvからエピソードスコアを読み込む
+    """Load episode scores from log_episode.tsv
 
     Args:
-        video_dir: 動画ディレクトリのパス
+        video_dir: Path to the video directory
 
     Returns:
-        エピソード番号をキーとするスコアの辞書、最高得点
+        Dictionary with episode numbers as keys and scores as values, and the best score
     """
     tsv_path = video_dir.parent / "log_episode.tsv"
     best_score_path = video_dir.parent / "best_score.txt"
@@ -58,15 +58,15 @@ def load_episode_scores(video_dir):
 
 
 def get_episode_info(video_filename, scores, max_score):
-    """動画ファイル名からエピソード情報を取得
+    """Get episode information from video filename
 
     Args:
-        video_filename: 動画ファイル名
-        scores: エピソードスコアの辞書
-        max_score: 最高得点
+        video_filename: Video filename
+        scores: Dictionary of episode scores
+        max_score: Best score
 
     Returns:
-        エピソード番号、スコア、最高得点
+        Episode number, score, and best score
     """
     if video_filename == "best_episode.mp4":
         return "best", max_score, max_score
@@ -81,13 +81,13 @@ def get_episode_info(video_filename, scores, max_score):
 
 
 def load_video_frames(video_path):
-    """動画からフレームを抽出
+    """Extract frames from video
 
     Args:
-        video_path: 動画ファイルのパス
+        video_path: Path to video file
 
     Returns:
-        フレームのリスト（PIL Image形式）、FPS
+        List of frames (PIL Image format), FPS
     """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -111,26 +111,26 @@ def load_video_frames(video_path):
 def analyze_episode_with_qwen(
     video_path, best_video_path, model, processor, device, episode_score, max_score
 ):
-    """QwenVLで動画を解析してエピソードの反省点を生成
+    """Analyze video with QwenVL to generate episode reflections
 
     Args:
-        video_path: 動画ファイルのパス
-        best_video_path: ベストエピソードの動画ファイルのパス
-        model: QwenVLモデル
-        processor: QwenVLプロセッサ
-        device: 使用するデバイス
-        episode_score: このエピソードのスコア
-        max_score: 最高得点
+        video_path: Path to video file
+        best_video_path: Path to best episode video file
+        model: QwenVL model
+        processor: QwenVL processor
+        device: Device to use
+        episode_score: Score of this episode
+        max_score: Best score
 
     Returns:
-        生成されたテキスト
+        Generated text
     """
-    # 動画からフレームを抽出
+    # Extract frames from video
     frames, fps = load_video_frames(video_path)
     best_frames, best_fps = load_video_frames(best_video_path)
 
-    print(f"対象エピソード - フレーム数: {len(frames)}, FPS: {fps}")
-    print(f"ベストエピソード - フレーム数: {len(best_frames)}, FPS: {best_fps}")
+    print(f"Target episode - Frame count: {len(frames)}, FPS: {fps}")
+    print(f"Best episode - Frame count: {len(best_frames)}, FPS: {best_fps}")
 
     prompt = f"""You are shown TWO videos of a reinforcement learning agent in the CarRacing-v3 environment.
 The red car is the learning agent, which must drive on the gray road and avoid going onto the green grass.
@@ -158,7 +158,7 @@ Please provide insights on the following points:
 
 Please provide a detailed comparison-based analysis."""
 
-    # チャットメッセージ形式で構築
+    # Build in chat message format
     content = [
         {"type": "text", "text": "Video 1 (Best Episode):"},
         {"type": "video", "video": best_frames, "fps": best_fps},
@@ -169,14 +169,14 @@ Please provide a detailed comparison-based analysis."""
 
     messages = [{"role": "user", "content": content}]
 
-    # テキストテンプレート適用
+    # Apply text template
     text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
 
-    # ビジョン情報処理
+    # Process vision information
     images, videos, video_kwargs = process_vision_info(
         messages,
         image_patch_size=16,
@@ -190,7 +190,7 @@ Please provide a detailed comparison-based analysis."""
     else:
         video_metadata = None
 
-    # プロセッサで入力準備
+    # Prepare input with processor
     inputs = processor(
         text=text,
         images=images,
@@ -207,7 +207,7 @@ Please provide a detailed comparison-based analysis."""
         for k, v in inputs.items()
     }
 
-    # テキスト生成
+    # Generate text
     pad_token_id = processor.tokenizer.pad_token_id
     eos_token_id = processor.tokenizer.eos_token_id
     if pad_token_id is None:
@@ -240,11 +240,11 @@ def main():
 
     device = "cuda"
 
-    # エピソードスコアを読み込む
+    # Load episode scores
     scores, max_score = load_episode_scores(video_dir)
-    print(f"最高得点: {max_score:.2f}")
+    print(f"Best score: {max_score:.2f}")
 
-    # モデルとプロセッサのロード
+    # Load model and processor
     model_id = "Qwen/Qwen3-VL-2B-Instruct"
     # model_id = "Qwen/Qwen3-VL-2B-Thinking"
     # model_id = "Qwen/Qwen3-VL-8B-Instruct"
@@ -253,7 +253,7 @@ def main():
     # model_id = "Qwen/Qwen3-VL-32B-Thinking"
     # model_id = "Qwen/Qwen3-VL-235B-A22B-Instruct"
     # model_id = "Qwen/Qwen3-VL-235B-A22B-Thinking"
-    print(f"モデルをロード中: {model_id}")
+    print(f"Loading model: {model_id}")
     model = AutoModelForImageTextToText.from_pretrained(
         model_id,
         dtype=torch.bfloat16,
@@ -263,42 +263,42 @@ def main():
     )
 
     processor = AutoProcessor.from_pretrained(model_id)
-    print("モデルのロードが完了しました")
+    print("Model loading complete")
 
-    # 動画ファイルの取得
+    # Get video files
     video_files = sorted(list(video_dir.glob("*.mp4")))[: args.max_videos]
 
     if not video_files:
-        print(f"動画ファイルが見つかりません: {video_dir}")
+        print(f"No video files found: {video_dir}")
         return
 
-    # best_episode.mp4のパスを取得
+    # Get path to best_episode.mp4
     best_video_path = video_dir / "best_episode.mp4"
     if not best_video_path.exists():
-        print(f"best_episode.mp4が見つかりません: {best_video_path}")
+        print(f"best_episode.mp4 not found: {best_video_path}")
         return
 
-    # best_episode.mp4以外のファイルのみを解析対象とする
+    # Only analyze files other than best_episode.mp4
     video_files = [v for v in video_files if v.name != "best_episode.mp4"]
 
     if not video_files:
-        print("解析対象の動画ファイルが見つかりません（best_episode.mp4以外）")
+        print("No video files to analyze found (excluding best_episode.mp4)")
         return
 
-    print(f"\n解析する動画数: {len(video_files)}")
+    print(f"\nNumber of videos to analyze: {len(video_files)}")
 
-    # 結果を保存
+    # Save results
     results = []
 
     for i, video_path in enumerate(video_files):
         print(f"\n{'=' * 80}")
-        print(f"[{i + 1}/{len(video_files)}] 解析中: {video_path.name}")
+        print(f"[{i + 1}/{len(video_files)}] Analyzing: {video_path.name}")
         print(f"{'=' * 80}")
 
         episode_num, episode_score, max_score_val = get_episode_info(
             video_path.name, scores, max_score
         )
-        print(f"エピソード番号: {episode_num}, スコア: {episode_score:.2f} / {max_score_val:.2f}")
+        print(f"Episode number: {episode_num}, Score: {episode_score:.2f} / {max_score_val:.2f}")
 
         analysis = analyze_episode_with_qwen(
             str(video_path),
@@ -311,7 +311,7 @@ def main():
         )
 
         result = f"""
-エピソード: {video_path.name} (Score: {episode_score:.2f} / {max_score_val:.2f})
+Episode: {video_path.name} (Score: {episode_score:.2f} / {max_score_val:.2f})
 {"=" * 80}
 {analysis}
 {"=" * 80}
@@ -319,12 +319,12 @@ def main():
         print(result)
         results.append(result)
 
-    # 結果をファイルに保存（動画ディレクトリと同じ階層に固定）
+    # Save results to file (fixed at the same level as video directory)
     output_path = video_dir.parent / "episode_analysis.txt"
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(results))
 
-    print(f"\n結果を保存しました: {output_path}")
+    print(f"\nResults saved: {output_path}")
 
 
 if __name__ == "__main__":

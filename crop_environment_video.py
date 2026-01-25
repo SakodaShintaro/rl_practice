@@ -1,13 +1,13 @@
 """
-動画の左側（environment部分）だけをクロップするスクリプト
+Script to crop only the left side (environment part) of videos
 
-concat_labeled_imagesの処理により、画像は以下のように並んでいる：
+Due to concat_labeled_images processing, images are arranged as follows:
 [environment | observation | prediction | reward]
 
-各画像の上部にはラベルが付与されている。
-- env.render()のサイズ: 400x600
-- ラベルの高さ: 28ピクセル（add_text_label_on_topで追加）
-- environment部分のサイズ（ラベル込み）: 428x600
+A label is attached at the top of each image.
+- env.render() size: 400x600
+- Label height: 28 pixels (added by add_text_label_on_top)
+- Environment part size (including label): 428x600
 """
 
 import argparse
@@ -16,7 +16,7 @@ from pathlib import Path
 import cv2
 import imageio
 
-# クロップ領域の定数（ラベルを除外したenvironment部分）
+# Crop region constants (environment part excluding label)
 CROP_X = 0
 CROP_Y = 28
 CROP_WIDTH = 600
@@ -31,11 +31,11 @@ def parse_args() -> argparse.Namespace:
 
 def crop_video(input_path, output_path):
     """
-    動画のenvironment部分だけをクロップ
+    Crop only the environment part of the video
 
     Args:
-        input_path: 入力動画のパス
-        output_path: 出力動画のパス
+        input_path: Path to input video
+        output_path: Path to output video
     """
     cap = cv2.VideoCapture(str(input_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -55,12 +55,12 @@ def crop_video(input_path, output_path):
     cap.release()
 
     if cropped_frames:
-        print(f"クロップ後のサイズ: {cropped_frames[0].shape[1]}x{cropped_frames[0].shape[0]}")
-        print(f"総フレーム数: {len(cropped_frames)}")
+        print(f"Size after cropping: {cropped_frames[0].shape[1]}x{cropped_frames[0].shape[0]}")
+        print(f"Total frame count: {len(cropped_frames)}")
         imageio.mimsave(str(output_path), cropped_frames, fps=fps, macro_block_size=1)
-        print(f"保存完了: {output_path}")
+        print(f"Save complete: {output_path}")
     else:
-        print("フレームが見つかりませんでした")
+        print("No frames found")
 
 
 def main():
@@ -70,16 +70,16 @@ def main():
     output_dir = input_dir.parent / "video_cropped"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # パターンに一致する動画ファイルを取得
+    # Get video files matching the pattern
     video_files = sorted(list(input_dir.glob("*.mp4")))
     if not video_files:
-        print(f"動画ファイルが見つかりません: {input_dir}/*.mp4")
+        print(f"No video files found: {input_dir}/*.mp4")
         return
 
-    print(f"処理する動画数: {len(video_files)}")
+    print(f"Number of videos to process: {len(video_files)}")
 
     for i, video_path in enumerate(video_files):
-        print(f"\n[{i + 1}/{len(video_files)}] 処理中: {video_path.name}")
+        print(f"\n[{i + 1}/{len(video_files)}] Processing: {video_path.name}")
         output_path = output_dir / video_path.name
         crop_video(video_path, output_path)
 

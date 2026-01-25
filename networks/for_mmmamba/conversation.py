@@ -768,7 +768,7 @@ register_conv_template(
         system_message="你是由上海人工智能实验室联合商汤科技开发的书生多模态大模型，英文名叫InternVL, 是一个有用无害的人工智能助手。",
         roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
         sep_style=SeparatorStyle.MPT,
-        sep="[UNUSED_TOKEN_1]",  # 从这个token开始后面那群embedding完全一样
+        sep="[UNUSED_TOKEN_1]",  # Embeddings are identical from this token onwards
         stop_token_ids=[
             2,
             1163,

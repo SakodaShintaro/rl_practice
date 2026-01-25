@@ -7,40 +7,40 @@ from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding, apply
 
 def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) -> torch.Tensor:
     """
-    連続値座標をフーリエ位置埋め込みに変換する
+    Convert continuous coordinates to Fourier positional embeddings
 
-    アクション値などの連続値を高次元ベクトルに変換してTransformerで処理可能にする。
-    異なる周波数のsin/cos関数を組み合わせて豊かな表現を作成。
+    Converts continuous values like actions to high-dimensional vectors for Transformer processing.
+    Creates rich representations by combining sin/cos functions of different frequencies.
 
     Args:
-        embed_dim: 埋め込み次元数（偶数である必要がある）
-        coords: 座標テンソル [B, T, coord_dim] または [B, T]
+        embed_dim: Embedding dimension (must be even)
+        coords: Coordinate tensor [B, T, coord_dim] or [B, T]
 
     Returns:
-        torch.Tensor: shape [B, T, coord_dim, embed_dim] のフーリエ埋め込み
+        torch.Tensor: Fourier embedding of shape [B, T, coord_dim, embed_dim]
     """
     device = coords.device
     dtype = coords.dtype
 
-    # 2次元テンソルの場合は3次元に拡張 [B, T] -> [B, T, 1]
+    # Expand 2D tensor to 3D [B, T] -> [B, T, 1]
     if coords.dim() == 2:
         coords = coords.unsqueeze(-1)
 
     batch_size, seq_len, coord_dim = coords.shape
 
-    # 異なる周波数を生成（Transformerの位置埋め込みと同じ原理）
+    # Generate different frequencies (same principle as Transformer positional embedding)
     half_dim = embed_dim // 2
     emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
     emb = torch.exp(torch.arange(half_dim, dtype=dtype, device=device) * -emb)
 
-    # ブロードキャスト用に次元を拡張 [half_dim] -> [1, 1, 1, half_dim]
+    # Expand dimensions for broadcasting [half_dim] -> [1, 1, 1, half_dim]
     emb = emb.unsqueeze(0).unsqueeze(0).unsqueeze(0)
     coords = coords.unsqueeze(-1)  # [B, T, coord_dim] -> [B, T, coord_dim, 1]
 
-    # 各座標値に各周波数を掛ける [B, T, coord_dim, half_dim]
+    # Multiply each coordinate value by each frequency [B, T, coord_dim, half_dim]
     emb = coords * emb
 
-    # sin/cosを組み合わせて埋め込みベクトルを作成
+    # Create embedding vector by combining sin/cos
     # [sin(coord*freq1), cos(coord*freq1), sin(coord*freq2), cos(coord*freq2), ...]
     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
     emb = emb.view(batch_size, seq_len, coord_dim, embed_dim)
@@ -50,13 +50,13 @@ def get_fourier_embeds_from_coordinates(embed_dim: int, coords: torch.Tensor) ->
 
 class SelfAttention(nn.Module):
     """
-    Self-Attentionモジュール
+    Self-Attention module
 
     Args:
-        hidden_dim: 隠れ次元数
-        n_head: アテンションヘッド数
-        max_position_embeddings: 最大位置埋め込み数
-        use_rope: RoPEを使用するか
+        hidden_dim: Hidden dimension
+        n_head: Number of attention heads
+        max_position_embeddings: Maximum position embeddings
+        use_rope: Whether to use RoPE
     """
 
     def __init__(self, hidden_dim, n_head, max_position_embeddings, use_rope):
@@ -78,7 +78,7 @@ class SelfAttention(nn.Module):
         else:
             self.q_norm = self.k_norm = nn.Identity()
 
-        # RoPEを使用する場合のみLlamaRotaryEmbeddingを初期化
+        # Initialize LlamaRotaryEmbedding only when using RoPE
         if self.use_rope:
             rope_config = LlamaConfig(
                 hidden_size=hidden_dim,
@@ -101,7 +101,7 @@ class SelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
-        # use_ropeがTrueの場合のみRoPEを適用
+        # Apply RoPE only when use_rope is True
         if self.use_rope:
             position_ids = torch.arange(T, device=x.device).unsqueeze(0)
             cos, sin = self.rotary_emb(v, position_ids)
@@ -122,12 +122,12 @@ class SelfAttention(nn.Module):
 
 class SpatialTransformerBlock(nn.Module):
     """
-    空間的なTransformerブロック（RoPEなし、maskなし）
+    Spatial Transformer block (no RoPE, no mask)
 
     Args:
-        hidden_dim: 隠れ次元数
-        n_head: アテンションヘッド数
-        max_position_embeddings: 最大位置埋め込み数
+        hidden_dim: Hidden dimension
+        n_head: Number of attention heads
+        max_position_embeddings: Maximum position embeddings
     """
 
     def __init__(self, hidden_dim, n_head, max_position_embeddings):

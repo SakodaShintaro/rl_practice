@@ -172,32 +172,32 @@ class FlowMatching(nn.Module):
 
     def sample_with_log_prob(self, batch_size=64):
         device = next(self.parameters()).device
-        # t=0でベース分布からサンプルし、その対数確率を計算
+        # Sample from base distribution at t=0 and compute its log probability
         x_t = self.sample_base(torch.empty(batch_size, self.D, device=device))
-        logp = self.log_p_base(x_t, reduction="sum")  # (batch_size,)のテンソル
+        logp = self.log_p_base(x_t, reduction="sum")  # (batch_size,) tensor
 
         ts = torch.linspace(0.0, 1.0, self.T, device=device, dtype=x_t.dtype)
         delta_t = ts[1] - ts[0]
 
         for t in ts[1:]:
-            # t埋め込み
+            # t embedding
             t_emb = self.time_embedding(t.unsqueeze(0).unsqueeze(0))  # shape: (1, D)
-            # vnetは(x_t+t_emb)に対して評価
+            # vnet is evaluated at (x_t+t_emb)
             point = x_t + t_emb
             v = self.vnet(point)
-            # Euler更新
+            # Euler update
             x_t = x_t + v * delta_t
 
-            # Hutchinson推定で発散を近似（vnetの評価点はpointと同じ）
+            # Approximate divergence using Hutchinson estimator (vnet evaluation point is same as point)
             point_detached = point.detach().clone().requires_grad_(True)
             v_temp = self.vnet(point_detached)
             e = torch.randn_like(point_detached)
             grad_v = torch.autograd.grad(v_temp.sum(), point_detached, create_graph=True)[0]
             divergence = (grad_v * e).view(batch_size, -1).sum(dim=1)
-            # ODEに従い密度は-div(v)で減衰
+            # Density decays by -div(v) according to ODE
             logp = logp - divergence * delta_t
 
-        # tanhによるスカラリングとそのヤコビアン補正
+        # Scaling by tanh and its Jacobian correction
         x_final = torch.tanh(x_t)
         jacobian = torch.log(1 - x_final**2 + 1e-6)
         logp = logp - jacobian.sum(dim=1)
