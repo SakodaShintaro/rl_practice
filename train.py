@@ -1,7 +1,12 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
+import os
+import warnings
+
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
 import argparse
 import csv
-import os
 import random
 import time
 from datetime import datetime
@@ -11,6 +16,8 @@ import cv2
 import imageio
 import numpy as np
 import torch
+
+torch.set_float32_matmul_precision("high")
 
 import wandb
 from agents.off_policy import OffPolicyAgent
