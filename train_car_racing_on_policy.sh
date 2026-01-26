@@ -17,12 +17,12 @@ uv run python train.py baseline$suffix \
   --step_limit 200_000 \
   --eval_range 20 \
   --image_processor_type simple_cnn \
-  --seq_len 4 \
+  --seq_len 1 \
   --batch_size 16 \
   --learning_rate 1e-4 \
   --buffer_capacity 2048 \
   --policy_type beta \
-  --on_policy_epoch 10 \
+  --on_policy_epoch 5 \
   --disable_state_predictor 1 \
   --detach_actor 0 \
   --critic_loss_weight 2.0 \
