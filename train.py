@@ -125,6 +125,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
     parser.add_argument("--critic_block_num", type=int, default=1)
+    parser.add_argument("--separate_critic", type=int, default=0, choices=[0, 1])
     parser.add_argument("--predictor_hidden_dim", type=int, default=512)
     parser.add_argument("--predictor_block_num", type=int, default=2)
     parser.add_argument("--predictor_step_num", type=int, default=1)

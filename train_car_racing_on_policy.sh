@@ -27,3 +27,4 @@ uv run python train.py baseline$suffix \
   --detach_actor 0 \
   --critic_loss_weight 2.0 \
   --max_grad_norm 0.5 \
+  --separate_critic 1 \

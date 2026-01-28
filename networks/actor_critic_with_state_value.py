@@ -10,7 +10,7 @@ from networks.image_processor import ImageProcessor
 from networks.policy_head import BetaPolicy, CategoricalPolicy
 from networks.prediction_head import StatePredictionHead
 from networks.reward_processor import RewardProcessor
-from networks.value_head import StateValueHead
+from networks.value_head import SeparateCritic, StateValueHead
 from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder
 
 
@@ -29,6 +29,7 @@ class Network(nn.Module):
         self.observation_space_shape = observation_space_shape
         self.predictor_step_num = args.predictor_step_num
         self.critic_loss_weight = args.critic_loss_weight
+        self.separate_critic = args.separate_critic
 
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=args.image_processor_type
@@ -71,12 +72,22 @@ class Network(nn.Module):
 
         hidden_dim = self.encoder.output_dim
 
-        self.value_head = StateValueHead(
-            in_channels=hidden_dim,
-            hidden_dim=hidden_dim,
-            block_num=1,
-            num_bins=args.num_bins,
-            sparsity=0.0,
+        self.value_head = (
+            SeparateCritic(
+                observation_space_shape,
+                args.image_processor_type,
+                hidden_dim,
+                args.critic_block_num,
+                args.num_bins,
+            )
+            if self.separate_critic
+            else StateValueHead(
+                in_channels=hidden_dim,
+                hidden_dim=hidden_dim,
+                block_num=1,
+                num_bins=args.num_bins,
+                sparsity=0.0,
+            )
         )
 
         if args.policy_type == "beta":
@@ -136,7 +147,7 @@ class Network(nn.Module):
     ) -> tuple:
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
-        value_dict = self.value_head(x)
+        value_dict = self.value_head(s_seq[:, -1]) if self.separate_critic else self.value_head(x)
 
         policy_dict = self.policy_head(x, action)
 
@@ -171,7 +182,11 @@ class Network(nn.Module):
         policy_activation = policy_dict["activation"]
 
         # Get value output
-        value_dict = self.value_head(state_curr)
+        value_dict = (
+            self.value_head(data.observations[:, -1])
+            if self.separate_critic
+            else self.value_head(state_curr)
+        )
         value = value_dict["output"]
         value_activation = value_dict["activation"]
 

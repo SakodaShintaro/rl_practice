@@ -6,6 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .image_processor import ImageProcessor
+from .value_head import SeparateCritic
 from .vlm_backbone import (
     ACTION_PROMPT,
     load_model,
@@ -40,6 +41,11 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.value_min = -args.value_range
         self.value_max = +args.value_range
         self.gamma = args.gamma
+        self.separate_critic = args.separate_critic
+        self.observation_space_shape = observation_space_shape
+        self.image_processor_type = args.image_processor_type
+        self.critic_block_num = args.critic_block_num
+        self.critic_hidden_dim = args.critic_hidden_dim
 
         # Load model and processor
         assert torch.cuda.is_available(), "CUDA is required for VLM training"
@@ -57,11 +63,21 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.model.gradient_checkpointing_enable()
 
         hidden_size = int(self.model.config.text_config.hidden_size)
-        self.value_head = nn.Sequential(
-            nn.Linear(hidden_size, args.critic_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(args.critic_hidden_dim, self.num_bins),
-        ).to(device)
+        self.value_head = (
+            SeparateCritic(
+                observation_space_shape,
+                args.image_processor_type,
+                args.critic_hidden_dim,
+                args.critic_block_num,
+                args.num_bins,
+            ).to(device)
+            if self.separate_critic
+            else nn.Sequential(
+                nn.Linear(hidden_size, args.critic_hidden_dim),
+                nn.ReLU(),
+                nn.Linear(args.critic_hidden_dim, self.num_bins),
+            ).to(device)
+        )
 
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
@@ -157,11 +173,15 @@ class VLMActorCriticWithStateValue(nn.Module):
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
         print(f"{action_tensor=}, {parse_success=}")
 
-        value_logits = self.value_head(hidden)
-        if self.num_bins > 1:
-            value = self.hl_gauss_loss(value_logits).unsqueeze(-1)
-        else:
-            value = value_logits
+        value_dict = (
+            self.value_head(s_seq[:, -1])
+            if self.separate_critic
+            else {"output": self.value_head(hidden)}
+        )
+        value_logits = value_dict["output"]
+        value = (
+            self.hl_gauss_loss(value_logits).unsqueeze(-1) if self.num_bins > 1 else value_logits
+        )
 
         # log_prob is already a scalar (sum of token log probs)
         a_logp = log_prob.unsqueeze(0).unsqueeze(-1)
@@ -230,11 +250,15 @@ class VLMActorCriticWithStateValue(nn.Module):
         # Value: from prompt's last hidden state (before action tokens)
         hidden_states = outputs.hidden_states
         state_hidden = hidden_states[self.target_layer_idx][:, prompt_len - 1, :].to(torch.float32)
-        value_logits = self.value_head(state_hidden)
-        if self.num_bins > 1:
-            value = self.hl_gauss_loss(value_logits).unsqueeze(-1)
-        else:
-            value = value_logits
+        value_dict = (
+            self.value_head(images[:, -1])
+            if self.separate_critic
+            else {"output": self.value_head(state_hidden)}
+        )
+        value_logits = value_dict["output"]
+        value = (
+            self.hl_gauss_loss(value_logits).unsqueeze(-1) if self.num_bins > 1 else value_logits
+        )
 
         # Log prob: from logits predicting action tokens
         relevant_logits = outputs.logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
@@ -270,10 +294,16 @@ class VLMActorCriticWithStateValue(nn.Module):
         actor_loss = -torch.min(surr1, surr2).mean()
 
         # Critic loss
-        if self.num_bins > 1:
-            value_loss = self.hl_gauss_loss(self.value_head(hidden), curr_target_v.view(-1))
-        else:
-            value_loss = F.mse_loss(value.view(-1), curr_target_v.view(-1))
+        value_logits_for_loss = (
+            self.value_head(data.observations[:, -1])["output"]
+            if self.separate_critic
+            else self.value_head(hidden)
+        )
+        value_loss = (
+            self.hl_gauss_loss(value_logits_for_loss, curr_target_v.view(-1))
+            if self.num_bins > 1
+            else F.mse_loss(value.view(-1), curr_target_v.view(-1))
+        )
 
         total_loss = actor_loss + value_loss
 
@@ -347,11 +377,16 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         # Use _compute_value_and_log_prob, ignore log_prob
         _, hidden_next, _ = self._compute_value_and_log_prob(obs_next, rewards_next, actions_next)
-        value_logits_next = self.value_head(hidden_next)
-        if self.num_bins > 1:
-            next_value = self.hl_gauss_loss(value_logits_next)
-        else:
-            next_value = value_logits_next.view(-1)
+        value_logits_next = (
+            self.value_head(obs_next[:, -1])["output"]
+            if self.separate_critic
+            else self.value_head(hidden_next)
+        )
+        next_value = (
+            self.hl_gauss_loss(value_logits_next)
+            if self.num_bins > 1
+            else value_logits_next.view(-1)
+        )
 
         curr_reward = data.rewards[:, -1].flatten()
         curr_continue = 1 - dones_next
