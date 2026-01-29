@@ -10,9 +10,10 @@ import gymnasium as gym
 import imageio
 import numpy as np
 import torch
-from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
-from utils import concat_images, convert_to_uint8
-from wrappers import make_env
+
+from rl_practice.networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
+from rl_practice.utils import concat_images, convert_to_uint8
+from rl_practice.wrappers import make_env
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

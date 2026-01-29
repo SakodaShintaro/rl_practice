@@ -6,11 +6,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from networks.image_processor import ImageProcessor
-from networks.reward_processor import RewardProcessor
-from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
 from torchvision import transforms
+
+from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from rl_practice.networks.image_processor import ImageProcessor
+from rl_practice.networks.reward_processor import RewardProcessor
+from rl_practice.networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 

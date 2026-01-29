@@ -1,8 +1,9 @@
 import argparse
 from pathlib import Path
 
-from networks.vlm_backbone import load_model
 from qwen_vl_utils import process_vision_info
+
+from rl_practice.networks.vlm_backbone import load_model
 
 
 def parse_args() -> argparse.Namespace:
