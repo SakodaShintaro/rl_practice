@@ -19,7 +19,7 @@ uv run python train.py baseline$suffix \
   --image_processor_type simple_cnn \
   --seq_len 1 \
   --batch_size 16 \
-  --learning_rate 1e-4 \
+  --learning_rate 1e-5 \
   --buffer_capacity 2048 \
   --policy_type beta \
   --on_policy_epoch 5 \
