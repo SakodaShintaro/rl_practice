@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Four Quadrant Click Game
 Divides the screen into 4 quadrants, with 1 quadrant colored red and the rest white

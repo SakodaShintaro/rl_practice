@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import argparse
 from pathlib import Path
 

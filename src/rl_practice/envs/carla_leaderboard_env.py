@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import time
 from dataclasses import dataclass
 

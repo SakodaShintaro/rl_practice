@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Letter Tracing Game
 Displays a-z letters in light gray, and the player traces the same shape by mouse dragging

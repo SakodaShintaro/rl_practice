@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Sparse network utilities for implementing one-shot random pruning
 based on "Network Sparsity Unlocks the Scaling Potential of Deep Reinforcement Learning"

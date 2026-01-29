@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import torch
 from diffusers.models import AutoencoderTiny
 from torch import nn

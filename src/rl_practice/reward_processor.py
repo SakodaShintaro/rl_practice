@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import gymnasium as gym
 import numpy as np
 import torch

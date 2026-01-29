@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Script to crop only the left side (environment part) of videos
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Four Quadrant Game - Implemented with numpy without Pygame
 Screen divided into 4 quadrants, 1 is red, others are white

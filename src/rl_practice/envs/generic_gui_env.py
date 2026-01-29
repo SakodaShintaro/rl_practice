@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Generic Gymnasium environment wrapper for GUI + mouse operations
 

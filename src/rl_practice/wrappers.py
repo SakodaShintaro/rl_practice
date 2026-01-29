@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import cv2
 import gymnasium as gym
 import minigrid

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Script for analyzing episode videos using QwenVL to generate text about failure causes and lessons learned
 """
