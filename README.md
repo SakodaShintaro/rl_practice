@@ -2,13 +2,9 @@
 
 Reinforcement learning experiments with visual observations.
 
-## Requirements
-
-- Python 3.12
-- NVIDIA GPU with driver installed (CUDA libraries are bundled with PyTorch)
-- uv
-
 ## Installation
+
+NVIDIA GPU with driver is required for training.
 
 ### Install uv
 
