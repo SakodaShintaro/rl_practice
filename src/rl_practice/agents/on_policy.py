@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from torch import nn, optim
 
-from rl_practice.metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
 from rl_practice.networks.actor_critic_with_action_value import Network as ActionValueNetwork
 from rl_practice.networks.actor_critic_with_state_value import Network as StateValueNetwork
 from rl_practice.networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue

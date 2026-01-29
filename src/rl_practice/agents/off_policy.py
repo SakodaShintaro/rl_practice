@@ -2,7 +2,6 @@
 import numpy as np
 import torch
 from torch import optim
-from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
 from rl_practice.networks.actor_critic_with_action_value import Network
 from rl_practice.replay_buffer import ReplayBuffer

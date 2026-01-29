@@ -2,7 +2,6 @@
 import numpy as np
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from .image_processor import ImageProcessor
 from .reward_processor import RewardProcessor
