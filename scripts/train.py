@@ -20,10 +20,10 @@ import torch
 torch.set_float32_matmul_precision("high")
 
 import wandb
-from agents.off_policy import OffPolicyAgent
-from agents.on_policy import OnPolicyAgent
-from utils import concat_labeled_images, create_reward_image
-from wrappers import make_env
+from rl_practice.agents.off_policy import OffPolicyAgent
+from rl_practice.agents.on_policy import OnPolicyAgent
+from rl_practice.utils import concat_labeled_images, create_reward_image
+from rl_practice.wrappers import make_env
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -197,7 +197,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     # Create result directories and save files only if not in debug mode
     if not args.debug:
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = Path(__file__).resolve().parent / "results" / f"{datetime_str}_{exp_name}"
+        result_dir = Path(__file__).resolve().parent.parent / "results" / f"{datetime_str}_{exp_name}"
         result_dir.mkdir(parents=True, exist_ok=True)
 
         # save seed to file

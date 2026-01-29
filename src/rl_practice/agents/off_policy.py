@@ -3,9 +3,9 @@ import torch
 from torch import optim
 from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
-from networks.actor_critic_with_action_value import Network
-from replay_buffer import ReplayBuffer
-from reward_processor import RewardProcessor
+from rl_practice.networks.actor_critic_with_action_value import Network
+from rl_practice.replay_buffer import ReplayBuffer
+from rl_practice.reward_processor import RewardProcessor
 
 
 class OffPolicyAgent:

@@ -4,7 +4,7 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-uv run python train.py baseline$suffix \
+uv run python scripts/train.py baseline$suffix \
   --env_id CarRacing-v3 \
   --agent_type off_policy \
   --network_class actor_critic_with_action_value \

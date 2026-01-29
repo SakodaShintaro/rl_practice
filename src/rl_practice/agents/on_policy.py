@@ -2,12 +2,12 @@ import numpy as np
 import torch
 from torch import nn, optim
 
-from metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
-from networks.actor_critic_with_action_value import Network as ActionValueNetwork
-from networks.actor_critic_with_state_value import Network as StateValueNetwork
-from networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue
-from replay_buffer import ReplayBuffer, ReplayBufferData
-from reward_processor import RewardProcessor
+from rl_practice.metrics.compute_norm import compute_gradient_norm, compute_parameter_norm
+from rl_practice.networks.actor_critic_with_action_value import Network as ActionValueNetwork
+from rl_practice.networks.actor_critic_with_state_value import Network as StateValueNetwork
+from rl_practice.networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue
+from rl_practice.replay_buffer import ReplayBuffer, ReplayBufferData
+from rl_practice.reward_processor import RewardProcessor
 
 
 class SequentialBatchSampler:

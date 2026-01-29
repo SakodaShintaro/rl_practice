@@ -5,13 +5,13 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
-from networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from networks.image_processor import ImageProcessor
-from networks.policy_head import BetaPolicy, CategoricalPolicy
-from networks.prediction_head import StatePredictionHead
-from networks.reward_processor import RewardProcessor
-from networks.value_head import SeparateCritic, StateValueHead
-from networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder
+from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from rl_practice.networks.image_processor import ImageProcessor
+from rl_practice.networks.policy_head import BetaPolicy, CategoricalPolicy
+from rl_practice.networks.prediction_head import StatePredictionHead
+from rl_practice.networks.reward_processor import RewardProcessor
+from rl_practice.networks.value_head import SeparateCritic, StateValueHead
+from rl_practice.networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder
 
 
 class Network(nn.Module):

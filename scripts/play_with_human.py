@@ -14,10 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from generic_gui_env import GenericGUIEnv, activate_window, create_score_reward_detector
 from PIL import Image
 from pynput import mouse
-
-from generic_gui_env import GenericGUIEnv, activate_window, create_score_reward_detector
 
 
 def parse_args():

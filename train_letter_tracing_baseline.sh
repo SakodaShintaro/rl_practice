@@ -3,7 +3,7 @@ set -eux
 
 suffix=${1:-""}
 cd $(dirname $0)
-uv run python train.py baseline$suffix \
+uv run python scripts/train.py baseline$suffix \
   --env_id LetterTracing-v0 \
   --agent_type off_policy \
   --action_norm_penalty 0.0 \
