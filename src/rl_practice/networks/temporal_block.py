@@ -347,23 +347,11 @@ def IdentityBlock(hidden_dim):
 
 
 if __name__ == "__main__":
-    # Adjust import path to run directly from networks directory
-    import sys
-    from pathlib import Path
-
-    # Add parent directory (rl_practice) to sys.path
-    current_dir = Path(__file__).parent
-    parent_dir = current_dir.parent
-    sys.path.insert(0, str(parent_dir))
-
-    # Reload with absolute import instead of relative import
-    from networks.self_attention import SelfAttention
-
     # Verification
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    B, T, C = 2, 10, 16
+    B, T, C = 2, 10, 32
     x = torch.randn(B, T, C, device=device)
 
     hidden_dim = C
@@ -399,7 +387,7 @@ if __name__ == "__main__":
 
     # GdnBlock
     print("\n=== GdnBlock ===")
-    gdn_block = GdnBlock(hidden_dim, n_head).to(device)
+    gdn_block = GdnBlock(hidden_dim).to(device)
     rnn_state = torch.zeros(1, B, gdn_block.get_rnn_state_size(), device=device)
     out, new_rnn_state = gdn_block(x, rnn_state)
     print(f"output shape: {out.shape}")
