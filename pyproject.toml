@@ -3,6 +3,8 @@ name = "rl-practice"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Shintaro Sakoda" }]
 dependencies = [
     "gymnasium[box2d]",
     "gymnasium[mujoco]",
