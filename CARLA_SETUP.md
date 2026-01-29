@@ -1,33 +1,33 @@
-# CARLA環境のセットアップ
+# CARLA Environment Setup
 
-## セットアップ
+## Setup
 
 ```bash
-# 以下からバイナリダウンロードして$HOMEに展開
+# Download binary from the following URL and extract to $HOME
 https://github.com/carla-simulator/carla/releases
 
-# 依存関係インストール
+# Install dependencies
 pip install ~/CARLA_0.9.16/PythonAPI/carla/dist/carla-0.9.16-cp310-cp310-manylinux_2_31_x86_64.whl
 ```
 
-## 使用方法
+## Usage
 
 ```bash
-# ターミナル1: CARLAサーバー起動
+# Terminal 1: Start CARLA server
 cd ~/CARLA_0.9.16
 ./CarlaUE4.sh -quality-level=Low
 
-# ターミナル2: 学習実行
+# Terminal 2: Run training
 ./train_carla_off_policy.sh
 ```
 
-## トラブルシューティング
+## Troubleshooting
 
 ```bash
-# CARLAサーバー確認
+# Check CARLA server
 ps aux | grep CarlaUE4
 lsof -i :2000
 
-# CARLAパッケージ確認
+# Check CARLA package
 python -c "import carla; print(carla.__version__)"
 ```
