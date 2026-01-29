@@ -1,39 +1,78 @@
 # rl_practice
 
-## 環境構築
+Reinforcement learning experiments with visual observations.
 
-### 必要なものをインストール
+## Requirements
+
+- Python 3.12
+- NVIDIA GPU with driver installed (CUDA libraries are bundled with PyTorch)
+- uv
+
+## Installation
+
+### Install uv
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Install system dependencies
 
 ```bash
 sudo apt update
-sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils python3.10-venv
+sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils
 ```
 
-## venv利用
+### Setup project
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-./setup.sh
+uv sync
 ```
+
+### Login to Hugging Face (for model downloads)
 
 ```bash
-huggingface-cli login
+uv run huggingface-cli login
 ```
 
-## Blackwellの場合
+## Usage
+
+### Training
 
 ```bash
-pip3 install -U torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+./train_car_racing_on_policy.sh
 ```
 
-## 利用可能なMiniGrid-Memory
+### Testing
 
 ```bash
-  - MiniGrid-MemoryS7-v0
-  - MiniGrid-MemoryS9-v0
-  - MiniGrid-MemoryS11-v0
-  - MiniGrid-MemoryS13-v0
-  - MiniGrid-MemoryS13Random-v0
-  - MiniGrid-MemoryS17Random-v0
+./test.sh
 ```
+
+## Project Structure
+
+```bash
+rl_practice/
+├── src/rl_practice/     # Library code
+│   ├── agents/          # RL agents (on-policy, off-policy)
+│   ├── envs/            # Custom environments
+│   ├── networks/        # Neural network architectures
+│   ├── metrics/         # Metrics computation
+│   └── optimizers/      # Custom optimizers
+├── scripts/             # Executable scripts
+│   └── train.py         # Main training script
+└── train_*.sh           # Training shell scripts
+```
+
+## Available Environments
+
+- CarRacing-v3
+- MiniGrid-MemoryS7-v0
+- MiniGrid-MemoryS9-v0
+- MiniGrid-MemoryS11-v0
+- MiniGrid-MemoryS13-v0
+- MiniGrid-MemoryS13Random-v0
+- MiniGrid-MemoryS17Random-v0
+- CARLA-Leaderboard-v0
+- LetterTracing-v0
+- FourQuadrant-v0
