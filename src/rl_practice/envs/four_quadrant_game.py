@@ -17,14 +17,14 @@ STATE_SHOW_SCORE = "SHOW_SCORE"
 STATE_WAITING = "WAITING"
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--time_limit", type=int)
+    parser.add_argument("--time_limit_sec", type=int, default=5)
     return parser.parse_args()
 
 
 class FourQuadrantGame:
-    def __init__(self, time_limit):
+    def __init__(self, time_limit_sec: int) -> None:
         pygame.init()
 
         # Fixed values
@@ -61,7 +61,7 @@ class FourQuadrantGame:
         self.waiting_duration = 200
 
         # Time limit (milliseconds)
-        self.time_limit = time_limit if time_limit is not None else 3000
+        self.time_limit_msec = time_limit_sec * 1000
         self.start_time = 0
 
         # Cooldown period (time to disable judgment after score display, milliseconds)
@@ -74,7 +74,7 @@ class FourQuadrantGame:
         # Generate a new question
         self.new_question()
 
-    def new_question(self):
+    def new_question(self) -> None:
         """Generate a new question"""
         # Randomly select one quadrant
         self.correct_quadrant = random.randint(0, 3)
@@ -88,7 +88,7 @@ class FourQuadrantGame:
         # Set cooldown period (wait a bit after score display ends)
         self.cooldown_end_time = pygame.time.get_ticks() + self.cooldown_duration
 
-    def handle_events(self):
+    def handle_events(self) -> bool:
         """Event processing"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -115,7 +115,7 @@ class FourQuadrantGame:
 
         return True
 
-    def _on_click(self, pos):
+    def _on_click(self, pos: tuple[int, int]) -> None:
         """Process click event"""
         # Determine which quadrant was clicked
         clicked_quadrant = None
@@ -134,7 +134,13 @@ class FourQuadrantGame:
         self.state = STATE_SHOW_SCORE
         self.state_timer = pygame.time.get_ticks()
 
-    def update(self):
+    def _on_timeout(self) -> None:
+        """Process when time limit is reached"""
+        self.score = -1.0
+        self.state = STATE_SHOW_SCORE
+        self.state_timer = pygame.time.get_ticks()
+
+    def update(self) -> None:
         """Update game state"""
         current_time = pygame.time.get_ticks()
 
@@ -147,8 +153,12 @@ class FourQuadrantGame:
             # In no-red state
             if current_time - self.state_timer > self.waiting_duration:
                 self.new_question()
+        elif self.state == STATE_PLAYING:
+            # Time limit check
+            if current_time - self.start_time > self.time_limit_msec:
+                self._on_timeout()
 
-    def draw(self):
+    def draw(self) -> None:
         """Draw screen"""
         # Fill background with white
         self.screen.fill(self.WHITE)
@@ -171,7 +181,7 @@ class FourQuadrantGame:
 
         pygame.display.flip()
 
-    def _draw_score(self):
+    def _draw_score(self) -> None:
         """Display score at screen center"""
         # Rectangle for score display (yellow background)
         score_box_width = 150
@@ -202,7 +212,7 @@ class FourQuadrantGame:
         )
         self.screen.blit(score_text_surface, score_text_rect)
 
-    def get_screen_array(self):
+    def get_screen_array(self) -> np.ndarray:
         """Get screen as numpy array (for Gymnasium environment)"""
         # Convert Pygame screen to numpy array
         array = pygame.surfarray.array3d(self.screen)
@@ -210,7 +220,7 @@ class FourQuadrantGame:
         array = np.transpose(array, (1, 0, 2))
         return array
 
-    def run(self):
+    def run(self) -> None:
         """Game loop"""
         running = True
         while running:
@@ -224,5 +234,5 @@ class FourQuadrantGame:
 
 if __name__ == "__main__":
     args = parse_args()
-    game = FourQuadrantGame(args.time_limit)
+    game = FourQuadrantGame(args.time_limit_sec)
     game.run()
