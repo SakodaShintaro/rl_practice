@@ -146,7 +146,7 @@ class FourQuadrantGame:
         elif self.state == STATE_WAITING:
             # In no-red state
             if current_time - self.state_timer > self.waiting_duration:
-                self.state = STATE_PLAYING
+                self.new_question()
 
     def draw(self):
         """Draw screen"""
