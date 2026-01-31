@@ -56,6 +56,7 @@ class OnPolicyAgent:
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
         self.batch_size = args.batch_size
+        self.accumulation_steps = args.accumulation_steps
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
         self.network_class = args.network_class
@@ -288,6 +289,8 @@ class OnPolicyAgent:
         for _ in range(self.on_policy_epoch):
             sum_action_loss = 0.0
             sum_value_loss = 0.0
+            self.optimizer.zero_grad()
+            batch_idx = 0
             for indices in SequentialBatchSampler(
                 self.buffer_capacity - 1,
                 self.batch_size,
@@ -327,9 +330,8 @@ class OnPolicyAgent:
                 sum_action_loss += info_dict.get("actor_loss", 0.0) * len(data.observations)
                 sum_value_loss += info_dict["critic_loss"] * len(data.observations)
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+                scaled_loss = loss / self.accumulation_steps
+                scaled_loss.backward()
 
                 # Collect metrics on the first batch only
                 if is_first_batch:
@@ -338,10 +340,13 @@ class OnPolicyAgent:
                         metrics_dict[f"activation_norms/{feature_name}"] = (
                             feature.norm(dim=1).mean().item()
                         )
-
                     is_first_batch = False
 
-                self.optimizer.step()
+                batch_idx += 1
+                if batch_idx % self.accumulation_steps == 0:
+                    nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
 
             ave_action_loss = sum_action_loss / self.buffer_capacity
             ave_value_loss = sum_value_loss / self.buffer_capacity
