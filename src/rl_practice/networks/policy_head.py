@@ -81,6 +81,12 @@ class DiffusionPolicy(nn.Module):
     def forward(
         self, a: torch.Tensor, t: torch.Tensor, state: torch.Tensor
     ) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            a: flattened action (B, horizon * action_dim)
+            t: timestep (B,)
+            state: state embedding (B, state_dim)
+        """
         result_dict = {}
 
         t = self.t_embedder(t)
@@ -120,42 +126,6 @@ class DiffusionPolicy(nn.Module):
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
-
-    def compute_loss(self, x: torch.Tensor, target_action: torch.Tensor) -> dict[str, torch.Tensor]:
-        """
-        Compute flow matching loss for training.
-
-        Args:
-            x: state embedding (B, state_dim)
-            target_action: target action chunk (B, horizon, action_dim)
-
-        Returns:
-            dict with "loss" and "activation"
-        """
-        bs = target_action.size(0)
-        target_action_flat = target_action.view(bs, -1)  # (B, horizon * action_dim)
-
-        # Sample random timestep
-        t = torch.rand((bs,), device=x.device) * self.denoising_time
-
-        # Sample noise
-        noise = torch.randn_like(target_action_flat)
-
-        # Noisy action at time t: x_t = (1 - t/T) * noise + (t/T) * target
-        t_ratio = (t / self.denoising_time).view(-1, 1)
-        noisy_action = (1 - t_ratio) * noise + t_ratio * target_action_flat
-
-        # Target velocity: (target - noise) / T
-        target_v = (target_action_flat - noise) / self.denoising_time
-
-        # Predict velocity
-        result = self.forward(noisy_action, t, x)
-        pred_v = result["output"]
-
-        # MSE loss
-        loss = F.mse_loss(pred_v, target_v)
-
-        return {"loss": loss, "activation": result["activation"]}
 
 
 class CFGDiffusionPolicy(nn.Module):
@@ -210,7 +180,7 @@ class CFGDiffusionPolicy(nn.Module):
     ) -> dict[str, torch.Tensor]:
         """
         Args:
-            a: action (B, action_dim)
+            a: flattened action (B, horizon * action_dim)
             t: timestep (B,)
             state: state embedding (B, state_dim)
             condition: condition I (B,) - 0=negative, 1=positive, 2=unconditional
@@ -276,49 +246,6 @@ class CFGDiffusionPolicy(nn.Module):
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p
-
-    def compute_loss(
-        self, x: torch.Tensor, target_action: torch.Tensor, advantage: torch.Tensor
-    ) -> dict[str, torch.Tensor]:
-        """
-        Compute flow matching loss with CFG for training.
-
-        Args:
-            x: state embedding (B, state_dim)
-            target_action: target action chunk (B, horizon, action_dim)
-            advantage: advantage values (B, 1) for condition label
-
-        Returns:
-            dict with "loss" and "activation"
-        """
-        bs = target_action.size(0)
-        device = x.device
-        target_action_flat = target_action.view(bs, -1)  # (B, horizon * action_dim)
-
-        # Sample random timestep
-        t = torch.rand((bs,), device=device) * self.denoising_time
-
-        # Sample noise
-        noise = torch.randn_like(target_action_flat)
-
-        # Noisy action at time t
-        t_ratio = (t / self.denoising_time).view(-1, 1)
-        noisy_action = (1 - t_ratio) * noise + t_ratio * target_action_flat
-
-        # Target velocity
-        target_v = (target_action_flat - noise) / self.denoising_time
-
-        # Condition label based on advantage: positive (1) if adv > 0, negative (0) otherwise
-        condition = (advantage.squeeze(1) > 0).long()
-
-        # Predict velocity with condition
-        result = self.forward(noisy_action, t, x, condition)
-        pred_v = result["output"]
-
-        # MSE loss
-        loss = F.mse_loss(pred_v, target_v)
-
-        return {"loss": loss, "activation": result["activation"]}
 
 
 class BetaPolicy(nn.Module):

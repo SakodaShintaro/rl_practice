@@ -297,21 +297,58 @@ class Network(nn.Module):
         for param in self.value_head.parameters():
             param.requires_grad_(True)
 
-        # Flow matching loss with target action chunk
-        flow_loss_dict = self.policy_head.compute_loss(state_curr, target_action_chunk)
-        flow_loss = flow_loss_dict["loss"]
+        # DACER2 loss (https://arxiv.org/abs/2505.23426)
+        batch_size = action.shape[0]
+        device = action.device
+        # Flatten action chunk for gradient computation: (B, horizon, action_dim) -> (B, horizon * action_dim)
+        action_flat = action.view(batch_size, -1)
+        actions = action_flat.clone().detach()
+        actions.requires_grad = True
+        eps = 1e-4
+        t = (torch.rand((batch_size, 1), device=device)) * (1 - eps) + eps
+        c = 0.4
+        d = -1.8
+        w_t = torch.exp(c * t + d)
+
+        def calc_target(q_network, actions_flat):
+            # Reshape back to (B, horizon, action_dim) for value_head
+            actions_chunk = actions_flat.view(batch_size, self.horizon, self.action_dim)
+            q_output_dict = q_network(state_curr, actions_chunk)
+            q_values = q_output_dict["output"]
+            if self.num_bins > 1:
+                q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
+            else:
+                q_values = q_values.unsqueeze(-1)
+            q_grad = torch.autograd.grad(
+                outputs=q_values.sum(),
+                inputs=actions_flat,
+                create_graph=True,
+            )[0]
+            with torch.no_grad():
+                target = (1 - t) / t * q_grad + 1 / t * actions_flat
+                target /= target.norm(dim=1, keepdim=True) + 1e-8
+                return w_t * target
+
+        target = calc_target(self.value_head, actions)
+        noise = torch.randn_like(actions)
+        noise = torch.clamp(noise, -3.0, 3.0)
+        a_t = (1.0 - t) * noise + t * actions
+        # Reshape a_t back to (B, horizon * action_dim) for policy_head.forward
+        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr)
+        v = actor_output_dict["output"]
+        dacer_loss = F.mse_loss(v, target)
 
         # Combine actor losses
-        total_actor_loss = actor_loss + flow_loss * self.dacer_loss_weight
+        total_actor_loss = actor_loss + dacer_loss * self.dacer_loss_weight
 
         activations_dict = {
-            "actor": flow_loss_dict["activation"],
+            "actor": actor_output_dict["activation"],
             "critic": advantage_dict["activation"],
         }
 
         info_dict = {
             "actor_loss": actor_loss.item(),
-            "dacer_loss": flow_loss.item(),
+            "dacer_loss": dacer_loss.item(),
             "log_pi": log_pi.mean().item(),
             "advantage": advantage.mean().item(),
         }
@@ -354,6 +391,9 @@ class Network(nn.Module):
         """
         CFGRL/pistar06 style conditional supervised learning
 
+        I=1 (positive) if advantage >= threshold, otherwise I=0 (negative)
+        Drop condition with condition_drop_prob probability (I=2, unconditional)
+
         Args:
             state_curr: (B, state_dim)
             action_chunk: (B, horizon, action_dim)
@@ -364,6 +404,9 @@ class Network(nn.Module):
         batch_size = state_curr.shape[0]
         device = state_curr.device
 
+        # Flatten action chunk: (B, horizon, action_dim) -> (B, horizon * action_dim)
+        action_flat = action_chunk.view(batch_size, -1)
+
         # Calculate advantage and determine condition I
         with torch.no_grad():
             advantage_dict = self.value_head.get_advantage(state_curr, action_chunk)
@@ -372,21 +415,50 @@ class Network(nn.Module):
                 advantage = self.hl_gauss_loss(advantage)
             advantage = advantage.view(-1)
 
-        # Use CFGDiffusionPolicy's compute_loss with advantage
-        flow_loss_dict = self.policy_head.compute_loss(
-            state_curr, action_chunk, advantage.unsqueeze(1)
-        )
-        actor_loss = flow_loss_dict["loss"]
+            # I = 1 if A >= median else 0 (use median as threshold)
+            threshold = advantage.median()
+            condition = (advantage >= threshold).long()
+
+            # Set to unconditional (I=2) with condition_drop_prob probability
+            drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
+            condition = torch.where(drop_mask, torch.full_like(condition, 2), condition)
+
+        # Flow Matching for conditional policy
+        eps = 1e-4
+        t = torch.rand((batch_size, 1), device=device) * (1 - eps) + eps
+
+        # Interpolation from noise to action_flat
+        noise = torch.randn_like(action_flat)
+        noise = torch.clamp(noise, -3.0, 3.0)
+        a_t = (1.0 - t) * noise + t * action_flat
+
+        # Predict velocity conditionally
+        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr, condition)
+        v_pred = actor_output_dict["output"]
+
+        # Target velocity: action_flat - noise
+        v_target = action_flat - noise
+
+        # Flow Matching loss
+        actor_loss = F.mse_loss(v_pred, v_target)
 
         activations_dict = {
-            "actor": flow_loss_dict["activation"],
+            "actor": actor_output_dict["activation"],
         }
+
+        # Calculate positive and negative ratios
+        positive_ratio = (condition == 1).float().mean().item()
+        negative_ratio = (condition == 0).float().mean().item()
+        uncond_ratio = (condition == 2).float().mean().item()
 
         info_dict = {
             "actor_loss": actor_loss.item(),
             "dacer_loss": 0.0,
             "log_pi": 0.0,
             "advantage": advantage.mean().item(),
+            "positive_ratio": positive_ratio,
+            "negative_ratio": negative_ratio,
+            "uncond_ratio": uncond_ratio,
         }
 
         return actor_loss, activations_dict, info_dict
