@@ -214,28 +214,45 @@ class Network(nn.Module):
 
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:
-        # Next state is after the first action of the chunk
-        # Slice: [1, 1+seq_len) to get seq_len frames starting from index 1
-        end_idx = 1 + self.seq_len
-        obs_next = data.observations[:, 1:end_idx]
-        obs_z_next = data.obs_z[:, 1:end_idx]
-        actions_next = data.actions[:, 1:end_idx]
-        rewards_next = data.rewards[:, 1:end_idx]
-        rnn_state_next = data.rnn_state[:, 1]  # (B, ...)
+        # For action chunking, next state is after the full horizon
+        # Shift by horizon steps
+        obs_next = data.observations[:, self.horizon :]  # (B, seq_len, ...)
+        obs_z_next = data.obs_z[:, self.horizon :]
+        actions_next = data.actions[:, self.horizon :]
+        rewards_next = data.rewards[:, self.horizon :]
+        rnn_state_next = data.rnn_state[:, self.horizon]  # (B, ...)
+
         state_next, _ = self.encoder.forward(
             obs_next, obs_z_next, actions_next, rewards_next, rnn_state_next
         )
-        next_state_actions, _ = self.policy_head.get_action(state_next)  # (B, horizon, action_dim)
+        next_state_actions, _ = self.policy_head.get_action(state_next)
         next_critic_output_dict = self.value_head(state_next, next_state_actions)
         next_critic_value = next_critic_output_dict["output"]
         if self.num_bins > 1:
             next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
         else:
             next_critic_value = next_critic_value.view(-1)
-        # Reward at first step of chunk
-        curr_reward = data.rewards[:, -self.horizon].flatten()
-        curr_continue = 1 - data.dones[:, -self.horizon].flatten()
-        target_value = curr_reward + curr_continue * self.gamma * next_critic_value
+
+        # Accumulate discounted rewards over the horizon
+        # rewards[:, -horizon:] contains rewards for the chunk
+        chunk_rewards = data.rewards[:, -self.horizon :]  # (B, horizon, 1)
+        chunk_dones = data.dones[:, -self.horizon :]  # (B, horizon)
+
+        # Compute discounted sum: r_0 + γ*r_1 + γ²*r_2 + ... + γ^{h-1}*r_{h-1}
+        batch_size = chunk_rewards.size(0)
+        device = chunk_rewards.device
+        discounted_reward = torch.zeros(batch_size, device=device)
+        gamma_power = 1.0
+        continuing = torch.ones(batch_size, device=device)
+
+        for i in range(self.horizon):
+            discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
+            gamma_power *= self.gamma
+            continuing *= 1 - chunk_dones[:, i].flatten()
+
+        # Final target: discounted_reward + γ^h * Q(s_next, a_next) if continuing
+        target_value = discounted_reward + continuing * gamma_power * next_critic_value
+
         return target_value
 
     ####################
