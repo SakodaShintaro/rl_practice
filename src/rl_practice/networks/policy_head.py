@@ -251,12 +251,12 @@ class CFGDiffusionPolicy(nn.Module):
 class BetaPolicy(nn.Module):
     def __init__(self, hidden_dim: int, action_dim: int, horizon: int) -> None:
         super().__init__()
-        assert horizon == 1, "BetaPolicy only supports horizon=1"
         self.horizon = horizon
-        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
-        self.alpha_head = nn.Linear(hidden_dim, action_dim)
-        self.beta_head = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
+        total_action_dim = action_dim * horizon
+        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.alpha_head = nn.Linear(hidden_dim, total_action_dim)
+        self.beta_head = nn.Linear(hidden_dim, total_action_dim)
 
     def forward(self, x: torch.Tensor, action: torch.Tensor | None) -> dict[str, torch.Tensor]:
         """
@@ -264,28 +264,34 @@ class BetaPolicy(nn.Module):
             x: state embedding (B, state_dim)
             action: action chunk (B, horizon, action_dim) or None for sampling
         """
+        bs = x.size(0)
         policy_x = self.policy_enc(x)
-        alpha = self.alpha_head(policy_x).exp() + 1
-        beta = self.beta_head(policy_x).exp() + 1
+        alpha = self.alpha_head(policy_x).exp() + 1  # (B, horizon * action_dim)
+        beta = self.beta_head(policy_x).exp() + 1  # (B, horizon * action_dim)
 
         dist = Beta(alpha, beta)
         if action is None:
-            action_01 = dist.sample()
+            action_01 = dist.sample()  # (B, horizon * action_dim)
             action_flat = action_01 * 2.0 - 1.0
         else:
-            # action: (B, horizon, action_dim) -> (B, action_dim)
-            action_flat = action.squeeze(1)
+            # action: (B, horizon, action_dim) -> (B, horizon * action_dim)
+            action_flat = action.view(bs, -1)
             action_01 = (action_flat + 1.0) / 2.0
 
+        # Sum log prob over all dimensions (horizon * action_dim)
+        total_action_dim = self.action_dim * self.horizon
         a_logp = (
             dist.log_prob(action_01).sum(dim=1, keepdim=True)
-            - torch.log(torch.tensor(2.0, device=policy_x.device)) * self.action_dim
+            - torch.log(torch.tensor(2.0, device=policy_x.device)) * total_action_dim
         )
 
+        # Reshape to (B, horizon, action_dim)
+        action_out = action_flat.view(bs, self.horizon, self.action_dim)
+
         return {
-            "action": action_flat.unsqueeze(1),  # (B, 1, action_dim)
+            "action": action_out,  # (B, horizon, action_dim)
             "a_logp": a_logp,
-            "entropy": dist.entropy().unsqueeze(1),
+            "entropy": dist.entropy().sum(dim=1, keepdim=True),  # sum over all dims
             "activation": policy_x,
         }
 
@@ -297,11 +303,11 @@ class BetaPolicy(nn.Module):
 class CategoricalPolicy(nn.Module):
     def __init__(self, hidden_dim: int, action_dim: int, horizon: int) -> None:
         super().__init__()
-        assert horizon == 1, "CategoricalPolicy only supports horizon=1"
         self.horizon = horizon
-        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
-        self.logits_head = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
+        self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        # Output logits for each timestep in the horizon
+        self.logits_head = nn.Linear(hidden_dim, action_dim * horizon)
 
     def forward(self, x: torch.Tensor, action: torch.Tensor | None) -> dict[str, torch.Tensor]:
         """
@@ -309,24 +315,30 @@ class CategoricalPolicy(nn.Module):
             x: state embedding (B, state_dim)
             action: action chunk (B, horizon, action_dim) or None for sampling
         """
+        bs = x.size(0)
         policy_x = self.policy_enc(x)
-        logits = self.logits_head(policy_x)
-        dist = Categorical(logits=logits)
+        logits = self.logits_head(policy_x)  # (B, horizon * action_dim)
+        logits = logits.view(bs, self.horizon, self.action_dim)  # (B, horizon, action_dim)
+
+        # Create independent categorical distribution for each timestep
+        dist = Categorical(logits=logits)  # batch shape (B, horizon)
 
         if action is None:
-            action_idx = dist.sample()
-            a_logp = dist.log_prob(action_idx).unsqueeze(1)
-            action_flat = F.one_hot(action_idx, num_classes=self.action_dim).float()
-            action_flat = action_flat * 2.0 - 1.0
+            action_idx = dist.sample()  # (B, horizon)
+            a_logp = dist.log_prob(action_idx).sum(dim=1, keepdim=True)  # sum over horizon
+            # Convert to one-hot: (B, horizon, action_dim)
+            action_onehot = F.one_hot(action_idx, num_classes=self.action_dim).float()
+            action_out = action_onehot * 2.0 - 1.0
         else:
-            # action: (B, horizon, action_dim) -> (B, action_dim)
-            action_flat = action.squeeze(1)
-            a_logp = dist.log_prob(action_flat.argmax(dim=1)).unsqueeze(1)
+            # action: (B, horizon, action_dim) - one-hot encoded
+            action_idx = action.argmax(dim=2)  # (B, horizon)
+            a_logp = dist.log_prob(action_idx).sum(dim=1, keepdim=True)  # sum over horizon
+            action_out = action
 
         return {
-            "action": action_flat.unsqueeze(1),  # (B, 1, action_dim)
+            "action": action_out,  # (B, horizon, action_dim)
             "a_logp": a_logp,
-            "entropy": dist.entropy().unsqueeze(1),
+            "entropy": dist.entropy().sum(dim=1, keepdim=True),  # sum over horizon
             "activation": policy_x,
         }
 
