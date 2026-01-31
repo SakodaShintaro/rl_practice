@@ -60,13 +60,16 @@ class DiffusionPolicy(nn.Module):
         block_num: int,
         denoising_time: float,
         sparsity: float,
+        horizon: int,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
-        self.fc_in = nn.Linear(state_dim + action_dim + time_embedding_size, hidden_dim)
+        self.horizon = horizon
+        total_action_dim = action_dim * horizon
+        self.fc_in = nn.Linear(state_dim + total_action_dim + time_embedding_size, hidden_dim)
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.fc_out = nn.Linear(hidden_dim, action_dim)
+        self.fc_out = nn.Linear(hidden_dim, total_action_dim)
         self.action_dim = action_dim
         self.step_num = 1
         self.denoising_time = denoising_time
@@ -93,11 +96,12 @@ class DiffusionPolicy(nn.Module):
         result_dict["output"] = x
         return result_dict
 
-    def get_action(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         bs = x.size(0)
+        total_action_dim = self.action_dim * self.horizon
         normal = torch.distributions.Normal(
-            torch.zeros((bs, self.action_dim), device=x.device),
-            torch.ones((bs, self.action_dim), device=x.device),
+            torch.zeros((bs, total_action_dim), device=x.device),
+            torch.ones((bs, total_action_dim), device=x.device),
         )
         action = normal.sample().to(x.device)
         action = torch.clamp(action, -3.0, 3.0)
@@ -112,9 +116,46 @@ class DiffusionPolicy(nn.Module):
             curr_time += dt
 
         action = torch.tanh(action)
+        action = action.view(bs, self.horizon, self.action_dim)
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
+
+    def compute_loss(self, x: torch.Tensor, target_action: torch.Tensor) -> dict[str, torch.Tensor]:
+        """
+        Compute flow matching loss for training.
+
+        Args:
+            x: state embedding (B, state_dim)
+            target_action: target action chunk (B, horizon, action_dim)
+
+        Returns:
+            dict with "loss" and "activation"
+        """
+        bs = target_action.size(0)
+        target_action_flat = target_action.view(bs, -1)  # (B, horizon * action_dim)
+
+        # Sample random timestep
+        t = torch.rand((bs,), device=x.device) * self.denoising_time
+
+        # Sample noise
+        noise = torch.randn_like(target_action_flat)
+
+        # Noisy action at time t: x_t = (1 - t/T) * noise + (t/T) * target
+        t_ratio = (t / self.denoising_time).view(-1, 1)
+        noisy_action = (1 - t_ratio) * noise + t_ratio * target_action_flat
+
+        # Target velocity: (target - noise) / T
+        target_v = (target_action_flat - noise) / self.denoising_time
+
+        # Predict velocity
+        result = self.forward(noisy_action, t, x)
+        pred_v = result["output"]
+
+        # MSE loss
+        loss = F.mse_loss(pred_v, target_v)
+
+        return {"loss": loss, "activation": result["activation"]}
 
 
 class CFGDiffusionPolicy(nn.Module):
@@ -134,20 +175,24 @@ class CFGDiffusionPolicy(nn.Module):
         denoising_time: float,
         sparsity: float,
         cfgrl_beta: float,
+        horizon: int,
     ) -> None:
         super().__init__()
         self.cfgrl_beta = cfgrl_beta
+        self.horizon = horizon
         time_embedding_size = 256
         condition_embedding_size = 64
+        total_action_dim = action_dim * horizon
         # Condition I embedding: 0=negative, 1=positive, 2=unconditional(dropout)
         self.condition_embedding = nn.Embedding(3, condition_embedding_size)
 
         self.fc_in = nn.Linear(
-            state_dim + action_dim + time_embedding_size + condition_embedding_size, hidden_dim
+            state_dim + total_action_dim + time_embedding_size + condition_embedding_size,
+            hidden_dim,
         )
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.fc_out = nn.Linear(hidden_dim, action_dim)
+        self.fc_out = nn.Linear(hidden_dim, total_action_dim)
         self.action_dim = action_dim
         self.step_num = 1
         self.denoising_time = denoising_time
@@ -195,10 +240,11 @@ class CFGDiffusionPolicy(nn.Module):
         """
         bs = x.size(0)
         device = x.device
+        total_action_dim = self.action_dim * self.horizon
 
         normal = torch.distributions.Normal(
-            torch.zeros((bs, self.action_dim), device=device),
-            torch.ones((bs, self.action_dim), device=device),
+            torch.zeros((bs, total_action_dim), device=device),
+            torch.ones((bs, total_action_dim), device=device),
         )
         action = normal.sample()
         action = torch.clamp(action, -3.0, 3.0)
@@ -226,22 +272,71 @@ class CFGDiffusionPolicy(nn.Module):
             curr_time += dt
 
         action = torch.tanh(action)
+        action = action.view(bs, self.horizon, self.action_dim)
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p
 
+    def compute_loss(
+        self, x: torch.Tensor, target_action: torch.Tensor, advantage: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """
+        Compute flow matching loss with CFG for training.
+
+        Args:
+            x: state embedding (B, state_dim)
+            target_action: target action chunk (B, horizon, action_dim)
+            advantage: advantage values (B, 1) for condition label
+
+        Returns:
+            dict with "loss" and "activation"
+        """
+        bs = target_action.size(0)
+        device = x.device
+        target_action_flat = target_action.view(bs, -1)  # (B, horizon * action_dim)
+
+        # Sample random timestep
+        t = torch.rand((bs,), device=device) * self.denoising_time
+
+        # Sample noise
+        noise = torch.randn_like(target_action_flat)
+
+        # Noisy action at time t
+        t_ratio = (t / self.denoising_time).view(-1, 1)
+        noisy_action = (1 - t_ratio) * noise + t_ratio * target_action_flat
+
+        # Target velocity
+        target_v = (target_action_flat - noise) / self.denoising_time
+
+        # Condition label based on advantage: positive (1) if adv > 0, negative (0) otherwise
+        condition = (advantage.squeeze(1) > 0).long()
+
+        # Predict velocity with condition
+        result = self.forward(noisy_action, t, x, condition)
+        pred_v = result["output"]
+
+        # MSE loss
+        loss = F.mse_loss(pred_v, target_v)
+
+        return {"loss": loss, "activation": result["activation"]}
+
 
 class BetaPolicy(nn.Module):
-    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+    def __init__(self, hidden_dim: int, action_dim: int, horizon: int) -> None:
         super().__init__()
+        assert horizon == 1, "BetaPolicy only supports horizon=1"
+        self.horizon = horizon
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
         self.alpha_head = nn.Linear(hidden_dim, action_dim)
         self.beta_head = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
 
-    def forward(
-        self, x: torch.Tensor, action: torch.Tensor | None = None
-    ) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor, action: torch.Tensor | None) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            x: state embedding (B, state_dim)
+            action: action chunk (B, horizon, action_dim) or None for sampling
+        """
         policy_x = self.policy_enc(x)
         alpha = self.alpha_head(policy_x).exp() + 1
         beta = self.beta_head(policy_x).exp() + 1
@@ -249,9 +344,11 @@ class BetaPolicy(nn.Module):
         dist = Beta(alpha, beta)
         if action is None:
             action_01 = dist.sample()
-            action = action_01 * 2.0 - 1.0
+            action_flat = action_01 * 2.0 - 1.0
         else:
-            action_01 = (action + 1.0) / 2.0
+            # action: (B, horizon, action_dim) -> (B, action_dim)
+            action_flat = action.squeeze(1)
+            action_01 = (action_flat + 1.0) / 2.0
 
         a_logp = (
             dist.log_prob(action_01).sum(dim=1, keepdim=True)
@@ -259,7 +356,7 @@ class BetaPolicy(nn.Module):
         )
 
         return {
-            "action": action,
+            "action": action_flat.unsqueeze(1),  # (B, 1, action_dim)
             "a_logp": a_logp,
             "entropy": dist.entropy().unsqueeze(1),
             "activation": policy_x,
@@ -271,15 +368,20 @@ class BetaPolicy(nn.Module):
 
 
 class CategoricalPolicy(nn.Module):
-    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+    def __init__(self, hidden_dim: int, action_dim: int, horizon: int) -> None:
         super().__init__()
+        assert horizon == 1, "CategoricalPolicy only supports horizon=1"
+        self.horizon = horizon
         self.policy_enc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
         self.logits_head = nn.Linear(hidden_dim, action_dim)
         self.action_dim = action_dim
 
-    def forward(
-        self, x: torch.Tensor, action: torch.Tensor | None = None
-    ) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor, action: torch.Tensor | None) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            x: state embedding (B, state_dim)
+            action: action chunk (B, horizon, action_dim) or None for sampling
+        """
         policy_x = self.policy_enc(x)
         logits = self.logits_head(policy_x)
         dist = Categorical(logits=logits)
@@ -287,14 +389,20 @@ class CategoricalPolicy(nn.Module):
         if action is None:
             action_idx = dist.sample()
             a_logp = dist.log_prob(action_idx).unsqueeze(1)
-            action = F.one_hot(action_idx, num_classes=self.action_dim).float()
-            action = action * 2.0 - 1.0
+            action_flat = F.one_hot(action_idx, num_classes=self.action_dim).float()
+            action_flat = action_flat * 2.0 - 1.0
         else:
-            a_logp = dist.log_prob(action.argmax(dim=1)).unsqueeze(1)
+            # action: (B, horizon, action_dim) -> (B, action_dim)
+            action_flat = action.squeeze(1)
+            a_logp = dist.log_prob(action_flat.argmax(dim=1)).unsqueeze(1)
 
         return {
-            "action": action,
+            "action": action_flat.unsqueeze(1),  # (B, 1, action_dim)
             "a_logp": a_logp,
             "entropy": dist.entropy().unsqueeze(1),
             "activation": policy_x,
         }
+
+    def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        result = self.forward(x, None)
+        return result["action"], result["a_logp"]

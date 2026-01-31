@@ -72,6 +72,7 @@ class Network(nn.Module):
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
         hidden_dim = self.encoder.output_dim
+        self.horizon = args.horizon
 
         self.value_head = (
             SeparateCritic(
@@ -92,9 +93,9 @@ class Network(nn.Module):
         )
 
         if args.policy_type == "beta":
-            self.policy_head = BetaPolicy(hidden_dim, self.action_dim)
+            self.policy_head = BetaPolicy(hidden_dim, self.action_dim, args.horizon)
         elif args.policy_type == "categorical":
-            self.policy_head = CategoricalPolicy(hidden_dim, self.action_dim)
+            self.policy_head = CategoricalPolicy(hidden_dim, self.action_dim, args.horizon)
         else:
             raise ValueError("Invalid policy type")
 
@@ -144,8 +145,8 @@ class Network(nn.Module):
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
-        action: torch.Tensor | None,  # (B, action_dim) or None
-    ) -> tuple:
+        action: torch.Tensor | None,  # (B, horizon, action_dim) or None
+    ) -> dict:
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         value_dict = self.value_head(s_seq[:, -1]) if self.separate_critic else self.value_head(x)
@@ -153,10 +154,10 @@ class Network(nn.Module):
         policy_dict = self.policy_head(x, action)
 
         return {
-            "action": policy_dict["action"],  # (B, action_dim)
+            "action": policy_dict["action"],  # (B, horizon, action_dim)
             "a_logp": policy_dict["a_logp"],  # (B, 1)
             "entropy": policy_dict["entropy"],  # (B, 1)
-            "value": value_dict["output"],  # (B, 1)
+            "value": value_dict["output"],  # (B, num_bins) or (B, 1)
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (B, ...)
             "action_token_ids": [],  # empty for non-VLM networks
@@ -164,27 +165,27 @@ class Network(nn.Module):
         }
 
     def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:
-        # Encode state
-        obs_curr = data.observations[:, :-1]
-        obs_z_curr = data.obs_z[:, :-1]
-        actions_curr = data.actions[:, :-1]
-        rewards_curr = data.rewards[:, :-1]
-        rnn_state_curr = data.rnn_state[:, :-1]
-        rnn_state_curr = rnn_state_curr[:, 0]
+        # Encode state: use seq_len frames (excluding last horizon frames)
+        obs_curr = data.observations[:, : -self.horizon]
+        obs_z_curr = data.obs_z[:, : -self.horizon]
+        actions_curr = data.actions[:, : -self.horizon]
+        rewards_curr = data.rewards[:, : -self.horizon]
+        rnn_state_curr = data.rnn_state[:, 0]
 
         state_curr, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
         )
 
-        # Get policy output
-        policy_dict = self.policy_head(state_curr, action=data.actions[:, -1])
+        # Get policy output with action chunk (B, horizon, action_dim)
+        target_actions = data.actions[:, -self.horizon :]
+        policy_dict = self.policy_head(state_curr, action=target_actions)
         a_logp = policy_dict["a_logp"]
         entropy = policy_dict["entropy"]
         policy_activation = policy_dict["activation"]
 
-        # Get value output
+        # Get value output (state value at chunk start, i.e., last frame of input sequence)
         value_dict = (
-            self.value_head(data.observations[:, -1])
+            self.value_head(obs_curr[:, -1])
             if self.separate_critic
             else self.value_head(state_curr)
         )
@@ -192,7 +193,7 @@ class Network(nn.Module):
         value_activation = value_dict["activation"]
 
         # Compute policy loss
-        ratio = torch.exp(a_logp - data.log_probs[:, -1])
+        ratio = torch.exp(a_logp - data.log_probs[:, -self.horizon])
         surr1 = ratio * curr_adv
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip_param_policy, 1.0 + self.clip_param_policy)
@@ -206,8 +207,8 @@ class Network(nn.Module):
         else:
             value_clipped = torch.clamp(
                 value,
-                data.values[:, -1] - self.clip_param_value,
-                data.values[:, -1] + self.clip_param_value,
+                data.values[:, -self.horizon] - self.clip_param_value,
+                data.values[:, -self.horizon] + self.clip_param_value,
             )
             value_loss_unclipped = F.mse_loss(value, curr_target_v)
             value_loss_clipped = F.mse_loss(value_clipped, curr_target_v)

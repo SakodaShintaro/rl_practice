@@ -32,6 +32,11 @@ class OffPolicyAgent:
 
         # Sequence observation management
         self.seq_len = args.seq_len
+        self.horizon = args.horizon
+
+        # Action chunking state
+        self.action_chunk = None  # (horizon, action_dim) - current action chunk
+        self.chunk_step = 0  # current step within chunk
 
         if args.network_class == "actor_critic_with_action_value":
             self.network = Network(
@@ -47,7 +52,7 @@ class OffPolicyAgent:
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
             size=args.buffer_size,
-            seq_len=self.seq_len + 1,
+            seq_len=self.seq_len + self.horizon,
             obs_shape=observation_space.shape,
             obs_z_shape=obs_z_shape,
             rnn_state_shape=self.rnn_state.squeeze(0).shape,
@@ -67,6 +72,11 @@ class OffPolicyAgent:
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
+
+        # Reset chunk on episode boundary
+        if terminated or truncated:
+            self.action_chunk = None
+            self.chunk_step = 0
 
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
@@ -95,7 +105,21 @@ class OffPolicyAgent:
             [],
         )
 
-        # inference
+        # Use cached action from chunk if available (except during random exploration)
+        if (
+            global_step >= self.learning_starts
+            and self.action_chunk is not None
+            and self.chunk_step < self.horizon
+        ):
+            action = self.action_chunk[self.chunk_step]
+            action = action * self.action_scale + self.action_bias
+            action = np.clip(action, self.action_low, self.action_high)
+            self.prev_action = action
+            self.chunk_step += 1
+            info_dict["chunk_step"] = self.chunk_step
+            return action, info_dict
+
+        # inference - predict new action chunk
         latest_data = self.rb.get_latest(self.seq_len)
         infer_dict = self.network.infer(
             latest_data.observations,
@@ -109,8 +133,16 @@ class OffPolicyAgent:
         # action
         if global_step < self.learning_starts:
             action = self.action_space.sample()
+            self.action_chunk = None
+            self.chunk_step = 0
         else:
-            action = infer_dict["action"][0].cpu().numpy()
+            # action chunk: (B, horizon, action_dim) -> (horizon, action_dim)
+            action_chunk = infer_dict["action"][0].cpu().numpy()
+            self.action_chunk = action_chunk
+            self.chunk_step = 1
+
+            # Use first action from chunk
+            action = action_chunk[0]
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
         self.prev_action = action
@@ -124,6 +156,7 @@ class OffPolicyAgent:
             info_dict["next_image"] = next_image
             info_dict["next_reward"] = next_reward
 
+        info_dict["chunk_step"] = self.chunk_step
         return action, info_dict
 
     def step(

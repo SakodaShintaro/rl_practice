@@ -71,6 +71,7 @@ class Network(nn.Module):
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
+        self.horizon = args.horizon
         self.policy_type = args.policy_type
         if self.policy_type == "diffusion":
             self.policy_head = DiffusionPolicy(
@@ -80,11 +81,13 @@ class Network(nn.Module):
                 block_num=args.actor_block_num,
                 denoising_time=args.denoising_time,
                 sparsity=args.sparsity,
+                horizon=args.horizon,
             )
         elif self.policy_type == "beta":
             self.policy_head = BetaPolicy(
                 hidden_dim=self.encoder.output_dim,
                 action_dim=action_dim,
+                horizon=args.horizon,
             )
         elif self.policy_type == "cfgrl":
             self.policy_head = CFGDiffusionPolicy(
@@ -95,10 +98,12 @@ class Network(nn.Module):
                 denoising_time=args.denoising_time,
                 sparsity=args.sparsity,
                 cfgrl_beta=1.5,
+                horizon=args.horizon,
             )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=action_dim,
+            horizon=args.horizon,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
             num_bins=self.num_bins,
@@ -143,15 +148,15 @@ class Network(nn.Module):
     ) -> dict:
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
-        # Get action from policy_head
-        action, a_logp = self.policy_head.get_action(x)
+        # Get action chunk from policy_head
+        action, a_logp = self.policy_head.get_action(x)  # (B, horizon, action_dim)
 
         # Get action-value from value_head
         q_dict = self.value_head(x, action)
         q_value = q_dict["output"]  # (B, 1) or (B, num_bins)
 
         return {
-            "action": action,  # (B, action_dim)
+            "action": action,  # (B, horizon, action_dim)
             "a_logp": a_logp,  # (B, 1)
             "value": q_value,  # (B, 1) or (B, num_bins)
             "x": x,  # (B, hidden_dim)
@@ -161,29 +166,32 @@ class Network(nn.Module):
         }
 
     def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
-        obs_curr = data.observations[:, :-1]
-        obs_z_curr = data.obs_z[:, :-1]
-        actions_curr = data.actions[:, :-1]
-        rewards_curr = data.rewards[:, :-1]
-        rnn_state_curr = data.rnn_state[:, :-1]  # (B, T-1, ...)
-        rnn_state_curr = rnn_state_curr[:, 0]  # (B, ...)
+        # Use seq_len frames (excluding last horizon frames)
+        obs_curr = data.observations[:, : -self.horizon]
+        obs_z_curr = data.obs_z[:, : -self.horizon]
+        actions_curr = data.actions[:, : -self.horizon]
+        rewards_curr = data.rewards[:, : -self.horizon]
+        rnn_state_curr = data.rnn_state[:, 0]  # (B, ...)
 
         state_curr, _ = self.encoder.forward(
             obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
         )  # (B, state_dim)
 
-        action_curr = data.actions[:, -1]  # (B, action_dim)
+        # Action chunk: (B, horizon, action_dim)
+        action_chunk = data.actions[:, -self.horizon :]
 
         critic_loss, critic_activations, critic_info = self._compute_critic_loss(
-            state_curr, action_curr, target_value
+            state_curr, action_chunk, target_value
         )
         if self.policy_type == "diffusion":
-            actor_loss, actor_activations, actor_info = self._compute_actor_loss(state_curr)
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss(
+                state_curr, action_chunk
+            )
         elif self.policy_type == "beta":
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(state_curr)
         elif self.policy_type == "cfgrl":
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
-                state_curr, action_curr
+                state_curr, action_chunk
             )
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state_curr)
 
@@ -206,24 +214,27 @@ class Network(nn.Module):
 
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:
-        obs_next = data.observations[:, 1:]
-        obs_z_next = data.obs_z[:, 1:]
-        actions_next = data.actions[:, 1:]
-        rewards_next = data.rewards[:, 1:]
-        rnn_state_next = data.rnn_state[:, 1:]  # (B, T-1, ...)
-        rnn_state_next = rnn_state_next[:, 0]  # (B, ...)
+        # Next state is after the first action of the chunk
+        # Slice: [1, 1+seq_len) to get seq_len frames starting from index 1
+        end_idx = 1 + self.seq_len
+        obs_next = data.observations[:, 1:end_idx]
+        obs_z_next = data.obs_z[:, 1:end_idx]
+        actions_next = data.actions[:, 1:end_idx]
+        rewards_next = data.rewards[:, 1:end_idx]
+        rnn_state_next = data.rnn_state[:, 1]  # (B, ...)
         state_next, _ = self.encoder.forward(
             obs_next, obs_z_next, actions_next, rewards_next, rnn_state_next
         )
-        next_state_actions, _ = self.policy_head.get_action(state_next)
+        next_state_actions, _ = self.policy_head.get_action(state_next)  # (B, horizon, action_dim)
         next_critic_output_dict = self.value_head(state_next, next_state_actions)
         next_critic_value = next_critic_output_dict["output"]
         if self.num_bins > 1:
             next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
         else:
             next_critic_value = next_critic_value.view(-1)
-        curr_reward = data.rewards[:, -1].flatten()
-        curr_continue = 1 - data.dones[:, -1].flatten()
+        # Reward at first step of chunk
+        curr_reward = data.rewards[:, -self.horizon].flatten()
+        curr_continue = 1 - data.dones[:, -self.horizon].flatten()
         target_value = curr_reward + curr_continue * self.gamma * next_critic_value
         return target_value
 
@@ -231,11 +242,17 @@ class Network(nn.Module):
     # Internal methods #
     ####################
 
-    def _compute_critic_loss(self, curr_state, curr_action, target_value):
+    def _compute_critic_loss(self, curr_state, action_chunk, target_value):
+        """
+        Args:
+            curr_state: (B, state_dim)
+            action_chunk: (B, horizon, action_dim)
+            target_value: (B,)
+        """
         if self.detach_critic:
             curr_state = curr_state.detach()
 
-        curr_critic_output_dict = self.value_head(curr_state, curr_action)
+        curr_critic_output_dict = self.value_head(curr_state, action_chunk)
 
         if self.num_bins > 1:
             curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
@@ -257,10 +274,15 @@ class Network(nn.Module):
 
         return critic_loss, activations_dict, info_dict
 
-    def _compute_actor_loss(self, state_curr):
+    def _compute_actor_loss(self, state_curr, target_action_chunk):
+        """
+        Args:
+            state_curr: (B, state_dim)
+            target_action_chunk: (B, horizon, action_dim) - target actions for flow matching
+        """
         if self.detach_actor:
             state_curr = state_curr.detach()
-        action, log_pi = self.policy_head.get_action(state_curr)
+        action, log_pi = self.policy_head.get_action(state_curr)  # (B, horizon, action_dim)
 
         for param in self.value_head.parameters():
             param.requires_grad_(False)
@@ -275,53 +297,21 @@ class Network(nn.Module):
         for param in self.value_head.parameters():
             param.requires_grad_(True)
 
-        # DACER2 loss (https://arxiv.org/abs/2505.23426)
-        actions = action.clone().detach()
-        actions.requires_grad = True
-        eps = 1e-4
-        device = action.device
-        batch_size = action.shape[0]
-        t = (torch.rand((batch_size, 1), device=device)) * (1 - eps) + eps
-        c = 0.4
-        d = -1.8
-        w_t = torch.exp(c * t + d)
-
-        def calc_target(q_network, actions):
-            q_output_dict = q_network(state_curr, actions)
-            q_values = q_output_dict["output"]
-            if self.num_bins > 1:
-                q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
-            else:
-                q_values = q_values.unsqueeze(-1)
-            q_grad = torch.autograd.grad(
-                outputs=q_values.sum(),
-                inputs=actions,
-                create_graph=True,
-            )[0]
-            with torch.no_grad():
-                target = (1 - t) / t * q_grad + 1 / t * actions
-                target /= target.norm(dim=1, keepdim=True) + 1e-8
-                return w_t * target
-
-        target = calc_target(self.value_head, actions)
-        noise = torch.randn_like(actions)
-        noise = torch.clamp(noise, -3.0, 3.0)
-        a_t = (1.0 - t) * noise + t * actions
-        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr)
-        v = actor_output_dict["output"]
-        dacer_loss = F.mse_loss(v, target)
+        # Flow matching loss with target action chunk
+        flow_loss_dict = self.policy_head.compute_loss(state_curr, target_action_chunk)
+        flow_loss = flow_loss_dict["loss"]
 
         # Combine actor losses
-        total_actor_loss = actor_loss + dacer_loss * self.dacer_loss_weight
+        total_actor_loss = actor_loss + flow_loss * self.dacer_loss_weight
 
         activations_dict = {
-            "actor": actor_output_dict["activation"],
+            "actor": flow_loss_dict["activation"],
             "critic": advantage_dict["activation"],
         }
 
         info_dict = {
             "actor_loss": actor_loss.item(),
-            "dacer_loss": dacer_loss.item(),
+            "dacer_loss": flow_loss.item(),
             "log_pi": log_pi.mean().item(),
             "advantage": advantage.mean().item(),
         }
@@ -360,12 +350,13 @@ class Network(nn.Module):
 
         return actor_loss, activations_dict, info_dict
 
-    def _compute_actor_loss_cfgrl(self, state_curr, action_curr):
+    def _compute_actor_loss_cfgrl(self, state_curr, action_chunk):
         """
         CFGRL/pistar06 style conditional supervised learning
 
-        I=1 (positive) if advantage >= threshold, otherwise I=0 (negative)
-        Drop condition with condition_drop_prob probability (I=2, unconditional)
+        Args:
+            state_curr: (B, state_dim)
+            action_chunk: (B, horizon, action_dim)
         """
         if self.detach_actor:
             state_curr = state_curr.detach()
@@ -375,56 +366,27 @@ class Network(nn.Module):
 
         # Calculate advantage and determine condition I
         with torch.no_grad():
-            advantage_dict = self.value_head.get_advantage(state_curr, action_curr)
+            advantage_dict = self.value_head.get_advantage(state_curr, action_chunk)
             advantage = advantage_dict["output"]
             if self.num_bins > 1:
                 advantage = self.hl_gauss_loss(advantage)
             advantage = advantage.view(-1)
 
-            # I = 1 if A >= median else 0 (use median as threshold)
-            threshold = advantage.median()
-            condition = (advantage >= threshold).long()
-
-            # Set to unconditional (I=2) with condition_drop_prob probability
-            drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
-            condition = torch.where(drop_mask, torch.full_like(condition, 2), condition)
-
-        # Flow Matching for conditional policy
-        eps = 1e-4
-        t = torch.rand((batch_size, 1), device=device) * (1 - eps) + eps
-
-        # Interpolation from noise to action_curr
-        noise = torch.randn_like(action_curr)
-        noise = torch.clamp(noise, -3.0, 3.0)
-        a_t = (1.0 - t) * noise + t * action_curr
-
-        # Predict velocity conditionally
-        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), state_curr, condition)
-        v_pred = actor_output_dict["output"]
-
-        # Target velocity: action_curr - noise
-        v_target = action_curr - noise
-
-        # Flow Matching loss
-        actor_loss = F.mse_loss(v_pred, v_target)
+        # Use CFGDiffusionPolicy's compute_loss with advantage
+        flow_loss_dict = self.policy_head.compute_loss(
+            state_curr, action_chunk, advantage.unsqueeze(1)
+        )
+        actor_loss = flow_loss_dict["loss"]
 
         activations_dict = {
-            "actor": actor_output_dict["activation"],
+            "actor": flow_loss_dict["activation"],
         }
-
-        # Calculate positive and negative ratios
-        positive_ratio = (condition == 1).float().mean().item()
-        negative_ratio = (condition == 0).float().mean().item()
-        uncond_ratio = (condition == 2).float().mean().item()
 
         info_dict = {
             "actor_loss": actor_loss.item(),
             "dacer_loss": 0.0,
             "log_pi": 0.0,
             "advantage": advantage.mean().item(),
-            "cfgrl_positive_ratio": positive_ratio,
-            "cfgrl_negative_ratio": negative_ratio,
-            "cfgrl_uncond_ratio": uncond_ratio,
         }
 
         return actor_loss, activations_dict, info_dict
