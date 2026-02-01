@@ -40,6 +40,7 @@ dependencies = [
     "torchvision>=0.22,<0.23",
     # transformers 5.0以降でmamba-ssmとの互換性問題があるため
     "transformers>=4.40,<5.0",
+    "scipy>=1.17.0",
 ]
 
 [build-system]

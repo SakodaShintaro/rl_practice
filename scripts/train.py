@@ -139,6 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step_limit", type=int, default=1_000_000)
     parser.add_argument("--eval_range", type=int, default=100)
     parser.add_argument("--seq_len", type=int, default=8)
+    parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--batch_size", type=int, default=32)
@@ -199,7 +200,9 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     # Create result directories and save files only if not in debug mode
     if not args.debug:
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = Path(__file__).resolve().parent.parent / "results" / f"{datetime_str}_{exp_name}"
+        result_dir = (
+            Path(__file__).resolve().parent.parent / "results" / f"{datetime_str}_{exp_name}"
+        )
         result_dir.mkdir(parents=True, exist_ok=True)
 
         # save seed to file
@@ -408,7 +411,7 @@ if __name__ == "__main__":
     args = parse_args()
     if args.debug:
         args.off_wandb = True
-        args.learning_starts = 10
+        args.learning_starts = max(10, args.seq_len + args.horizon + 5)
         args.buffer_capacity = 50
         args.render = 0
         args.step_limit = 100

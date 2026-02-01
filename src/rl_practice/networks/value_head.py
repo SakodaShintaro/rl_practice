@@ -55,13 +55,17 @@ class ActionValueHead(nn.Module):
         self,
         in_channels: int,
         action_dim: int,
+        horizon: int,
         hidden_dim: int,
         block_num: int,
         num_bins: int,
         sparsity: float,
     ) -> None:
         super().__init__()
-        mid_dim = in_channels + action_dim
+        self.horizon = horizon
+        self.action_dim = action_dim
+        total_action_dim = action_dim * horizon
+        mid_dim = in_channels + total_action_dim
 
         # Value stream: V(s) - depends only on state
         self.v_fc_in = nn.Linear(in_channels, hidden_dim)
@@ -82,7 +86,14 @@ class ActionValueHead(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            x: state embedding (B, state_dim)
+            a: action chunk (B, horizon, action_dim)
+        """
         result_dict = {}
+        bs = a.size(0)
+        a_flat = a.view(bs, -1)  # (B, horizon * action_dim)
 
         # Value stream: V(s)
         v = self.v_fc_in(x)
@@ -91,7 +102,7 @@ class ActionValueHead(nn.Module):
         v_out = self.v_fc_out(v)  # (B, num_bins)
 
         # Advantage stream: A(s,a)
-        xa = torch.cat([x, a], dim=1)
+        xa = torch.cat([x, a_flat], dim=1)
         adv = self.a_fc_in(xa)
         adv = self.a_fc_mid(adv)
         adv = self.a_norm(adv)
@@ -106,9 +117,16 @@ class ActionValueHead(nn.Module):
         return result_dict
 
     def get_advantage(self, x: torch.Tensor, a: torch.Tensor) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            x: state embedding (B, state_dim)
+            a: action chunk (B, horizon, action_dim)
+        """
         result_dict = {}
+        bs = a.size(0)
+        a_flat = a.view(bs, -1)  # (B, horizon * action_dim)
 
-        xa = torch.cat([x, a], dim=1)
+        xa = torch.cat([x, a_flat], dim=1)
         adv = self.a_fc_in(xa)
         adv = self.a_fc_mid(adv)
         adv = self.a_norm(adv)

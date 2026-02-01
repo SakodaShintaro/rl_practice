@@ -55,6 +55,7 @@ class OnPolicyAgent:
         self.gamma = args.gamma
         self.buffer_capacity = args.buffer_capacity
         self.seq_len = args.seq_len
+        self.horizon = args.horizon
         self.batch_size = args.batch_size
         self.accumulation_steps = args.accumulation_steps
         self.device = torch.device("cuda")
@@ -65,6 +66,10 @@ class OnPolicyAgent:
         self.use_done = args.use_done
         self.use_weight_projection = args.use_weight_projection
         self.apply_masks_during_training = args.apply_masks_during_training
+
+        # Action chunking state
+        self.action_chunk = None  # (horizon, action_dim) - current action chunk
+        self.chunk_step = 0  # current step within chunk
 
         self.reward_processor = RewardProcessor("scaling", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
@@ -93,7 +98,7 @@ class OnPolicyAgent:
 
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
-            seq_len=self.seq_len + 1,
+            seq_len=self.seq_len + self.horizon,
             obs_shape=observation_space.shape,
             obs_z_shape=obs_z_shape,
             rnn_state_shape=self.rnn_state.squeeze(0).shape,
@@ -120,6 +125,11 @@ class OnPolicyAgent:
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
+
+        # Reset chunk on episode boundary
+        if terminated or truncated:
+            self.action_chunk = None
+            self.chunk_step = 0
 
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
@@ -150,7 +160,19 @@ class OnPolicyAgent:
             self.prev_action_token_ids,
         )
 
-        # inference
+        # Use cached action from chunk if available
+        if self.action_chunk is not None and self.chunk_step < self.horizon:
+            action = self.action_chunk[self.chunk_step]
+            action = action * self.action_scale + self.action_bias
+            action = np.clip(action, self.action_low, self.action_high)
+            self.prev_action = action
+            self.chunk_step += 1
+            info_dict["a_logp"] = self.prev_logp
+            info_dict["value"] = self.prev_value
+            info_dict["chunk_step"] = self.chunk_step
+            return action, info_dict
+
+        # inference - predict new action chunk
         latest_data = self.rb.get_latest(1)
         result_dict = self.network(
             latest_data.observations,
@@ -162,9 +184,13 @@ class OnPolicyAgent:
         )
         self.rnn_state = result_dict["rnn_state"]
 
-        # action
-        action = result_dict["action"]
-        action = action[0].cpu().numpy()
+        # action chunk: (B, horizon, action_dim) -> (horizon, action_dim)
+        action_chunk = result_dict["action"][0].cpu().numpy()
+        self.action_chunk = action_chunk
+        self.chunk_step = 1
+
+        # Use first action from chunk
+        action = action_chunk[0]
         action = action * self.action_scale + self.action_bias
         action = np.clip(action, self.action_low, self.action_high)
         self.prev_action = action
@@ -189,13 +215,14 @@ class OnPolicyAgent:
 
         # predict next state
         if self.network_class != "vlm_actor_critic_with_state_value":
-            action_tensor = result_dict["action"]
+            action_tensor = result_dict["action"][:, 0, :]  # Use first action for prediction
             next_image, next_reward = self.network.predict_next_state(
                 result_dict["x"], action_tensor
             )
             info_dict["next_image"] = next_image
             info_dict["next_reward"] = next_reward
 
+        info_dict["chunk_step"] = self.chunk_step
         return action, info_dict
 
     def step(
@@ -292,9 +319,9 @@ class OnPolicyAgent:
             self.optimizer.zero_grad()
             batch_idx = 0
             for indices in SequentialBatchSampler(
-                self.buffer_capacity - 1,
+                self.buffer_capacity - self.horizon + 1,
                 self.batch_size,
-                k_frames=self.seq_len + 1,
+                k_frames=self.seq_len + self.horizon,
                 drop_last=False,
             ):
                 indices = np.array(indices, dtype=np.int64)  # [B, T]
@@ -309,8 +336,10 @@ class OnPolicyAgent:
                     values=v[indices],
                     action_token_ids=action_token_ids[indices],
                 )
-                curr_adv = adv[indices[:, -2]]
-                curr_target_v = target_v[indices[:, -2]]
+                # Index for chunk start point (last frame of input sequence)
+                chunk_start_idx = indices[:, -self.horizon - 1]
+                curr_adv = adv[chunk_start_idx]
+                curr_target_v = target_v[chunk_start_idx]
 
                 if self.network_class == "actor_critic_with_state_value":
                     loss, activations_dict, info_dict = self.network.compute_loss(
