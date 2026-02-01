@@ -9,7 +9,7 @@ from torch.nn import functional as F
 from .image_processor import ImageProcessor
 from .value_head import SeparateCritic
 from .vlm_backbone import (
-    ACTION_PROMPT,
+    get_action_prompt,
     load_model,
     parse_action_text,
     prepare_vlm_inputs,
@@ -34,7 +34,8 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.clip_param_value = args.clip_param_value
         self.action_dim = action_space_shape[0]
         self.seq_len = args.seq_len
-        self.task_prompt = ACTION_PROMPT
+        self.horizon = args.horizon
+        self.task_prompt = get_action_prompt(self.horizon)
         self.episode_prompt = ""
         self.target_layer_idx = args.target_layer_idx
         self.max_new_tokens = args.max_token_len
@@ -170,7 +171,8 @@ class VLMActorCriticWithStateValue(nn.Module):
         action_text, hidden, log_prob, generated_ids = self._generate_with_hidden_states(inputs)
         print(f"{action_text=}")
 
-        action_array, parse_success = parse_action_text(action_text)
+        action_array, parse_success = parse_action_text(action_text, self.horizon)
+        # action_array: (horizon, action_dim) -> (1, horizon, action_dim)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
         print(f"{action_tensor=}, {parse_success=}")
 
@@ -201,10 +203,17 @@ class VLMActorCriticWithStateValue(nn.Module):
         }
 
     def _action_to_text(self, action: torch.Tensor) -> str:
-        """Convert 2D action tensor to canonical text representation."""
-        steer = action[0].item()
-        accel = action[1].item()
-        return f"Action: steer={steer:.2f}, accel={accel:.2f}"
+        """Convert action tensor to canonical text representation.
+
+        Args:
+            action: (horizon, action_dim) tensor
+        """
+        parts = []
+        for t in range(action.shape[0]):
+            steer = action[t, 0].item()
+            accel = action[t, 1].item()
+            parts.append(f"t{t}: steer={steer:.2f}, accel={accel:.2f}")
+        return "Actions: " + "; ".join(parts)
 
     def _compute_value_and_log_prob(
         self,
@@ -370,11 +379,14 @@ class VLMActorCriticWithStateValue(nn.Module):
 
     @torch.no_grad()
     def compute_target_value(self, data) -> torch.Tensor:
-        """Compute target value for TD learning."""
-        obs_next = data.observations[:, 1:]
-        rewards_next = data.rewards[:, 1:]
+        """Compute target value for TD learning with n-step returns."""
+        batch_size = data.observations.shape[0]
+        device = data.observations.device
+
+        # For action chunking, next state is after the full horizon
+        obs_next = data.observations[:, self.horizon :]
+        rewards_next = data.rewards[:, self.horizon :]
         actions_next = data.actions[:, -1]  # Use current action as dummy
-        dones_next = data.dones[:, -1].flatten()
 
         # Use _compute_value_and_log_prob, ignore log_prob
         _, hidden_next, _ = self._compute_value_and_log_prob(obs_next, rewards_next, actions_next)
@@ -389,7 +401,17 @@ class VLMActorCriticWithStateValue(nn.Module):
             else value_logits_next.view(-1)
         )
 
-        curr_reward = data.rewards[:, -1].flatten()
-        curr_continue = 1 - dones_next
+        # Accumulate discounted rewards over the horizon
+        chunk_rewards = data.rewards[:, -self.horizon :]
+        chunk_dones = data.dones[:, -self.horizon :]
 
-        return curr_reward + curr_continue * self.gamma * next_value
+        discounted_reward = torch.zeros(batch_size, device=device)
+        gamma_power = 1.0
+        continuing = torch.ones(batch_size, device=device)
+
+        for i in range(self.horizon):
+            discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
+            gamma_power *= self.gamma
+            continuing *= 1 - chunk_dones[:, i].flatten()
+
+        return discounted_reward + continuing * gamma_power * next_value

@@ -19,12 +19,18 @@ from transformers import (
 
 from .for_mmmamba.modeling_mmMamba_chat import mmMambaChatModel
 
-ACTION_PROMPT = (
-    "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
-    "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
-    "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
-    "Respond in the exact format: 'Action: steer=X.XX, accel=X.XX' using decimal values within range."
-)
+
+def get_action_prompt(horizon: int) -> str:
+    """Generate action prompt based on horizon."""
+    base = (
+        "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
+        "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
+        "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
+    )
+    example_actions = "; ".join([f"t{i}: steer=0.00, accel=0.10" for i in range(horizon)])
+    return (
+        base + f"Respond with {horizon} sequential actions in format: 'Actions: {example_actions}'"
+    )
 
 
 def load_model(
@@ -151,32 +157,33 @@ def prepare_vlm_inputs(
     return inputs
 
 
-def parse_action_text(action_text: str) -> tuple[np.ndarray, bool]:
-    """Parse action text and extract steer, accel values.
+def parse_action_text(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
+    """Parse action text and extract steer, accel values for multiple timesteps.
 
     Args:
-        action_text: Text in format 'Action: steer=X.XX, accel=X.XX'
+        action_text: Text in format 'Actions: t0: steer=X.XX, accel=X.XX; t1: steer=X.XX, accel=X.XX; ...'
+        horizon: Number of timesteps to parse
 
     Returns:
         tuple of (action_array, success)
-        - action_array: np.ndarray of shape (2,) containing [steer, accel]
-        - success: True if both steer and accel were successfully parsed
-
-    Example:
-        >>> parse_action_text("Action: steer=0.5, accel=0.3")
-        (array([0.5, 0.3]), True)
+        - action_array: np.ndarray of shape (horizon, 2) containing [steer, accel] for each timestep
+        - success: True if all timesteps were successfully parsed
     """
-    steer_match = re.search(r"steer=([+-]?\d*\.?\d+)", action_text)
-    accel_match = re.search(r"accel=([+-]?\d*\.?\d+)", action_text)
+    action_array = np.zeros((horizon, 2), dtype=np.float32)
+    success = True
 
-    success = steer_match is not None and accel_match is not None
+    # Find all steer=X and accel=X pairs with optional t prefix
+    pattern = r"(?:t\d+:\s*)?steer=([+-]?\d*\.?\d+),\s*accel=([+-]?\d*\.?\d+)"
+    matches = re.findall(pattern, action_text)
 
-    steer = float(steer_match.group(1)) if steer_match else 0.0
-    accel = float(accel_match.group(1)) if accel_match else 0.0
+    parsed_count = min(len(matches), horizon)
+    success = parsed_count == horizon
 
-    action_array = np.array([steer, accel], dtype=np.float32)
-    action_array[0] = np.clip(action_array[0], -1.0, 1.0)
-    action_array[1] = np.clip(action_array[1], -1.0, 1.0)
+    for i in range(parsed_count):
+        steer = float(matches[i][0])
+        accel = float(matches[i][1])
+        action_array[i, 0] = np.clip(steer, -1.0, 1.0)
+        action_array[i, 1] = np.clip(accel, -1.0, 1.0)
 
     return action_array, success
 
@@ -332,7 +339,10 @@ class MMMambaEncoder(nn.Module):
 
         # Create tokenized input (same for all batch samples)
         prompt = (
-            ACTION_PROMPT + " <|im_start|>" + "<IMG_CONTEXT>" * self.image_token_num + "<|im_end|>"
+            get_action_prompt(1)
+            + " <|im_start|>"
+            + "<IMG_CONTEXT>" * self.image_token_num
+            + "<|im_end|>"
         )
         messages = [{"role": "user", "content": prompt}]
 
