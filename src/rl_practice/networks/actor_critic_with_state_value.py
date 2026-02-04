@@ -166,28 +166,28 @@ class Network(nn.Module):
 
     def compute_loss(self, data, curr_target_v, curr_adv) -> tuple[torch.Tensor, dict, dict]:
         # Encode state: use seq_len frames (excluding last horizon frames)
-        obs_curr = data.observations[:, : -self.horizon]
-        obs_z_curr = data.obs_z[:, : -self.horizon]
-        actions_curr = data.actions[:, : -self.horizon]
-        rewards_curr = data.rewards[:, : -self.horizon]
-        rnn_state_curr = data.rnn_state[:, 0]
+        curr_obs = data.observations[:, : -self.horizon]
+        curr_obs_z = data.obs_z[:, : -self.horizon]
+        curr_actions = data.actions[:, : -self.horizon]
+        curr_rewards = data.rewards[:, : -self.horizon]
+        curr_rnn_state = data.rnn_state[:, 0]
 
-        state_curr, _ = self.encoder.forward(
-            obs_curr, obs_z_curr, actions_curr, rewards_curr, rnn_state_curr
+        curr_state, _ = self.encoder.forward(
+            curr_obs, curr_obs_z, curr_actions, curr_rewards, curr_rnn_state
         )
 
         # Get policy output with action chunk (B, horizon, action_dim)
         target_actions = data.actions[:, -self.horizon :]
-        policy_dict = self.policy_head(state_curr, action=target_actions)
+        policy_dict = self.policy_head(curr_state, action=target_actions)
         a_logp = policy_dict["a_logp"]
         entropy = policy_dict["entropy"]
         policy_activation = policy_dict["activation"]
 
         # Get value output (state value at chunk start, i.e., last frame of input sequence)
         value_dict = (
-            self.value_head(obs_curr[:, -1])
+            self.value_head(curr_obs[:, -1])
             if self.separate_critic
-            else self.value_head(state_curr)
+            else self.value_head(curr_state)
         )
         value = value_dict["output"]
         value_activation = value_dict["activation"]
@@ -217,10 +217,10 @@ class Network(nn.Module):
         loss = action_loss + self.critic_loss_weight * value_loss - 0.02 * entropy.mean()
 
         activations_dict = {
-            "state": state_curr,
+            "state": curr_state,
             "actor": policy_activation,
             "critic": value_activation,
-            "state_predictor": state_curr,
+            "state_predictor": curr_state,
         }
 
         info_dict = {
