@@ -171,7 +171,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--on_policy_epoch", type=int, default=10)
     parser.add_argument("--clip_param_policy", type=float, default=0.2)
     parser.add_argument("--clip_param_value", type=float, default=0.2)
-    parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument("--max_new_tokens", type=int, default=64)
     parser.add_argument("--pad_token_id", type=int, default=0)
     parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
     parser.add_argument("--parse_fail_penalty", type=float, default=1.0)
