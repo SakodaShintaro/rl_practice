@@ -151,12 +151,12 @@ class VLMActorCriticWithStateValue(nn.Module):
 
         log_prob = torch.tensor(0.0, device=self.device)
 
-        print(f"{action_text=}")
-
         action_array, parse_success = parse_action_text(action_text, self.horizon)
         # action_array: (horizon, action_dim) -> (1, horizon, action_dim)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(s_seq.device)
-        print(f"{action_tensor=}, {parse_success=}")
+        print(
+            f"{input_len=}, {len(generated_ids)=}, {action_text=}, {action_tensor=}, {parse_success=}"
+        )
 
         value_dict = (
             self.value_head(s_seq[:, -1])
