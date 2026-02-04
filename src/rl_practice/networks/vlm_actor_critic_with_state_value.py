@@ -184,19 +184,6 @@ class VLMActorCriticWithStateValue(nn.Module):
             "parse_success": parse_success,
         }
 
-    def _action_to_text(self, action: torch.Tensor) -> str:
-        """Convert action tensor to canonical text representation.
-
-        Args:
-            action: (horizon, action_dim) tensor
-        """
-        parts = []
-        for t in range(action.shape[0]):
-            steer = action[t, 0].item()
-            accel = action[t, 1].item()
-            parts.append(f"t{t}: steer={steer:.2f}, accel={accel:.2f}")
-        return "Actions: " + "; ".join(parts)
-
     def _compute_value_and_log_prob(
         self,
         images: torch.Tensor,
