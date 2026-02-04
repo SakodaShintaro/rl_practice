@@ -146,6 +146,8 @@ class Network(nn.Module):
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,
     ) -> dict:
+        assert s_seq.shape[0] == 1, "Batch size must be 1 for inference"
+
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         # Get action chunk from policy_head
@@ -154,13 +156,25 @@ class Network(nn.Module):
         # Get action-value from value_head
         q_dict = self.value_head(x, action)
         q_value = q_dict["output"]  # (B, 1) or (B, num_bins)
+        q_value = q_value.item() if self.num_bins == 1 else self.hl_gauss_loss(q_value).item()
+
+        # Get predicted next state
+        next_image, next_reward = self.prediction_head.predict_next_state(
+            x,
+            action[:, 0],  # use first action in chunk for prediction
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )
 
         return {
             "action": action,  # (B, horizon, action_dim)
             "a_logp": a_logp,  # (B, 1)
-            "value": q_value,  # (B, 1) or (B, num_bins)
+            "value": q_value,  # float
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (B, ...)
+            "next_image": next_image,  # predicted next image
+            "next_reward": next_reward,  # predicted next reward
             "action_token_ids": [],  # empty for non-VLM networks
             "parse_success": True,  # always True for non-VLM networks
         }
@@ -530,13 +544,3 @@ class Network(nn.Module):
         info_dict = {"seq_loss": pred_loss.item()}
 
         return pred_loss, activations_dict, info_dict
-
-    @torch.inference_mode()
-    def predict_next_state(self, curr_state, curr_action) -> tuple[np.ndarray, float]:
-        return self.prediction_head.predict_next_state(
-            curr_state,
-            curr_action,
-            self.observation_space_shape,
-            self.predictor_step_num,
-            self.disable_state_predictor,
-        )

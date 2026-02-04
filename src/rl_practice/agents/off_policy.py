@@ -93,13 +93,14 @@ class OffPolicyAgent:
         obs_tensor = torch.from_numpy(obs).to(self.device)
         obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
+        normalized_action = (self.prev_action - self.action_bias) / self.action_scale
         self.rb.add(
             obs_tensor,
             obs_z,
             reward_with_penalty,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
-            torch.from_numpy(self.prev_action).to(self.device),
+            torch.from_numpy(normalized_action).to(self.device),
             0.0,
             0.0,
             [],
@@ -129,6 +130,9 @@ class OffPolicyAgent:
             self.rnn_state,
         )
         self.rnn_state = infer_dict["rnn_state"]
+        info_dict["value"] = infer_dict["value"]
+        info_dict["next_image"] = infer_dict["next_image"]
+        info_dict["next_reward"] = infer_dict["next_reward"]
 
         # action
         if global_step < self.learning_starts:
@@ -146,15 +150,6 @@ class OffPolicyAgent:
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
         self.prev_action = action
-
-        # predict next state
-        if hasattr(self.network, "predict_next_state"):
-            action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device)
-            next_image, next_reward = self.network.predict_next_state(
-                infer_dict["x"], action_tensor.unsqueeze(0)
-            )
-            info_dict["next_image"] = next_image
-            info_dict["next_reward"] = next_reward
 
         info_dict["chunk_step"] = self.chunk_step
         return action, info_dict
