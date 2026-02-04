@@ -28,7 +28,7 @@ class ReplayBufferData:
     actions: torch.Tensor  # (B, T, action_shape)
     log_probs: torch.Tensor  # (B, T)
     values: torch.Tensor  # (B, T)
-    action_token_ids: torch.Tensor  # (B, T, max_token_len)
+    action_token_ids: torch.Tensor  # (B, T, max_new_tokens)
 
 
 class ReplayBuffer:
@@ -42,7 +42,7 @@ class ReplayBuffer:
         action_shape: tuple[int, ...],
         output_device: torch.device,
         storage_device: torch.device,
-        max_token_len: int,
+        max_new_tokens: int,
         pad_token_id: int,
     ) -> None:
         self.size = size
@@ -50,7 +50,7 @@ class ReplayBuffer:
         self.action_shape = action_shape
         self.output_device = output_device
         self.storage_device = storage_device
-        self.max_token_len = max_token_len
+        self.max_new_tokens = max_new_tokens
         self.pad_token_id = pad_token_id
 
         assert self.seq_len <= self.size, "Replay buffer size must be >= sequence length."
@@ -71,7 +71,7 @@ class ReplayBuffer:
         self.log_probs = init_tensor((size, 1))
         self.values = init_tensor((size, 1))
         self.action_token_ids = torch.full(
-            (size, max_token_len),
+            (size, max_new_tokens),
             pad_token_id,
             dtype=torch.long,
             device=self.storage_device,
@@ -125,7 +125,7 @@ class ReplayBuffer:
         self.values[self.idx].fill_(value)
 
         self.action_token_ids[self.idx].fill_(self.pad_token_id)
-        token_len = min(len(action_token_ids), self.max_token_len)
+        token_len = min(len(action_token_ids), self.max_new_tokens)
         self.action_token_ids[self.idx, :token_len] = torch.tensor(
             action_token_ids[:token_len], dtype=torch.long, device=self.storage_device
         )

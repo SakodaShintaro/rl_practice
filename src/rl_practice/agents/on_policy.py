@@ -93,7 +93,7 @@ class OnPolicyAgent:
         self.rnn_state = self.network.init_state().to(self.device)
         obs_z_shape = tuple(self.network.image_processor.output_shape)
 
-        self.max_token_len = args.max_token_len
+        self.max_new_tokens = args.max_new_tokens
         self.pad_token_id = args.pad_token_id
 
         self.rb = ReplayBuffer(
@@ -105,7 +105,7 @@ class OnPolicyAgent:
             action_shape=action_space.shape,
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
-            max_token_len=self.max_token_len,
+            max_new_tokens=self.max_new_tokens,
             pad_token_id=self.pad_token_id,
         )
 

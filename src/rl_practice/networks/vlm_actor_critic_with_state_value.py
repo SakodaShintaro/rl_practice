@@ -38,7 +38,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         self.task_prompt = get_action_prompt(self.horizon)
         self.episode_prompt = ""
         self.target_layer_idx = args.target_layer_idx
-        self.max_new_tokens = args.max_token_len
+        self.max_new_tokens = args.max_new_tokens
         self.num_bins = args.num_bins
         self.value_min = -args.value_range
         self.value_max = +args.value_range
