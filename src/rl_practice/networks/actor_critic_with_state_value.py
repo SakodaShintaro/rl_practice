@@ -153,6 +153,14 @@ class Network(nn.Module):
 
         policy_dict = self.policy_head(x, action)
 
+        next_image, next_reward = self.prediction_head.predict_next_state(
+            x,
+            policy_dict["action"][:, 0],  # use first action in chunk for prediction
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )
+
         return {
             "action": policy_dict["action"],  # (B, horizon, action_dim)
             "a_logp": policy_dict["a_logp"],  # (B, 1)
@@ -160,6 +168,8 @@ class Network(nn.Module):
             "value": value_dict["output"],  # (B, num_bins) or (B, 1)
             "x": x,  # (B, hidden_dim)
             "rnn_state": rnn_state,  # (B, ...)
+            "next_image": next_image,  # predicted next image
+            "next_reward": next_reward,  # predicted next reward
             "action_token_ids": [],  # empty for non-VLM networks
             "parse_success": True,  # always True for non-VLM networks
         }
@@ -230,13 +240,3 @@ class Network(nn.Module):
         }
 
         return loss, activations_dict, info_dict
-
-    @torch.inference_mode()
-    def predict_next_state(self, state_curr, action_curr):
-        return self.prediction_head.predict_next_state(
-            state_curr,
-            action_curr,
-            self.observation_space_shape,
-            self.predictor_step_num,
-            self.disable_state_predictor,
-        )

@@ -148,13 +148,14 @@ class OnPolicyAgent:
         obs_tensor = torch.from_numpy(obs).to(self.device)
         obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
+        normalized_action = (self.prev_action - self.action_bias) / self.action_scale
         self.rb.add(
             obs_tensor,
             obs_z,
             reward_with_penalty,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
-            torch.from_numpy(self.prev_action).to(self.device),
+            torch.from_numpy(normalized_action).to(self.device),
             self.prev_logp,
             self.prev_value,
             self.prev_action_token_ids,
@@ -214,13 +215,8 @@ class OnPolicyAgent:
         self.prev_parse_success = result_dict["parse_success"]
 
         # predict next state
-        if self.network_class != "vlm_actor_critic_with_state_value":
-            action_tensor = result_dict["action"][:, 0, :]  # Use first action for prediction
-            next_image, next_reward = self.network.predict_next_state(
-                result_dict["x"], action_tensor
-            )
-            info_dict["next_image"] = next_image
-            info_dict["next_reward"] = next_reward
+        info_dict["next_image"] = result_dict["next_image"]
+        info_dict["next_reward"] = result_dict["next_reward"]
 
         info_dict["chunk_step"] = self.chunk_step
         return action, info_dict

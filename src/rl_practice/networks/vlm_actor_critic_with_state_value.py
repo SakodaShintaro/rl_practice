@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 import argparse
 
+import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
@@ -172,6 +173,11 @@ class VLMActorCriticWithStateValue(nn.Module):
         a_logp = log_prob.unsqueeze(0).unsqueeze(-1)
         entropy = torch.zeros((s_seq.size(0), 1), device=s_seq.device)
 
+        # dummy next state prediction
+        c, h, w = self.observation_space_shape
+        next_image = np.zeros((h, w, c), dtype=np.float32)
+        next_reward = 0.0
+
         return {
             "action": action_tensor,
             "a_logp": a_logp,
@@ -179,6 +185,8 @@ class VLMActorCriticWithStateValue(nn.Module):
             "value": value,
             "x": hidden,
             "rnn_state": rnn_state,
+            "next_image": next_image,
+            "next_reward": next_reward,
             "action_text": action_text,
             "action_token_ids": generated_ids,
             "parse_success": parse_success,
