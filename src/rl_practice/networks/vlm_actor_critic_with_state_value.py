@@ -208,7 +208,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         Args:
             images: (B, T, C, H, W)
             rewards: (B, T, 1)
-            action_token_ids: (B, max_token_len) - padded token IDs
+            action_token_ids: (B, max_new_tokens) - padded token IDs
 
         Returns:
             value: (B, 1) or (B, num_bins)
@@ -269,7 +269,7 @@ class VLMActorCriticWithStateValue(nn.Module):
         """Compute PPO actor loss and critic loss in a single forward pass."""
         obs_curr = data.observations[:, :-1]
         rewards_curr = data.rewards[:, :-1]
-        action_token_ids_curr = data.action_token_ids[:, -1]  # (B, max_token_len)
+        action_token_ids_curr = data.action_token_ids[:, -1]  # (B, max_new_tokens)
         old_log_prob = data.log_probs[:, -1].view(-1)
 
         # Single forward pass for value and log prob
