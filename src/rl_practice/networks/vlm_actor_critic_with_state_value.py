@@ -254,14 +254,14 @@ class VLMActorCriticWithStateValue(nn.Module):
         curr_adv: torch.Tensor,
     ) -> tuple[torch.Tensor, dict, dict]:
         """Compute PPO actor loss and critic loss in a single forward pass."""
-        obs_curr = data.observations[:, :-1]
-        rewards_curr = data.rewards[:, :-1]
-        action_token_ids_curr = data.action_token_ids[:, -1]  # (B, max_new_tokens)
+        curr_obs = data.observations[:, :-1]
+        curr_rewards = data.rewards[:, :-1]
+        curr_action_token_ids = data.action_token_ids[:, -1]  # (B, max_new_tokens)
         old_log_prob = data.log_probs[:, -1].view(-1)
 
         # Single forward pass for value and log prob
         value, hidden, new_log_prob = self._compute_value_and_log_prob(
-            obs_curr, rewards_curr, action_token_ids_curr
+            curr_obs, curr_rewards, curr_action_token_ids
         )
 
         # PPO actor loss
@@ -353,21 +353,21 @@ class VLMActorCriticWithStateValue(nn.Module):
         device = data.observations.device
 
         # For action chunking, next state is after the full horizon
-        obs_next = data.observations[:, self.horizon :]
-        rewards_next = data.rewards[:, self.horizon :]
-        actions_next = data.actions[:, -1]  # Use current action as dummy
+        next_obs = data.observations[:, self.horizon :]
+        next_rewards = data.rewards[:, self.horizon :]
+        next_actions = data.actions[:, -1]  # Use current action as dummy
 
         # Use _compute_value_and_log_prob, ignore log_prob
-        _, hidden_next, _ = self._compute_value_and_log_prob(obs_next, rewards_next, actions_next)
-        value_logits_next = (
-            self.value_head(obs_next[:, -1])["output"]
+        _, hidden_next, _ = self._compute_value_and_log_prob(next_obs, next_rewards, next_actions)
+        next_value_logits = (
+            self.value_head(next_obs[:, -1])["output"]
             if self.separate_critic
             else self.value_head(hidden_next)
         )
         next_value = (
-            self.hl_gauss_loss(value_logits_next)
+            self.hl_gauss_loss(next_value_logits)
             if self.num_bins > 1
-            else value_logits_next.view(-1)
+            else next_value_logits.view(-1)
         )
 
         # Accumulate discounted rewards over the horizon
