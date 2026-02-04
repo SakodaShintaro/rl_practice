@@ -102,19 +102,20 @@ class VLMActorCriticWithStateValue(nn.Module):
         eos_token_id = self.processor.tokenizer.eos_token_id
         return pad_token_id if pad_token_id is not None else eos_token_id
 
-    def _generate_with_hidden_states(
+    def forward(
         self,
-        inputs: dict[str, torch.Tensor],
-    ) -> tuple[str, torch.Tensor, torch.Tensor, list[int]]:
-        """Generate action text and return hidden state, log prob, and token ids.
+        s_seq: torch.Tensor,
+        obs_z_seq: torch.Tensor,
+        a_seq: torch.Tensor,
+        r_seq: torch.Tensor,
+        rnn_state: torch.Tensor,
+        action: torch.Tensor,
+    ) -> dict:
+        """Forward pass: generate action text and compute state value."""
+        inputs = prepare_vlm_inputs(
+            self.processor, s_seq, r_seq, self.task_prompt + self.episode_prompt
+        )
 
-        Returns:
-            action_text: Generated action text
-            state_hidden: Hidden state from first forward pass (before action generation)
-            total_log_prob: Sum of log probabilities for all generated tokens
-            generated_ids: List of generated token IDs
-        """
-        # First, get hidden state from prompt processing
         outputs = self.model.forward(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
@@ -124,9 +125,8 @@ class VLMActorCriticWithStateValue(nn.Module):
             return_dict=True,
         )
         hidden_states = outputs.hidden_states
-        state_hidden = hidden_states[self.target_layer_idx][:, -1, :].to(torch.float32)
+        hidden = hidden_states[self.target_layer_idx][:, -1, :].to(torch.float32)
 
-        # Generate action text using model.generate()
         pad_token_id = self.processor.tokenizer.pad_token_id
         eos_token_id = self.processor.tokenizer.eos_token_id
         if pad_token_id is None:
@@ -149,26 +149,8 @@ class VLMActorCriticWithStateValue(nn.Module):
             generated_ids, skip_special_tokens=True
         ).strip()
 
-        # Compute log prob by re-encoding with teacher forcing
-        # For now, return 0 as placeholder (actual log prob computed in compute_loss)
-        total_log_prob = torch.tensor(0.0, device=self.device)
+        log_prob = torch.tensor(0.0, device=self.device)
 
-        return action_text, state_hidden, total_log_prob, generated_ids
-
-    def forward(
-        self,
-        s_seq: torch.Tensor,
-        obs_z_seq: torch.Tensor,
-        a_seq: torch.Tensor,
-        r_seq: torch.Tensor,
-        rnn_state: torch.Tensor,
-        action: torch.Tensor,
-    ) -> dict:
-        """Forward pass: generate action text and compute state value."""
-        inputs = prepare_vlm_inputs(
-            self.processor, s_seq, r_seq, self.task_prompt + self.episode_prompt
-        )
-        action_text, hidden, log_prob, generated_ids = self._generate_with_hidden_states(inputs)
         print(f"{action_text=}")
 
         action_array, parse_success = parse_action_text(action_text, self.horizon)
