@@ -184,9 +184,7 @@ class Network(nn.Module):
             curr_state, action_chunk, target_value
         )
         if self.policy_type == "diffusion":
-            actor_loss, actor_activations, actor_info = self._compute_actor_loss(
-                curr_state, action_chunk
-            )
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss(curr_state)
         elif self.policy_type == "beta":
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(curr_state)
         elif self.policy_type == "cfgrl":
@@ -291,11 +289,10 @@ class Network(nn.Module):
 
         return critic_loss, activations_dict, info_dict
 
-    def _compute_actor_loss(self, curr_state, target_action_chunk):
+    def _compute_actor_loss(self, curr_state):
         """
         Args:
             curr_state: (B, state_dim)
-            target_action_chunk: (B, horizon, action_dim) - target actions for flow matching
         """
         if self.detach_actor:
             curr_state = curr_state.detach()
