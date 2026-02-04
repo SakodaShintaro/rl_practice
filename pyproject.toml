@@ -1,3 +1,70 @@
+[project]
+name = "rl-practice"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Shintaro Sakoda" }]
+dependencies = [
+    "gymnasium[box2d]",
+    "gymnasium[mujoco]",
+    "gymnasium[other]",
+    "wandb",
+    "tyro",
+    "stable-baselines3",
+    "timm",
+    "opencv-python",
+    "diffusers",
+    "accelerate",
+    "hl_gauss_pytorch",
+    "wheel",
+    "packaging",
+    "num2words",
+    "imageio[ffmpeg]",
+    "minigrid",
+    "peft",
+    "fschat",
+    "sentencepiece",
+    "qwen-vl-utils",
+    "bitsandbytes",
+    "flash-linear-attention",
+    "pytesseract",
+    "pyautogui",
+    "pynput",
+    # CUDA拡張パッケージ（プリビルドホイール使用）
+    "mamba-ssm",
+    "causal-conv1d",
+    "flash-attn",
+    # PyTorch 2.7系に固定（プリビルドホイールとの互換性のため）
+    "torch>=2.7,<2.8",
+    "torchvision>=0.22,<0.23",
+    # transformers 5.0以降でmamba-ssmとの互換性問題があるため
+    "transformers>=4.40,<5.0",
+    "scipy>=1.17.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rl_practice"]
+
+[tool.uv]
+index-url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.2/causal_conv1d-1.5.2+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+flash-attn = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+mamba-ssm = { url = "https://github.com/state-spaces/mamba/releases/download/v2.2.5/mamba_ssm-2.2.5+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
 [tool.ruff]
 line-length = 100
 

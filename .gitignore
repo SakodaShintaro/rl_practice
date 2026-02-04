@@ -1,12 +1,9 @@
 *.png
 *.pyc
-runs/
 results/
 wandb/
 .venv
 *.egg-info
-resnet18
-pretrained
 cache
 CLAUDE.md
 unsloth_compiled_cache

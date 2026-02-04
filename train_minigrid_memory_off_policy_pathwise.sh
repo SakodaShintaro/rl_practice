@@ -4,7 +4,7 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-python3 train.py pathwise$suffix \
+uv run python scripts/train.py pathwise$suffix \
   --agent_type off_policy \
   --encoder temporal_only \
   --step_limit 800_000 \
