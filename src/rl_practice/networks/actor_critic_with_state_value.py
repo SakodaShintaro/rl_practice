@@ -138,20 +138,20 @@ class Network(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
-    def forward(
+    @torch.inference_mode()
+    def infer(
         self,
         s_seq: torch.Tensor,  # (B, T, C, H, W)
         obs_z_seq: torch.Tensor,  # (B, T, C', H', W') - pre-encoded observations
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
-        action: torch.Tensor | None,  # (B, horizon, action_dim) or None
     ) -> dict:
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
         value_dict = self.value_head(s_seq[:, -1]) if self.separate_critic else self.value_head(x)
 
-        policy_dict = self.policy_head(x, action)
+        policy_dict = self.policy_head(x, None)
 
         next_image, next_reward = self.prediction_head.predict_next_state(
             x,

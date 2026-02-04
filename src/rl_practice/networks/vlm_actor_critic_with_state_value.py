@@ -103,14 +103,14 @@ class VLMActorCriticWithStateValue(nn.Module):
         eos_token_id = self.processor.tokenizer.eos_token_id
         return pad_token_id if pad_token_id is not None else eos_token_id
 
-    def forward(
+    @torch.inference_mode()
+    def infer(
         self,
         s_seq: torch.Tensor,
         obs_z_seq: torch.Tensor,
         a_seq: torch.Tensor,
         r_seq: torch.Tensor,
         rnn_state: torch.Tensor,
-        action: torch.Tensor,
     ) -> dict:
         """Forward pass: generate action text and compute state value."""
         inputs = prepare_vlm_inputs(

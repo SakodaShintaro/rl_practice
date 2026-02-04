@@ -175,13 +175,12 @@ class OnPolicyAgent:
 
         # inference - predict new action chunk
         latest_data = self.rb.get_latest(1)
-        result_dict = self.network(
+        result_dict = self.network.infer(
             latest_data.observations,
             latest_data.obs_z,
             latest_data.actions,
             latest_data.rewards,
             self.rnn_state,
-            None,
         )
         self.rnn_state = result_dict["rnn_state"]
 
