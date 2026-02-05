@@ -101,7 +101,7 @@ def parse_args() -> argparse.Namespace:
         "--encoder",
         type=str,
         default="temporal_only",
-        choices=["spatial_temporal", "temporal_only", "qwenvl", "mmmamba"],
+        choices=["spatial_temporal", "temporal_only", "qwenvl"],
     )
     parser.add_argument(
         "--temporal_model_type",

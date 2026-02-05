@@ -12,7 +12,7 @@ from torchvision import transforms
 from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from rl_practice.networks.image_processor import ImageProcessor
 from rl_practice.networks.reward_processor import RewardProcessor
-from rl_practice.networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
+from rl_practice.networks.vlm_backbone import QwenVLEncoder, parse_action_text
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -22,12 +22,7 @@ def parse_args():
     parser.add_argument(
         "encoder",
         type=str,
-        choices=[
-            "spatial_temporal",
-            "temporal_only",
-            "mmmamba",
-            "qwenvl",
-        ],
+        choices=["spatial_temporal", "temporal_only", "qwenvl"],
     )
     parser.add_argument("--images_dir", type=Path, default="./local/image/ep_00000001")
     parser.add_argument("--num_images", type=int, default=8)
@@ -115,9 +110,6 @@ if __name__ == "__main__":
             use_image_only=True,
         )
         encoder = encoder.to(device)
-
-    elif args.encoder == "mmmamba":
-        encoder = MMMambaEncoder(device=device)
 
     elif args.encoder == "qwenvl":
         encoder = QwenVLEncoder(

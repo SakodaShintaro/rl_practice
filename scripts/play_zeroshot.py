@@ -12,7 +12,7 @@ import imageio
 import numpy as np
 import torch
 
-from rl_practice.networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder, parse_action_text
+from rl_practice.networks.vlm_backbone import QwenVLEncoder, parse_action_text
 from rl_practice.utils import concat_images, convert_to_uint8
 from rl_practice.wrappers import make_env
 
@@ -27,9 +27,7 @@ def parse_args() -> argparse.Namespace:
         default="CarRacing-v3",
         choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
     )
-    parser.add_argument(
-        "--agent_type", type=str, default="qwenvl", choices=["random", "qwenvl", "mmmamba"]
-    )
+    parser.add_argument("--agent_type", type=str, default="qwenvl", choices=["random", "qwenvl"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--num_episodes", type=int, default=10)
@@ -51,10 +49,6 @@ class VLMAgent:
 
         if encoder_type == "qwenvl":
             self.encoder = QwenVLEncoder(observation_space_shape=observation_space_shape)
-        elif encoder_type == "mmmamba":
-            self.encoder = MMMambaEncoder(
-                observation_space_shape=observation_space_shape, device=self.device
-            )
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
 

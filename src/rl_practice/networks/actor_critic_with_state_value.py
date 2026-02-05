@@ -12,7 +12,7 @@ from rl_practice.networks.policy_head import BetaPolicy, CategoricalPolicy
 from rl_practice.networks.prediction_head import StatePredictionHead
 from rl_practice.networks.reward_processor import RewardProcessor
 from rl_practice.networks.value_head import SeparateCritic, StateValueHead
-from rl_practice.networks.vlm_backbone import MMMambaEncoder, QwenVLEncoder
+from rl_practice.networks.vlm_backbone import QwenVLEncoder
 
 
 class Network(nn.Module):
@@ -65,8 +65,6 @@ class Network(nn.Module):
                 target_layer_idx=args.target_layer_idx,
                 seq_len=args.seq_len,
             )
-        elif args.encoder == "mmmamba":
-            self.encoder = MMMambaEncoder()
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
 
