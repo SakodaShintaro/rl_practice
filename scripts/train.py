@@ -147,6 +147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
     parser.add_argument("--normalizing_by_return", type=int, default=0, choices=[0, 1])
     parser.add_argument("--image_save_interval", type=int, default=10)
+    parser.add_argument("--accumulation_steps", type=int, default=1)
     parser.add_argument("--debug", action="store_true")
 
     # for off_policy
@@ -175,7 +176,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pad_token_id", type=int, default=0)
     parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
     parser.add_argument("--parse_fail_penalty", type=float, default=1.0)
-    parser.add_argument("--accumulation_steps", type=int, default=1)
 
     return parser.parse_args()
 
