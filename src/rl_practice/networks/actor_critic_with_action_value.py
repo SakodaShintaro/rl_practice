@@ -60,7 +60,6 @@ class Network(nn.Module):
             )
         elif args.encoder == "qwenvl":
             self.encoder = QwenVLEncoder(
-                output_text=False,
                 use_quantization=args.use_quantization,
                 use_lora=args.use_lora,
                 target_layer_idx=args.target_layer_idx,

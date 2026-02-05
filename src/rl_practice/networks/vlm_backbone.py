@@ -191,7 +191,6 @@ def parse_action_text(action_text: str, horizon: int) -> tuple[np.ndarray, bool]
 class QwenVLEncoder(nn.Module):
     def __init__(
         self,
-        output_text: bool,
         use_quantization: bool,
         use_lora: bool,
         target_layer_idx: int,
@@ -199,7 +198,6 @@ class QwenVLEncoder(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.output_text = output_text
         self.use_lora = use_lora
         self.target_layer_idx = target_layer_idx
         self.seq_len = seq_len

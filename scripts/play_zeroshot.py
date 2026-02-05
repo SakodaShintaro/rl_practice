@@ -50,9 +50,7 @@ class VLMAgent:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if encoder_type == "qwenvl":
-            self.encoder = QwenVLEncoder(
-                observation_space_shape=observation_space_shape, output_text=True
-            )
+            self.encoder = QwenVLEncoder(observation_space_shape=observation_space_shape)
         elif encoder_type == "mmmamba":
             self.encoder = MMMambaEncoder(
                 observation_space_shape=observation_space_shape, device=self.device
