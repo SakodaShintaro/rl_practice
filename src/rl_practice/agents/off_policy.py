@@ -169,12 +169,12 @@ class OffPolicyAgent:
 
         return action, info_dict
 
+    def on_episode_end(self, score: float, feedback_text: str) -> dict:
+        return {}
+
     ####################
     # Internal methods #
     ####################
-
-    def on_episode_end(self, score: float, feedback_text: str) -> dict:
-        return {}
 
     def _train(self, global_step) -> dict:
         info_dict = {}
@@ -190,11 +190,8 @@ class OffPolicyAgent:
         # apply reward processing
         data.rewards = self.reward_processor.normalize(data.rewards)
 
-        # compute target value
-        target_value = self.network.compute_target_value(data)
-
         # compute loss
-        loss, activation_dict, info_dict = self.network.compute_loss(data, target_value)
+        loss, activation_dict, info_dict = self.network.compute_loss(data)
 
         # add prefixes to info_dict keys
         info_dict = {f"losses/{key}": value for key, value in info_dict.items()}

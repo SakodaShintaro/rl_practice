@@ -179,7 +179,10 @@ class Network(nn.Module):
             "parse_success": True,  # always True for non-VLM networks
         }
 
-    def compute_loss(self, data, target_value) -> tuple[torch.Tensor, dict, dict]:
+    def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
+        # compute target value
+        target_value = self._compute_target_value(data)  # (B,)
+
         # Use seq_len frames (excluding last horizon frames)
         curr_obs = data.observations[:, : -self.horizon]
         curr_obs_z = data.obs_z[:, : -self.horizon]
@@ -224,8 +227,12 @@ class Network(nn.Module):
 
         return total_loss, activations_dict, info_dict
 
+    ####################
+    # Internal methods #
+    ####################
+
     @torch.no_grad()
-    def compute_target_value(self, data) -> torch.Tensor:
+    def _compute_target_value(self, data) -> torch.Tensor:
         # For action chunking, next state is after the full horizon
         # Shift by horizon steps
         next_obs = data.observations[:, self.horizon :]  # (B, seq_len, ...)
@@ -266,10 +273,6 @@ class Network(nn.Module):
         target_value = discounted_reward + continuing * gamma_power * next_critic_value
 
         return target_value
-
-    ####################
-    # Internal methods #
-    ####################
 
     def _compute_critic_loss(self, curr_state, action_chunk, target_value):
         """
