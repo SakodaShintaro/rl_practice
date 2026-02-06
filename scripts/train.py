@@ -145,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--critic_loss_weight", type=float, default=1.0)
     parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--normalizing_by_return", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--normalizing_by_return", type=int, default=1, choices=[0, 1])
     parser.add_argument("--image_save_interval", type=int, default=10)
     parser.add_argument("--accumulation_steps", type=int, default=1)
     parser.add_argument("--debug", action="store_true")

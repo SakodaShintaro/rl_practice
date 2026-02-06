@@ -9,6 +9,7 @@ class RewardProcessor:
 
     def __init__(self, processing_type: str, reward_scale: float) -> None:
         self.return_rms = gym.wrappers.utils.RunningMeanStd(shape=())
+        self.max_abs_score = 1.0
         self.epsilon = 1e-8
         self.type = processing_type
         self.reward_scale = reward_scale
@@ -17,6 +18,8 @@ class RewardProcessor:
     def update(self, reward: float) -> None:
         """Update the running mean and std with the new reward."""
         self.return_rms.update(np.array([reward]))
+        self.max_abs_score = max(self.max_abs_score, np.abs(reward))
+        self.reward_scale = 1.0 / self.max_abs_score
 
     def normalize(self, reward: torch.Tensor) -> torch.Tensor:
         """Normalize the reward."""

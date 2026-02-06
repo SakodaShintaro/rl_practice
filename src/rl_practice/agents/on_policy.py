@@ -71,7 +71,7 @@ class OnPolicyAgent:
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
         self.chunk_step = 0  # current step within chunk
 
-        self.reward_processor = RewardProcessor("scaling", 1.0)
+        self.reward_processor = RewardProcessor("const", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
 
         if self.network_class == "actor_critic_with_state_value":
