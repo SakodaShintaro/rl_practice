@@ -2,7 +2,7 @@
 import numpy as np
 
 
-def make_np(x):
+def make_np(x: float) -> np.ndarray:
     return np.array(x).copy().astype("float32")
 
 
@@ -33,7 +33,7 @@ class RunningStats:
         x = make_np(x)
         self.update_params(x)
 
-    def update_params(self, x):
+    def update_params(self, x: np.ndarray) -> None:
         self.n += 1
         if self.n == 1:
             self.m = x
@@ -43,7 +43,7 @@ class RunningStats:
             self.m += (x - self.m) / self.n
             self.s += (x - prev_m) * (x - self.m)
 
-    def __add__(self, other):
+    def __add__(self, other: "RunningStats | float") -> "RunningStats":
         if isinstance(other, RunningStats):
             sum_ns = self.n + other.n
             prod_ns = self.n * other.n
@@ -89,13 +89,13 @@ class TDErrorScaler:
     Usage: Push the statistics online _before_ a learning update. Scale TD error by sigma.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.gamma_rms = RunningStats()
         self.return_sq_rms = RunningStats()
         self.reward_rms = RunningStats()
         self.return_rms = RunningStats()
 
-    def update(self, reward, gamma, G):
+    def update(self, reward: float, gamma: float, G: float | None) -> None:
         if G is not None:
             self.return_sq_rms.update(G**2)
             self.return_rms.update(G)
@@ -103,7 +103,7 @@ class TDErrorScaler:
         self.gamma_rms.update(gamma)
 
     @property
-    def sigma(self):
+    def sigma(self) -> float:
         variance = max(
             self.reward_rms.variance + self.gamma_rms.variance * self.return_sq_rms.mean, 1e-4
         )
