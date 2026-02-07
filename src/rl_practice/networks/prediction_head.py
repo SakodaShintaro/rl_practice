@@ -16,7 +16,7 @@ class StatePredictionHead(nn.Module):
         action_dim: int,
         predictor_hidden_dim: int,
         predictor_block_num: int,
-    ):
+    ) -> None:
         super().__init__()
         self.image_processor = image_processor
         self.reward_processor = reward_processor

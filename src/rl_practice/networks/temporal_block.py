@@ -19,7 +19,7 @@ class BaseTemporalBlock(nn.Module):
         temporal_layer: Layer for temporal processing
     """
 
-    def __init__(self, hidden_dim, temporal_layer):
+    def __init__(self, hidden_dim: int, temporal_layer: nn.Module) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
 
@@ -36,7 +36,7 @@ class BaseTemporalBlock(nn.Module):
             nn.Dropout(0.0),
         )
 
-    def get_rnn_state_size(self):
+    def get_rnn_state_size(self) -> int:
         """Return size of rnn_state"""
         return self.temporal.get_rnn_state_size()
 
@@ -65,7 +65,7 @@ class CausalAttentionLayer(nn.Module):
         max_position_embeddings: Maximum position embeddings
     """
 
-    def __init__(self, hidden_dim, n_head, max_position_embeddings):
+    def __init__(self, hidden_dim: int, n_head: int, max_position_embeddings: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.attn = SelfAttention(hidden_dim, n_head, max_position_embeddings, use_rope=True)
@@ -76,7 +76,7 @@ class CausalAttentionLayer(nn.Module):
         causal_mask = torch.where(matrix == 1, 0, causal_mask)
         self.register_buffer("causal_mask", causal_mask.contiguous())
 
-    def get_rnn_state_size(self):
+    def get_rnn_state_size(self) -> int:
         """Return hidden_dim since state is not used"""
         return self.hidden_dim
 
@@ -99,13 +99,13 @@ class MambaLayer(nn.Module):
         hidden_dim: Hidden dimension
     """
 
-    def __init__(self, hidden_dim):
+    def __init__(self, hidden_dim: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         d_ssm = 2 * hidden_dim
         self.mamba = Mamba2(d_model=hidden_dim, headdim=d_ssm)
 
-    def get_rnn_state_size(self):
+    def get_rnn_state_size(self) -> int:
         """Return hidden_dim since state is not used"""
         return self.hidden_dim
 
@@ -126,12 +126,12 @@ class GRULayer(nn.Module):
         hidden_dim: Hidden dimension
     """
 
-    def __init__(self, hidden_dim):
+    def __init__(self, hidden_dim: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.gru = nn.GRU(hidden_dim, hidden_dim, num_layers=1, batch_first=True)
 
-    def get_rnn_state_size(self):
+    def get_rnn_state_size(self) -> int:
         """Return GRU state size"""
         return self.hidden_dim
 
@@ -154,7 +154,7 @@ class GatedDeltaNetLayer(nn.Module):
         hidden_dim: Hidden dimension
     """
 
-    def __init__(self, hidden_dim):
+    def __init__(self, hidden_dim: int) -> None:
         super().__init__()
         expand_v = 2
         n_head = 8
@@ -184,11 +184,11 @@ class GatedDeltaNetLayer(nn.Module):
         self.conv_state_sizes = [math.prod(shape) for shape in self.conv_state_shapes]
         self.cache_size = self.recurrent_state_size + sum(self.conv_state_sizes)
 
-    def get_rnn_state_size(self):
+    def get_rnn_state_size(self) -> int:
         """Return GatedDeltaNet cache size"""
         return self.cache_size
 
-    def _flatten_cache(self, cache_dict):
+    def _flatten_cache(self, cache_dict: dict | None) -> torch.Tensor | None:
         """Flatten dictionary from FLACache to 1D tensor"""
         if cache_dict is None:
             return None
@@ -206,7 +206,13 @@ class GatedDeltaNetLayer(nn.Module):
         cache_flat = torch.cat([recurrent_flat, conv_flat], dim=-1)  # [B, cache_size]
         return cache_flat.unsqueeze(0)  # [1, B, cache_size]
 
-    def _unflatten_cache(self, cache_flat, batch_size, device, dtype):
+    def _unflatten_cache(
+        self,
+        cache_flat: torch.Tensor | None,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> FLACache | None:
         """Restore 1D tensor to dictionary for FLACache"""
         if cache_flat is None:
             return None
@@ -301,11 +307,11 @@ class IdentityLayer(nn.Module):
         hidden_dim: Hidden dimension
     """
 
-    def __init__(self, hidden_dim):
+    def __init__(self, hidden_dim: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
 
-    def get_rnn_state_size(self):
+    def get_rnn_state_size(self) -> int:
         """Return hidden_dim since state is not used"""
         return self.hidden_dim
 
@@ -318,7 +324,9 @@ class IdentityLayer(nn.Module):
 
 
 # Aliases for compatibility
-def CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings):
+def CausalTransformerBlock(
+    hidden_dim: int, n_head: int, max_position_embeddings: int
+) -> BaseTemporalBlock:
     """Causal Transformer block (with RoPE, applies causal mask internally)"""
     return BaseTemporalBlock(
         hidden_dim,
@@ -326,22 +334,22 @@ def CausalTransformerBlock(hidden_dim, n_head, max_position_embeddings):
     )
 
 
-def MambaBlock(hidden_dim):
+def MambaBlock(hidden_dim: int) -> BaseTemporalBlock:
     """Mamba state space model block (same structure as Transformer block)"""
     return BaseTemporalBlock(hidden_dim, MambaLayer(hidden_dim))
 
 
-def GRUBlock(hidden_dim):
+def GRUBlock(hidden_dim: int) -> BaseTemporalBlock:
     """GRU block (same structure as Transformer block)"""
     return BaseTemporalBlock(hidden_dim, GRULayer(hidden_dim))
 
 
-def GdnBlock(hidden_dim):
+def GdnBlock(hidden_dim: int) -> BaseTemporalBlock:
     """GatedDeltaNet block (same structure as Transformer block)"""
     return BaseTemporalBlock(hidden_dim, GatedDeltaNetLayer(hidden_dim))
 
 
-def IdentityBlock(hidden_dim):
+def IdentityBlock(hidden_dim: int) -> BaseTemporalBlock:
     """Identity block (for comparison)"""
     return BaseTemporalBlock(hidden_dim, IdentityLayer(hidden_dim))
 

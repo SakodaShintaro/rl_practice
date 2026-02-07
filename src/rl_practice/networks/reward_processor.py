@@ -4,7 +4,7 @@ from torch import nn
 
 
 class RewardProcessor(nn.Module):
-    def __init__(self, embed_dim: int, bias: bool = False):
+    def __init__(self, embed_dim: int) -> None:
         super().__init__()
         self.embed_dim = embed_dim
 

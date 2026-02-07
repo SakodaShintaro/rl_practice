@@ -32,7 +32,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
 
 
 class EmbedND(nn.Module):
-    def __init__(self, dim: int, theta: int, axes_dim: tuple[int]):
+    def __init__(self, dim: int, theta: int, axes_dim: tuple[int]) -> None:
         super().__init__()
         self.dim = dim
         self.theta = theta
@@ -47,7 +47,9 @@ class EmbedND(nn.Module):
         return emb.unsqueeze(1)
 
 
-def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 1000.0):
+def timestep_embedding(
+    t: Tensor, dim: int, max_period: int = 10000, time_factor: float = 1000.0
+) -> Tensor:
     """
     Create sinusoidal timestep embeddings.
     :param t: a 1-D Tensor of N indices, one per batch element.
@@ -73,7 +75,7 @@ def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 10
 
 
 class MLPEmbedder(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int):
+    def __init__(self, in_dim: int, hidden_dim: int) -> None:
         super().__init__()
         self.in_layer = nn.Linear(in_dim, hidden_dim, bias=True)
         self.silu = nn.SiLU()
@@ -84,11 +86,11 @@ class MLPEmbedder(nn.Module):
 
 
 class RMSNorm(torch.nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int) -> None:
         super().__init__()
         self.scale = nn.Parameter(torch.ones(dim))
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor) -> Tensor:
         x_dtype = x.dtype
         x = x.float()
         rrms = torch.rsqrt(torch.mean(x**2, dim=-1, keepdim=True) + 1e-6)
@@ -96,7 +98,7 @@ class RMSNorm(torch.nn.Module):
 
 
 class QKNorm(torch.nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int) -> None:
         super().__init__()
         self.query_norm = RMSNorm(dim)
         self.key_norm = RMSNorm(dim)
@@ -134,7 +136,7 @@ class ModulationOut:
 
 
 class Modulation(nn.Module):
-    def __init__(self, dim: int, double: bool):
+    def __init__(self, dim: int, double: bool) -> None:
         super().__init__()
         self.is_double = double
         self.multiplier = 6 if double else 3
@@ -271,18 +273,18 @@ class SingleStreamBlock(nn.Module):
 
 
 class LinearEmbedder(nn.Module):
-    def __init__(self, embed_dim, bias=False):
+    def __init__(self, embed_dim: int, bias: bool) -> None:
         super().__init__()
         self.embed_dim = embed_dim
         self.use_bias = bias
         self.encoder = nn.Linear(1, embed_dim, bias=bias)
 
-    def encode(self, x):
+    def encode(self, x: Tensor) -> Tensor:
         x = x.unsqueeze(-1)
         embedded = self.encoder(x)
         return embedded
 
-    def decode(self, embedded):
+    def decode(self, embedded: Tensor) -> Tensor:
         if self.use_bias:
             bias_expanded = self.encoder.bias.unsqueeze(0).unsqueeze(0)
             decoded_values = (embedded - bias_expanded) / (self.encoder.weight[:, 0] + 1e-6)
@@ -294,7 +296,7 @@ class LinearEmbedder(nn.Module):
 
 
 class LastLayer(nn.Module):
-    def __init__(self, hidden_size: int, patch_size: int, out_channels: int):
+    def __init__(self, hidden_size: int, patch_size: int, out_channels: int) -> None:
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)

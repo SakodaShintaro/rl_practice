@@ -8,7 +8,7 @@ from .self_attention import SpatialTransformerBlock
 class SequenceCompressor(nn.Module):
     """(B, L_in, D) -> (B, L_out, D) by learnable tokens and Self-Attention"""
 
-    def __init__(self, hidden_dim: int, l_in: int, l_out: int):
+    def __init__(self, hidden_dim: int, l_in: int, l_out: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.l_out = l_out

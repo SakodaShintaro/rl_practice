@@ -29,7 +29,14 @@ from rl_practice.wrappers import make_env
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def save_episode_data(video_dir, image_dir, name, bgr_image_list, action_list, reward_list):
+def save_episode_data(
+    video_dir: Path,
+    image_dir: Path,
+    name: str,
+    bgr_image_list: list[np.ndarray],
+    action_list: list[np.ndarray],
+    reward_list: list[float],
+) -> None:
     """Save episode video, images, actions and rewards"""
     if not bgr_image_list:
         return

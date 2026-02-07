@@ -10,7 +10,7 @@ from .spatial_temporal_transformer import SpatialTemporalTransformer
 from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, IdentityBlock, MambaBlock
 
 
-def init_weights(m):
+def init_weights(m: nn.Module) -> None:
     if isinstance(m, nn.Conv2d):
         nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
         if m.bias is not None:
@@ -40,7 +40,7 @@ class SpatialTemporalEncoder(nn.Module):
         action_dim: int,
         temporal_model_type: str,
         use_image_only: bool,
-    ):
+    ) -> None:
         super().__init__()
 
         self.use_image_only = use_image_only
@@ -180,7 +180,7 @@ class TemporalOnlyEncoder(nn.Module):
         action_dim: int,
         temporal_model_type: str,
         use_image_only: bool,
-    ):
+    ) -> None:
         super().__init__()
 
         self.n_layer = n_layer

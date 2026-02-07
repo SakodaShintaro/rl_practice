@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: MIT
+import argparse
+
+import gymnasium as gym
 import numpy as np
 import torch
 from torch import optim
@@ -9,7 +12,12 @@ from rl_practice.reward_processor import RewardProcessor
 
 
 class OffPolicyAgent:
-    def __init__(self, args, observation_space, action_space) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        observation_space: gym.spaces.Box,
+        action_space: gym.spaces.Box,
+    ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.observation_space = observation_space
@@ -178,7 +186,7 @@ class OffPolicyAgent:
     # Internal methods #
     ####################
 
-    def _train(self, global_step) -> dict:
+    def _train(self, global_step: int) -> dict:
         info_dict = {}
 
         if global_step < self.learning_starts:

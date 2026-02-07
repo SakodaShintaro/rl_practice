@@ -11,12 +11,12 @@ from .temporal_block import CausalTransformerBlock, GdnBlock, GRUBlock, Identity
 class SpatialTemporalBlock(nn.Module):
     def __init__(
         self,
-        hidden_dim,
-        n_head,
-        temporal_model_type,
-        tempo_len,
-        space_len,
-    ):
+        hidden_dim: int,
+        n_head: int,
+        temporal_model_type: str,
+        tempo_len: int,
+        space_len: int,
+    ) -> None:
         super().__init__()
 
         if temporal_model_type == "mamba":
@@ -33,7 +33,9 @@ class SpatialTemporalBlock(nn.Module):
             raise ValueError(f"Unknown temporal_model_type: {temporal_model_type}")
         self.space_block = SpatialTransformerBlock(hidden_dim, n_head, space_len)
 
-    def forward(self, x, rnn_state):
+    def forward(
+        self, x: torch.Tensor, rnn_state: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             x: [B, T, S, C]
@@ -61,7 +63,7 @@ class SpatialTemporalTransformer(nn.Module):
         hidden_dim: int,
         n_head: int,
         temporal_model_type: str,
-    ):
+    ) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
@@ -87,7 +89,7 @@ class SpatialTemporalTransformer(nn.Module):
 
         self.apply(self._init_weights)
 
-    def _init_weights(self, module):
+    def _init_weights(self, module: nn.Module) -> None:
         if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean=0.0, std=0.02)
             if isinstance(module, nn.Linear) and module.bias is not None:
@@ -96,7 +98,9 @@ class SpatialTemporalTransformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, x: torch.Tensor, rnn_state: torch.Tensor) -> tuple:
+    def forward(
+        self, x: torch.Tensor, rnn_state: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the SpatialTemporalTransformer.
 

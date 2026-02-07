@@ -26,7 +26,7 @@ class FluxDiT(nn.Module):
         axes_dim: tuple[int],
         theta: int,
         qkv_bias: bool,
-    ):
+    ) -> None:
         super().__init__()
 
         self.in_channels = in_channels
@@ -73,7 +73,7 @@ class FluxDiT(nn.Module):
         timesteps: Tensor,
         cond: Tensor,
         y: Tensor,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         B, noise_seq_len, C = noise.shape
         _, cond_seq_len, _ = cond.shape
 

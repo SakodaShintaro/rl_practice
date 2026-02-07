@@ -60,7 +60,9 @@ class SelfAttention(nn.Module):
         use_rope: Whether to use RoPE
     """
 
-    def __init__(self, hidden_dim, n_head, max_position_embeddings, use_rope):
+    def __init__(
+        self, hidden_dim: int, n_head: int, max_position_embeddings: int, use_rope: bool
+    ) -> None:
         super().__init__()
         assert hidden_dim % n_head == 0
         self.key = nn.Linear(hidden_dim, hidden_dim, bias=False)
@@ -89,7 +91,7 @@ class SelfAttention(nn.Module):
             )
             self.rotary_emb = LlamaRotaryEmbedding(rope_config)
 
-    def forward(self, x, attn_mask=None):
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None) -> torch.Tensor:
         B, T, C = x.size()
 
         k = self.key(x)
@@ -131,7 +133,7 @@ class SpatialTransformerBlock(nn.Module):
         max_position_embeddings: Maximum position embeddings
     """
 
-    def __init__(self, hidden_dim, n_head, max_position_embeddings):
+    def __init__(self, hidden_dim: int, n_head: int, max_position_embeddings: int) -> None:
         super().__init__()
         self.ln1 = nn.LayerNorm(hidden_dim)
         self.ln2 = nn.LayerNorm(hidden_dim)
@@ -148,7 +150,7 @@ class SpatialTransformerBlock(nn.Module):
             nn.Dropout(0.0),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln1(x), attn_mask=None)
         x = x + self.mlp(self.ln2(x))
         return x

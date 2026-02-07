@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: MIT
+import argparse
+
+import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn, optim
@@ -11,7 +14,9 @@ from rl_practice.reward_processor import RewardProcessor
 
 
 class SequentialBatchSampler:
-    def __init__(self, buffer_capacity, batch_size, k_frames, drop_last):
+    def __init__(
+        self, buffer_capacity: int, batch_size: int, k_frames: int, drop_last: bool
+    ) -> None:
         self.buffer_capacity = buffer_capacity
         self.batch_size = batch_size
         self.k_frames = k_frames
@@ -33,7 +38,7 @@ class SequentialBatchSampler:
         if batch and not self.drop_last:
             yield batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         num_samples = self.buffer_capacity - self.k_frames + 1
         if self.drop_last:
             return num_samples // self.batch_size
@@ -42,7 +47,12 @@ class SequentialBatchSampler:
 
 
 class OnPolicyAgent:
-    def __init__(self, args, observation_space, action_space) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        observation_space: gym.spaces.Box,
+        action_space: gym.spaces.Box,
+    ) -> None:
         self.on_policy_epoch = args.on_policy_epoch
         # action properties
         self.action_space = action_space

@@ -7,7 +7,7 @@ from .image_processor import ImageProcessor
 from .sparse_utils import apply_one_shot_pruning
 
 
-def weights_init_(m):
+def weights_init_(m: nn.Module) -> None:
     if isinstance(m, nn.Linear):
         nn.init.xavier_uniform_(m.weight, gain=1)
         # nn.init.orthogonal_(m.weight.data)
