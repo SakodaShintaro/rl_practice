@@ -15,7 +15,7 @@ from rl_practice.networks.value_head import SeparateCritic, StateValueHead
 from rl_practice.networks.vlm_backbone import QwenVLEncoder
 
 
-class Network(nn.Module):
+class ActorCriticWithStateValue(nn.Module):
     def __init__(
         self,
         observation_space_shape: tuple[int],
