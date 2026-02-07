@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch import nn, optim
 
-from rl_practice.networks.actor_critic_with_action_value import Network as ActionValueNetwork
+from rl_practice.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from rl_practice.networks.actor_critic_with_state_value import Network as StateValueNetwork
 from rl_practice.networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue
 from rl_practice.replay_buffer import ReplayBuffer, ReplayBufferData
@@ -80,7 +80,7 @@ class OnPolicyAgent:
             )
             self.network = torch.compile(self.network)
         elif self.network_class == "actor_critic_with_action_value":
-            self.network = ActionValueNetwork(
+            self.network = ActorCriticWithActionValue(
                 observation_space.shape, action_dim=self.action_dim, args=args
             ).to(self.device)
             self.network = torch.compile(self.network)

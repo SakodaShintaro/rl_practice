@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 import argparse
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,11 +15,11 @@ from rl_practice.networks.value_head import ActionValueHead
 from rl_practice.networks.vlm_backbone import QwenVLEncoder
 
 
-class Network(nn.Module):
+class ActorCriticWithActionValue(nn.Module):
     def __init__(
         self, observation_space_shape: tuple[int], action_dim: int, args: argparse.Namespace
     ) -> None:
-        super(Network, self).__init__()
+        super().__init__()
         self.gamma = args.gamma
         self.num_bins = args.num_bins
         self.sparsity = args.sparsity
