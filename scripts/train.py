@@ -23,6 +23,7 @@ torch.set_float32_matmul_precision("high")
 import wandb
 from rl_practice.agents.off_policy import OffPolicyAgent
 from rl_practice.agents.on_policy import OnPolicyAgent
+from rl_practice.agents.streaming import StreamingAgent
 from rl_practice.utils import concat_labeled_images, create_reward_image
 from rl_practice.wrappers import make_env
 
@@ -88,7 +89,7 @@ def parse_args() -> argparse.Namespace:
         "--agent_type",
         type=str,
         default="on_policy",
-        choices=["off_policy", "on_policy"],
+        choices=["off_policy", "on_policy", "streaming"],
     )
     parser.add_argument(
         "--network_class",
@@ -253,6 +254,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         agent = OffPolicyAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "on_policy":
         agent = OnPolicyAgent(args, env.observation_space, env.action_space)
+    elif args.agent_type == "streaming":
+        agent = StreamingAgent(args, env.observation_space, env.action_space)
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
