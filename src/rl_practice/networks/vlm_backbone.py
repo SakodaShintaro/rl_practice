@@ -212,13 +212,13 @@ class QwenVLEncoder(nn.Module):
         self.video_fps = 50 / 8
         self._dummy_state = torch.zeros(1, 1, 1)
 
-        # Compute output_dim dynamically with dummy forward pass
-        self.output_dim = self._compute_output_dim()
+        # Compute target sequence length and output_dim via dummy forward pass
+        self._target_seq_len, self.output_dim = self._compute_output_dim()
         torch.cuda.empty_cache()
 
     @torch.no_grad()
-    def _compute_output_dim(self) -> int:
-        """Compute output dimension by running a dummy forward pass."""
+    def _compute_output_dim(self) -> tuple[int, int]:
+        """Compute target sequence length and output dimension by running a dummy forward pass."""
         dummy_images = torch.zeros(1, self.seq_len, 3, 96, 96, device=self.device)
         dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
 
@@ -227,10 +227,9 @@ class QwenVLEncoder(nn.Module):
         output = self.model.forward(**model_inputs, output_hidden_states=True)
         hidden = output["hidden_states"][self.target_layer_idx]
 
-        x = hidden.to(torch.float32)
-        x = self.out_proj(x)
-        x = x.flatten(start_dim=1)
-        return x.shape[1]
+        target_seq_len = hidden.shape[1]
+        output_dim = target_seq_len * self.out_proj.out_features
+        return target_seq_len, output_dim
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
@@ -250,7 +249,15 @@ class QwenVLEncoder(nn.Module):
             hidden = output["hidden_states"][self.target_layer_idx]
 
         x = hidden.to(torch.float32)
-        x = self.out_proj(x)
+        x = self.out_proj(x)  # (B, seq_len, out_dim)
+        seq_len = x.shape[1]
+        if seq_len > self._target_seq_len:
+            x = x[:, seq_len - self._target_seq_len :, :]
+        elif seq_len < self._target_seq_len:
+            pad = torch.zeros(
+                x.shape[0], self._target_seq_len - seq_len, x.shape[2], device=x.device
+            )
+            x = torch.cat([pad, x], dim=1)
         x = x.flatten(start_dim=1)
 
         return x, rnn_state
