@@ -42,7 +42,7 @@ class OffPolicyAgent:
 
         if args.network_class == "actor_critic_with_action_value":
             self.network = ActorCriticWithActionValue(
-                observation_space.shape, action_dim=self.action_dim, args=args
+                observation_space.shape, action_space.shape, args
             ).to(self.device)
         else:
             raise ValueError(f"Unknown network class: {args.network_class}")

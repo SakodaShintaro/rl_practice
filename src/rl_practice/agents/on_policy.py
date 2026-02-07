@@ -81,7 +81,7 @@ class OnPolicyAgent:
             self.network = torch.compile(self.network)
         elif self.network_class == "actor_critic_with_action_value":
             self.network = ActorCriticWithActionValue(
-                observation_space.shape, action_dim=self.action_dim, args=args
+                observation_space.shape, action_space.shape, args
             ).to(self.device)
             self.network = torch.compile(self.network)
         elif self.network_class == "vlm_actor_critic_with_state_value":

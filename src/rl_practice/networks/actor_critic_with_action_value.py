@@ -17,7 +17,10 @@ from rl_practice.networks.vlm_backbone import QwenVLEncoder
 
 class ActorCriticWithActionValue(nn.Module):
     def __init__(
-        self, observation_space_shape: tuple[int], action_dim: int, args: argparse.Namespace
+        self,
+        observation_space_shape: tuple[int],
+        action_space_shape: tuple[int],
+        args: argparse.Namespace,
     ) -> None:
         super().__init__()
         self.gamma = args.gamma
@@ -27,7 +30,7 @@ class ActorCriticWithActionValue(nn.Module):
         self.dacer_loss_weight = args.dacer_loss_weight
         self.critic_loss_weight = args.critic_loss_weight
 
-        self.action_dim = action_dim
+        self.action_dim = action_space_shape[0]
         self.predictor_step_num = args.predictor_step_num
         self.observation_space_shape = observation_space_shape
 
@@ -43,7 +46,7 @@ class ActorCriticWithActionValue(nn.Module):
                 reward_processor=self.reward_processor,
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
-                action_dim=action_dim,
+                action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
                 use_image_only=True,
             )
@@ -53,7 +56,7 @@ class ActorCriticWithActionValue(nn.Module):
                 reward_processor=self.reward_processor,
                 seq_len=self.seq_len,
                 n_layer=args.encoder_block_num,
-                action_dim=action_dim,
+                action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
                 use_image_only=False,
             )
@@ -72,7 +75,7 @@ class ActorCriticWithActionValue(nn.Module):
         if self.policy_type == "diffusion":
             self.policy_head = DiffusionPolicy(
                 state_dim=self.encoder.output_dim,
-                action_dim=action_dim,
+                action_dim=self.action_dim,
                 hidden_dim=args.actor_hidden_dim,
                 block_num=args.actor_block_num,
                 denoising_time=args.denoising_time,
@@ -82,13 +85,13 @@ class ActorCriticWithActionValue(nn.Module):
         elif self.policy_type == "beta":
             self.policy_head = BetaPolicy(
                 hidden_dim=self.encoder.output_dim,
-                action_dim=action_dim,
+                action_dim=self.action_dim,
                 horizon=args.horizon,
             )
         elif self.policy_type == "cfgrl":
             self.policy_head = CFGDiffusionPolicy(
                 state_dim=self.encoder.output_dim,
-                action_dim=action_dim,
+                action_dim=self.action_dim,
                 hidden_dim=args.actor_hidden_dim,
                 block_num=args.actor_block_num,
                 denoising_time=args.denoising_time,
@@ -98,7 +101,7 @@ class ActorCriticWithActionValue(nn.Module):
             )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
-            action_dim=action_dim,
+            action_dim=self.action_dim,
             horizon=args.horizon,
             hidden_dim=args.critic_hidden_dim,
             block_num=args.critic_block_num,
@@ -108,7 +111,7 @@ class ActorCriticWithActionValue(nn.Module):
         self.prediction_head = StatePredictionHead(
             image_processor=self.image_processor,
             reward_processor=self.reward_processor,
-            action_dim=action_dim,
+            action_dim=self.action_dim,
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
         )
