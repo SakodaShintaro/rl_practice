@@ -73,18 +73,13 @@ class StreamingAgent:
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
-    @torch.inference_mode()
-    def select_action(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
-    ) -> tuple[np.ndarray, dict]:
-        info_dict = {}
-
-        # Reset chunk on episode boundary
+    def _prepare_step(
+        self, obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info_dict: dict
+    ) -> None:
         if terminated or truncated:
             self.action_chunk = None
             self.chunk_step = 0
 
-        # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
         if not self.normalizing_by_return:
@@ -95,10 +90,10 @@ class StreamingAgent:
             torch.tensor(reward_with_penalty)
         ).item()
 
-        # add to replay buffer
         obs_tensor = torch.from_numpy(obs).to(self.device)
-        obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
-        obs_z = obs_z.squeeze(0)
+        with torch.inference_mode():
+            obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
+            obs_z = obs_z.squeeze(0)
         normalized_action = (self.prev_action - self.action_bias) / self.action_scale
         self.rb.add(
             obs_tensor,
@@ -112,17 +107,42 @@ class StreamingAgent:
             [],
         )
 
-        # Use cached action from chunk if available (except during random exploration)
-        if self.action_chunk is not None and self.chunk_step < self.horizon:
-            action = self.action_chunk[self.chunk_step]
-            action = action * self.action_scale + self.action_bias
-            action = np.clip(action, self.action_low, self.action_high)
-            self.prev_action = action
-            self.chunk_step += 1
-            info_dict["chunk_step"] = self.chunk_step
-            return action, info_dict
+    def _use_action_chunk(self, info_dict: dict) -> np.ndarray:
+        action = self.action_chunk[self.chunk_step]
+        action = action * self.action_scale + self.action_bias
+        action = np.clip(action, self.action_low, self.action_high)
+        self.prev_action = action
+        self.chunk_step += 1
+        info_dict["chunk_step"] = self.chunk_step
+        return action
 
-        # inference - predict new action chunk
+    def _start_new_chunk(self, infer_dict: dict, info_dict: dict) -> np.ndarray:
+        self.rnn_state = infer_dict["rnn_state"]
+        info_dict["value"] = infer_dict["value"]
+        info_dict["next_image"] = infer_dict["next_image"]
+        info_dict["next_reward"] = infer_dict["next_reward"]
+
+        action_chunk = infer_dict["action"][0].cpu().numpy()
+        self.action_chunk = action_chunk
+        self.chunk_step = 1
+
+        action = action_chunk[0]
+        action = action * self.action_scale + self.action_bias
+        action = np.clip(action, self.action_low, self.action_high)
+        self.prev_action = action
+        info_dict["chunk_step"] = self.chunk_step
+        return action
+
+    @torch.inference_mode()
+    def select_action(
+        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+    ) -> tuple[np.ndarray, dict]:
+        info_dict = {}
+        self._prepare_step(obs, reward, terminated, truncated, info_dict)
+
+        if self.action_chunk is not None and self.chunk_step < self.horizon:
+            return self._use_action_chunk(info_dict), info_dict
+
         latest_data = self.rb.get_latest(self.seq_len)
         infer_dict = self.network.infer(
             latest_data.observations,
@@ -131,64 +151,26 @@ class StreamingAgent:
             latest_data.rewards,
             self.rnn_state,
         )
-        self.rnn_state = infer_dict["rnn_state"]
-        info_dict["value"] = infer_dict["value"]
-        info_dict["next_image"] = infer_dict["next_image"]
-        info_dict["next_reward"] = infer_dict["next_reward"]
-
-        # action
-        # action chunk: (B, horizon, action_dim) -> (horizon, action_dim)
-        action_chunk = infer_dict["action"][0].cpu().numpy()
-        self.action_chunk = action_chunk
-        self.chunk_step = 1
-
-        # Use first action from chunk
-        action = action_chunk[0]
-        action = action * self.action_scale + self.action_bias
-        action = np.clip(action, self.action_low, self.action_high)
-        self.prev_action = action
-
-        info_dict["chunk_step"] = self.chunk_step
-        return action, info_dict
+        return self._start_new_chunk(infer_dict, info_dict), info_dict
 
     def step(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
+        self._prepare_step(obs, reward, terminated, truncated, info_dict)
 
-        # make decision
-        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
-        info_dict.update(action_info)
+        # cached action: no inference, no training
+        if self.action_chunk is not None and self.chunk_step < self.horizon:
+            return self._use_action_chunk(info_dict), info_dict
 
-        # train
-        train_info = self._train(global_step)
-        info_dict.update(train_info)
-
-        return action, info_dict
-
-    def on_episode_end(self, score: float, feedback_text: str) -> dict:
-        return {}
-
-    ####################
-    # Internal methods #
-    ####################
-
-    def _train(self, global_step: int) -> dict:
-        info_dict = {}
-
-        # Sample data for training using ReplayBuffer
+        # combined inference + training
         data = self.rb.get_latest(self.seq_len + self.horizon)
-
-        # apply reward processing
         data.rewards = self.reward_processor.normalize(data.rewards)
 
-        # compute loss
-        loss, activation_dict, info_dict = self.network.compute_loss(data)
+        infer_dict, loss, activation_dict, loss_info = self.network.infer_and_compute_loss(data)
+        action = self._start_new_chunk(infer_dict, info_dict)
 
-        # add prefixes to info_dict keys
-        info_dict = {f"losses/{key}": value for key, value in info_dict.items()}
-
-        # optimize the model with gradient accumulation
+        info_dict.update({f"losses/{key}": value for key, value in loss_info.items()})
         scaled_loss = loss / self.accumulation_steps
         scaled_loss.backward()
 
@@ -198,4 +180,7 @@ class StreamingAgent:
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-        return info_dict
+        return action, info_dict
+
+    def on_episode_end(self, score: float, feedback_text: str) -> dict:
+        return {}
