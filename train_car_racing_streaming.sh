@@ -13,11 +13,11 @@ uv run python scripts/train.py baseline$suffix \
   --encoder spatial_temporal \
   --num_bins 1 \
   --value_range 200.0 \
-  --step_limit 40_000 \
+  --step_limit 80_000 \
   --eval_range 20 \
   --image_processor_type ae \
   --seq_len 8 \
   --batch_size 16 \
   --accumulation_steps 1 \
-  --learning_rate 1e-4 \
+  --learning_rate 1e-5 \
   --policy_type diffusion \
