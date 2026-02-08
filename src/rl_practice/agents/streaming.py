@@ -55,7 +55,7 @@ class StreamingAgent:
         self.network = torch.compile(self.network)
         self.rnn_state = self.network.init_state().to(self.device)
         lr = args.learning_rate
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.1)
 
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
