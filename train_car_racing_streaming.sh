@@ -13,7 +13,7 @@ uv run python scripts/train.py baseline$suffix \
   --encoder spatial_temporal \
   --num_bins 1 \
   --value_range 200.0 \
-  --step_limit 80_000 \
+  --step_limit 400_000 \
   --eval_range 20 \
   --image_processor_type ae \
   --seq_len 8 \

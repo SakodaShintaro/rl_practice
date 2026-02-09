@@ -180,7 +180,7 @@ class ActorCriticWithActionValue(nn.Module):
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
         # compute target value
-        target_value = self._compute_target_value(data)  # (B,)
+        target_value = self._compute_target_value(data)["target_value"]  # (B,)
 
         # Use seq_len frames (excluding last horizon frames)
         curr_obs = data.observations[:, : -self.horizon]
@@ -226,37 +226,94 @@ class ActorCriticWithActionValue(nn.Module):
 
         return total_loss, activations_dict, info_dict
 
+    def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
+        """Combined inference and loss computation. Encoder runs 2x instead of 3x."""
+        target_dict = self._compute_target_value(data)
+        target_value = target_dict["target_value"]
+
+        curr_obs = data.observations[:, : -self.horizon]
+        curr_obs_z = data.obs_z[:, : -self.horizon]
+        curr_actions = data.actions[:, : -self.horizon]
+        curr_rewards = data.rewards[:, : -self.horizon]
+        curr_rnn_state = data.rnn_state[:, 0]
+
+        curr_state, _ = self.encoder.forward(
+            curr_obs, curr_obs_z, curr_actions, curr_rewards, curr_rnn_state
+        )
+
+        action_chunk = data.actions[:, -self.horizon :]
+
+        critic_loss, critic_activations, critic_info = self._compute_critic_loss(
+            curr_state, action_chunk, target_value
+        )
+        if self.policy_type == "diffusion":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss(curr_state)
+        elif self.policy_type == "beta":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(curr_state)
+        elif self.policy_type == "cfgrl":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
+                curr_state, action_chunk
+            )
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, curr_state)
+
+        total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
+
+        next_image, next_reward = self.prediction_head.predict_next_state(
+            target_dict["next_state"],
+            target_dict["action"][:, 0],
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )
+
+        infer_dict = {
+            "action": target_dict["action"],
+            "value": target_dict["q_value"].item(),
+            "rnn_state": target_dict["rnn_state"],
+            "next_image": next_image,
+            "next_reward": next_reward,
+        }
+
+        activations_dict = {
+            "state": curr_state,
+            **critic_activations,
+            **actor_activations,
+            **seq_activations,
+        }
+
+        info_dict = {
+            **critic_info,
+            **actor_info,
+            **seq_info,
+        }
+
+        return infer_dict, total_loss, activations_dict, info_dict
+
     ####################
     # Internal methods #
     ####################
 
     @torch.no_grad()
-    def _compute_target_value(self, data) -> torch.Tensor:
-        # For action chunking, next state is after the full horizon
-        # Shift by horizon steps
-        next_obs = data.observations[:, self.horizon :]  # (B, seq_len, ...)
+    def _compute_target_value(self, data) -> dict:
+        next_obs = data.observations[:, self.horizon :]
         next_obs_z = data.obs_z[:, self.horizon :]
         next_actions = data.actions[:, self.horizon :]
         next_rewards = data.rewards[:, self.horizon :]
-        next_rnn_state = data.rnn_state[:, self.horizon]  # (B, ...)
+        next_rnn_state = data.rnn_state[:, self.horizon]
 
-        next_state, _ = self.encoder.forward(
+        next_state, rnn_state_out = self.encoder.forward(
             next_obs, next_obs_z, next_actions, next_rewards, next_rnn_state
         )
-        next_state_actions, _ = self.policy_head.get_action(next_state)
-        next_critic_output_dict = self.value_head(next_state, next_state_actions)
+        action, _ = self.policy_head.get_action(next_state)
+        next_critic_output_dict = self.value_head(next_state, action)
         next_critic_value = next_critic_output_dict["output"]
         if self.num_bins > 1:
             next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
         else:
             next_critic_value = next_critic_value.view(-1)
 
-        # Accumulate discounted rewards over the horizon
-        # rewards[:, -horizon:] contains rewards for the chunk
-        chunk_rewards = data.rewards[:, -self.horizon :]  # (B, horizon, 1)
-        chunk_dones = data.dones[:, -self.horizon :]  # (B, horizon)
-
-        # Compute discounted sum: r_0 + γ*r_1 + γ²*r_2 + ... + γ^{h-1}*r_{h-1}
+        chunk_rewards = data.rewards[:, -self.horizon :]
+        chunk_dones = data.dones[:, -self.horizon :]
         batch_size = chunk_rewards.size(0)
         device = chunk_rewards.device
         discounted_reward = torch.zeros(batch_size, device=device)
@@ -268,10 +325,15 @@ class ActorCriticWithActionValue(nn.Module):
             gamma_power *= self.gamma
             continuing *= 1 - chunk_dones[:, i].flatten()
 
-        # Final target: discounted_reward + γ^h * Q(s_next, a_next) if continuing
         target_value = discounted_reward + continuing * gamma_power * next_critic_value
 
-        return target_value
+        return {
+            "target_value": target_value,
+            "action": action,
+            "rnn_state": rnn_state_out,
+            "q_value": next_critic_value,
+            "next_state": next_state,
+        }
 
     def _compute_critic_loss(self, curr_state, action_chunk, target_value):
         """
