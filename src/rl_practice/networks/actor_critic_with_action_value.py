@@ -226,11 +226,8 @@ class ActorCriticWithActionValue(nn.Module):
 
         return total_loss, activations_dict, info_dict
 
-    def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        """Combined inference and loss computation. Encoder runs 2x instead of 3x."""
-        target_dict = self._compute_target_value(data)
-        target_value = target_dict["target_value"]
-
+    def compute_curr_state(self, data) -> torch.Tensor:
+        """Compute current state with gradients (fallback when no cached state)."""
         curr_obs = data.observations[:, : -self.horizon]
         curr_obs_z = data.obs_z[:, : -self.horizon]
         curr_actions = data.actions[:, : -self.horizon]
@@ -240,7 +237,49 @@ class ActorCriticWithActionValue(nn.Module):
         curr_state, _ = self.encoder.forward(
             curr_obs, curr_obs_z, curr_actions, curr_rewards, curr_rnn_state
         )
+        return curr_state
 
+    def infer_and_compute_loss(
+        self, data, curr_state: torch.Tensor
+    ) -> tuple[dict, torch.Tensor, torch.Tensor, dict, dict]:
+        """Combined inference and loss computation. Encoder runs 1x with state caching."""
+        # Compute next state WITH gradients (to be cached as curr_state for next step)
+        next_obs = data.observations[:, self.horizon :]
+        next_obs_z = data.obs_z[:, self.horizon :]
+        next_actions = data.actions[:, self.horizon :]
+        next_rewards = data.rewards[:, self.horizon :]
+        next_rnn_state = data.rnn_state[:, self.horizon]
+
+        next_state, rnn_state_out = self.encoder.forward(
+            next_obs, next_obs_z, next_actions, next_rewards, next_rnn_state
+        )
+
+        # Compute target value (no grad for TD target stability)
+        with torch.no_grad():
+            action, _ = self.policy_head.get_action(next_state)
+            next_critic_output_dict = self.value_head(next_state, action)
+            next_critic_value = next_critic_output_dict["output"]
+            if self.num_bins > 1:
+                next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
+            else:
+                next_critic_value = next_critic_value.view(-1)
+
+            chunk_rewards = data.rewards[:, -self.horizon :]
+            chunk_dones = data.dones[:, -self.horizon :]
+            batch_size = chunk_rewards.size(0)
+            device = chunk_rewards.device
+            discounted_reward = torch.zeros(batch_size, device=device)
+            gamma_power = 1.0
+            continuing = torch.ones(batch_size, device=device)
+
+            for i in range(self.horizon):
+                discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
+                gamma_power *= self.gamma
+                continuing *= 1 - chunk_dones[:, i].flatten()
+
+            target_value = discounted_reward + continuing * gamma_power * next_critic_value
+
+        # Compute losses using provided curr_state
         action_chunk = data.actions[:, -self.horizon :]
 
         critic_loss, critic_activations, critic_info = self._compute_critic_loss(
@@ -259,17 +298,17 @@ class ActorCriticWithActionValue(nn.Module):
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
         next_image, next_reward = self.prediction_head.predict_next_state(
-            target_dict["next_state"],
-            target_dict["action"][:, 0],
+            next_state.detach(),
+            action[:, 0],
             self.observation_space_shape,
             self.predictor_step_num,
             self.disable_state_predictor,
         )
 
         infer_dict = {
-            "action": target_dict["action"],
-            "value": target_dict["q_value"].item(),
-            "rnn_state": target_dict["rnn_state"],
+            "action": action,
+            "value": next_critic_value.item(),
+            "rnn_state": rnn_state_out.detach(),
             "next_image": next_image,
             "next_reward": next_reward,
         }
@@ -287,7 +326,7 @@ class ActorCriticWithActionValue(nn.Module):
             **seq_info,
         }
 
-        return infer_dict, total_loss, activations_dict, info_dict
+        return infer_dict, next_state, total_loss, activations_dict, info_dict
 
     ####################
     # Internal methods #

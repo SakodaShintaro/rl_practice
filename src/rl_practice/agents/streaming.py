@@ -72,6 +72,7 @@ class StreamingAgent:
         )
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        self._cached_curr_state = None
 
     def _prepare_step(
         self, obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info_dict: dict
@@ -79,6 +80,7 @@ class StreamingAgent:
         if terminated or truncated:
             self.action_chunk = None
             self.chunk_step = 0
+            self._cached_curr_state = None
 
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
@@ -137,6 +139,7 @@ class StreamingAgent:
     def select_action(
         self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
     ) -> tuple[np.ndarray, dict]:
+        self._cached_curr_state = None
         info_dict = {}
         self._prepare_step(obs, reward, terminated, truncated, info_dict)
 
@@ -167,7 +170,14 @@ class StreamingAgent:
         data = self.rb.get_latest(self.seq_len + self.horizon)
         data.rewards = self.reward_processor.normalize(data.rewards)
 
-        infer_dict, loss, activation_dict, loss_info = self.network.infer_and_compute_loss(data)
+        curr_state = self._cached_curr_state
+        if curr_state is None:
+            curr_state = self.network.compute_curr_state(data)
+
+        infer_dict, next_state, loss, activation_dict, loss_info = (
+            self.network.infer_and_compute_loss(data, curr_state)
+        )
+        self._cached_curr_state = next_state
         action = self._start_new_chunk(infer_dict, info_dict)
 
         info_dict.update({f"losses/{key}": value for key, value in loss_info.items()})
@@ -179,6 +189,7 @@ class StreamingAgent:
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
             self.optimizer.step()
             self.optimizer.zero_grad()
+            self._cached_curr_state = None
 
         return action, info_dict
 
