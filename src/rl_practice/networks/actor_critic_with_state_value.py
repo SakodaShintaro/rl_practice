@@ -23,6 +23,7 @@ class ActorCriticWithStateValue(nn.Module):
         args: argparse.Namespace,
     ) -> None:
         super().__init__()
+        self.gamma = args.gamma
         self.clip_param_policy = args.clip_param_policy
         self.clip_param_value = args.clip_param_value
         self.action_dim = action_space_shape[0]
@@ -237,3 +238,123 @@ class ActorCriticWithStateValue(nn.Module):
         }
 
         return loss, activations_dict, info_dict
+
+    def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
+        """Combined inference and loss computation for streaming agent."""
+        # --- Target value computation (no grad) ---
+        with torch.no_grad():
+            next_obs = data.observations[:, self.horizon :]
+            next_obs_z = data.obs_z[:, self.horizon :]
+            next_actions = data.actions[:, self.horizon :]
+            next_rewards = data.rewards[:, self.horizon :]
+            next_rnn_state = data.rnn_state[:, self.horizon]
+
+            next_state, rnn_state_out = self.encoder.forward(
+                next_obs, next_obs_z, next_actions, next_rewards, next_rnn_state
+            )
+
+            next_value_dict = (
+                self.value_head(next_obs[:, -1])
+                if self.separate_critic
+                else self.value_head(next_state)
+            )
+            next_value = next_value_dict["output"]
+            next_value = (
+                self.hl_gauss_loss(next_value).view(-1)
+                if self.num_bins > 1
+                else next_value.view(-1)
+            )
+
+            # Generate inference action from next state
+            policy_dict_next = self.policy_head(next_state, None)
+            infer_action = policy_dict_next["action"]
+
+            # Discounted reward over horizon
+            chunk_rewards = data.rewards[:, -self.horizon :]
+            chunk_dones = data.dones[:, -self.horizon :]
+            batch_size = chunk_rewards.size(0)
+            device = chunk_rewards.device
+            discounted_reward = torch.zeros(batch_size, device=device)
+            gamma_power = 1.0
+            continuing = torch.ones(batch_size, device=device)
+            for i in range(self.horizon):
+                discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
+                gamma_power *= self.gamma
+                continuing *= 1 - chunk_dones[:, i].flatten()
+            target_value = discounted_reward + continuing * gamma_power * next_value
+
+        # --- Current state for loss computation ---
+        curr_obs = data.observations[:, : -self.horizon]
+        curr_obs_z = data.obs_z[:, : -self.horizon]
+        curr_actions = data.actions[:, : -self.horizon]
+        curr_rewards = data.rewards[:, : -self.horizon]
+        curr_rnn_state = data.rnn_state[:, 0]
+
+        curr_state, _ = self.encoder.forward(
+            curr_obs, curr_obs_z, curr_actions, curr_rewards, curr_rnn_state
+        )
+
+        # Policy evaluation with target actions
+        target_actions = data.actions[:, -self.horizon :]
+        policy_dict = self.policy_head(curr_state, action=target_actions)
+        a_logp = policy_dict["a_logp"]
+        entropy = policy_dict["entropy"]
+        policy_activation = policy_dict["activation"]
+
+        # Value evaluation
+        value_dict = (
+            self.value_head(curr_obs[:, -1])
+            if self.separate_critic
+            else self.value_head(curr_state)
+        )
+        value = value_dict["output"]
+        value_activation = value_dict["activation"]
+
+        # Advantage (no normalization for streaming B=1)
+        with torch.no_grad():
+            curr_v = self.hl_gauss_loss(value).view(-1) if self.num_bins > 1 else value.view(-1)
+            advantage = target_value - curr_v
+
+        # Policy loss (REINFORCE-style, online so no PPO clipping needed)
+        action_loss = -(a_logp * advantage.unsqueeze(1)).mean()
+
+        # Value loss
+        value_loss = (
+            self.hl_gauss_loss(value, target_value)
+            if self.num_bins > 1
+            else F.mse_loss(value.view(-1), target_value)
+        )
+
+        total_loss = action_loss + self.critic_loss_weight * value_loss - 0.02 * entropy.mean()
+
+        # Prediction for inference visualization
+        next_image, next_reward = self.prediction_head.predict_next_state(
+            next_state,
+            infer_action[:, 0],
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )
+
+        infer_dict = {
+            "action": infer_action,
+            "value": next_value.item(),
+            "rnn_state": rnn_state_out,
+            "next_image": next_image,
+            "next_reward": next_reward,
+        }
+
+        activations_dict = {
+            "state": curr_state,
+            "actor": policy_activation,
+            "critic": value_activation,
+            "state_predictor": curr_state,
+        }
+
+        loss_info = {
+            "actor_loss": action_loss.item(),
+            "critic_loss": value_loss.item(),
+            "entropy": entropy.mean().item(),
+        }
+
+        return infer_dict, total_loss, activations_dict, loss_info
