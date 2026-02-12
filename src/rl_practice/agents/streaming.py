@@ -82,7 +82,9 @@ class StreamingAgent:
             pad_token_id=args.pad_token_id,
         )
 
+        self.network_class = args.network_class
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        self.prev_action_token_ids = []
 
     def _prepare_step(
         self, obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info_dict: dict
@@ -90,6 +92,7 @@ class StreamingAgent:
         if terminated or truncated:
             self.action_chunk = None
             self.chunk_step = 0
+            self.prev_action_token_ids = []
 
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
@@ -115,7 +118,7 @@ class StreamingAgent:
             torch.from_numpy(normalized_action).to(self.device),
             0.0,
             0.0,
-            [],
+            self.prev_action_token_ids,
         )
 
     def _use_action_chunk(self, info_dict: dict) -> np.ndarray:
@@ -129,6 +132,7 @@ class StreamingAgent:
 
     def _start_new_chunk(self, infer_dict: dict, info_dict: dict) -> np.ndarray:
         self.rnn_state = infer_dict["rnn_state"]
+        self.prev_action_token_ids = infer_dict.get("action_token_ids", [])
         info_dict["value"] = infer_dict["value"]
         info_dict["next_image"] = infer_dict["next_image"]
         info_dict["next_reward"] = infer_dict["next_reward"]
@@ -194,4 +198,24 @@ class StreamingAgent:
         return action, info_dict
 
     def on_episode_end(self, score: float, feedback_text: str) -> dict:
-        return {}
+        info_dict = {}
+        if self.network_class != "vlm_actor_critic_with_state_value":
+            return info_dict
+        if not feedback_text:
+            return info_dict
+
+        latest_data = self.rb.get_latest(self.seq_len)
+        loss_dict = self.network.train_with_feedback(
+            latest_data.observations,
+            latest_data.rewards,
+            feedback_text,
+        )
+
+        self.optimizer.zero_grad()
+        loss_dict["feedback_loss"].backward()
+        torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
+        self.optimizer.step()
+
+        info_dict["losses/feedback_loss"] = loss_dict["feedback_loss"].item()
+        print(f"Feedback training loss: {info_dict['losses/feedback_loss']:.4f}")
+        return info_dict

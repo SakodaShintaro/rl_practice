@@ -192,6 +192,132 @@ class VLMActorCriticWithStateValue(nn.Module):
             "parse_success": parse_success,
         }
 
+    def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
+        """Combined inference and loss computation for streaming agent."""
+        # --- 1. No grad: compute next value + generate inference action ---
+        with torch.no_grad():
+            next_obs = data.observations[:, self.horizon :]
+            next_rewards = data.rewards[:, self.horizon :]
+
+            next_inputs = prepare_vlm_inputs(
+                self.processor, next_obs, next_rewards, self.task_prompt + self.episode_prompt
+            )
+            next_outputs = self.model.forward(
+                input_ids=next_inputs["input_ids"],
+                attention_mask=next_inputs["attention_mask"],
+                pixel_values=next_inputs.get("pixel_values"),
+                image_grid_thw=next_inputs.get("image_grid_thw"),
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            next_hidden = next_outputs.hidden_states[self.target_layer_idx][:, -1, :].to(
+                torch.float32
+            )
+
+            next_value_dict = (
+                self.value_head(next_obs[:, -1])
+                if self.separate_critic
+                else {"output": self.value_head(next_hidden)}
+            )
+            next_value_logits = next_value_dict["output"]
+            next_value = (
+                self.hl_gauss_loss(next_value_logits).view(-1)
+                if self.num_bins > 1
+                else next_value_logits.view(-1)
+            )
+
+            # Generate inference action
+            pad_token_id = self.get_pad_token_id()
+            eos_token_id = self.processor.tokenizer.eos_token_id
+            generated = self.model.generate(
+                **next_inputs,
+                max_new_tokens=self.max_new_tokens,
+                num_beams=1,
+                do_sample=False,
+                eos_token_id=eos_token_id,
+                pad_token_id=pad_token_id,
+            )
+            input_len = next_inputs["input_ids"].shape[1]
+            new_tokens = generated[:, input_len:]
+            generated_ids = new_tokens[0].tolist()
+            action_text = self.processor.tokenizer.decode(
+                generated_ids, skip_special_tokens=True
+            ).strip()
+            action_array, parse_success = parse_action_text(action_text, self.horizon)
+            infer_action = torch.from_numpy(action_array).unsqueeze(0).to(data.observations.device)
+
+            print(
+                f"{input_len=}, {len(generated_ids)=}, {action_text=}, "
+                f"{infer_action=}, {parse_success=}"
+            )
+
+            # Discounted reward over horizon
+            chunk_rewards = data.rewards[:, -self.horizon :]
+            chunk_dones = data.dones[:, -self.horizon :]
+            batch_size = chunk_rewards.size(0)
+            device = chunk_rewards.device
+            discounted_reward = torch.zeros(batch_size, device=device)
+            gamma_power = 1.0
+            continuing = torch.ones(batch_size, device=device)
+            for i in range(self.horizon):
+                discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
+                gamma_power *= self.gamma
+                continuing *= 1 - chunk_dones[:, i].flatten()
+            target_value = discounted_reward + continuing * gamma_power * next_value
+
+        # --- 2. With grad: compute current value and log prob ---
+        curr_obs = data.observations[:, : -self.horizon]
+        curr_rewards = data.rewards[:, : -self.horizon]
+        curr_action_token_ids = data.action_token_ids[:, -1]
+
+        value, hidden, new_log_prob = self._compute_value_and_log_prob(
+            curr_obs, curr_rewards, curr_action_token_ids
+        )
+
+        # --- 3. Compute loss ---
+        with torch.no_grad():
+            curr_v = self.hl_gauss_loss(value).view(-1) if self.num_bins > 1 else value.view(-1)
+            advantage = target_value - curr_v
+
+        action_loss = -(new_log_prob * advantage).mean()
+
+        value_logits_for_loss = (
+            self.value_head(curr_obs[:, -1])["output"]
+            if self.separate_critic
+            else self.value_head(hidden)
+        )
+        value_loss = (
+            self.hl_gauss_loss(value_logits_for_loss, target_value)
+            if self.num_bins > 1
+            else F.mse_loss(value.view(-1), target_value)
+        )
+
+        total_loss = action_loss + value_loss
+
+        c, h, w = self.observation_space_shape
+        next_image = np.zeros((h, w, c), dtype=np.float32)
+        next_reward = 0.0
+
+        infer_dict = {
+            "action": infer_action,
+            "value": next_value.item(),
+            "rnn_state": self._dummy_state.clone(),
+            "next_image": next_image,
+            "next_reward": next_reward,
+            "action_text": action_text,
+            "action_token_ids": generated_ids,
+            "parse_success": parse_success,
+        }
+
+        activations_dict = {"critic": hidden}
+
+        loss_info = {
+            "actor_loss": action_loss.item(),
+            "critic_loss": value_loss.item(),
+        }
+
+        return infer_dict, total_loss, activations_dict, loss_info
+
     def _compute_value_and_log_prob(
         self,
         images: torch.Tensor,
