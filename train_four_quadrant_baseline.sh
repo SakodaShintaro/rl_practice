@@ -3,6 +3,13 @@ set -eux
 
 suffix=${1:-""}
 cd $(dirname $0)
+
+# ゲームウィンドウが立ち上がっていなければ自動起動
+if ! wmctrl -l | grep -qi "Four Quadrant Game"; then
+  uv run python src/rl_practice/envs/four_quadrant_game.py &
+  sleep 2
+fi
+
 uv run python scripts/train.py baseline$suffix \
   --env_id FourQuadrant-v0 \
   --agent_type off_policy \

@@ -57,6 +57,8 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "FourQuadrant-v0":
+        from rl_practice.envs.generic_gui_env import GenericGUIEnv, create_score_reward_detector
+
         reward_detector = create_score_reward_detector()
         env = GenericGUIEnv(
             reward_detector=reward_detector,
