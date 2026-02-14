@@ -281,6 +281,15 @@ class GenericGUIEnv(gym.Env):
         # Convert to numpy array
         screen_array = np.array(screenshot)
 
+        # Draw mouse cursor on observation
+        mx, my = pyautogui.position()
+        region_x, region_y, region_w, region_h = self.region
+        cx = mx - region_x
+        cy = my - region_y
+        if 0 <= cx < region_w and 0 <= cy < region_h:
+            cv2.circle(screen_array, (cx, cy), 5, (255, 0, 0), -1)
+            cv2.circle(screen_array, (cx, cy), 5, (0, 0, 0), 1)
+
         # Resize processing
         if self.resize_shape is not None:
             height, width = self.resize_shape
