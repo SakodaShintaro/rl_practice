@@ -83,6 +83,7 @@ def parse_args() -> argparse.Namespace:
             "CARLA-Leaderboard-v0",
             "LetterTracing-v0",
             "FourQuadrant-v0",
+            "ColorPanel-v0",
         ],
     )
     parser.add_argument(
@@ -170,6 +171,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
     parser.add_argument("--denoising_time", type=float, default=1.0)
     parser.add_argument("--vlm_model_id", type=str, default="Qwen/Qwen3-VL-2B-Instruct")
+    parser.add_argument("--encoder_task_prompt", type=str, default="")
 
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")

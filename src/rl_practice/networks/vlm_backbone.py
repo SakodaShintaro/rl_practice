@@ -193,12 +193,14 @@ class QwenVLEncoder(nn.Module):
         use_lora: bool,
         target_layer_idx: int,
         seq_len: int,
+        task_prompt: str,
     ) -> None:
         super().__init__()
 
         self.use_lora = use_lora
         self.target_layer_idx = target_layer_idx
         self.seq_len = seq_len
+        self.task_prompt = task_prompt
 
         device = torch.device("cuda")
 
@@ -222,7 +224,9 @@ class QwenVLEncoder(nn.Module):
         dummy_images = torch.zeros(1, self.seq_len, 3, 96, 96, device=self.device)
         dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
 
-        model_inputs = prepare_vlm_inputs(self.processor, dummy_images, dummy_rewards, "")
+        model_inputs = prepare_vlm_inputs(
+            self.processor, dummy_images, dummy_rewards, self.task_prompt
+        )
 
         output = self.model.forward(**model_inputs, output_hidden_states=True)
         hidden = output["hidden_states"][self.target_layer_idx]
@@ -243,7 +247,7 @@ class QwenVLEncoder(nn.Module):
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         with torch.enable_grad() if self.use_lora else torch.no_grad():
-            model_inputs = prepare_vlm_inputs(self.processor, images, rewards, "")
+            model_inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
 
             output = self.model.forward(**model_inputs, output_hidden_states=True)
             hidden = output["hidden_states"][self.target_layer_idx]

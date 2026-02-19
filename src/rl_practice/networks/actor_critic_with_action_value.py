@@ -66,6 +66,7 @@ class ActorCriticWithActionValue(nn.Module):
                 use_lora=args.use_lora,
                 target_layer_idx=args.target_layer_idx,
                 seq_len=args.seq_len,
+                task_prompt=args.encoder_task_prompt,
             )
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")

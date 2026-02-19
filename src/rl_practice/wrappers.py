@@ -71,6 +71,20 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         return env
 
+    elif env_id == "ColorPanel-v0":
+        from rl_practice.envs.generic_gui_env import GenericGUIEnv, create_score_reward_detector
+
+        reward_detector = create_score_reward_detector()
+        env = GenericGUIEnv(
+            reward_detector=reward_detector,
+            render_mode="rgb_array",
+            window_title="Color Panel Game",
+        )
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        return env
+
     else:
         raise ValueError(f"Unsupported environment: {env_id}")
 
