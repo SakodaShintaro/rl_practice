@@ -7,7 +7,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id LetterTracing-v0 \
   --agent_type off_policy \
   --action_norm_penalty 0.0 \
-  --target_score 800.0 \
   --encoder spatial_temporal \
   --num_bins 1 \
   --value_range 200.0 \

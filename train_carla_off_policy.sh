@@ -13,7 +13,6 @@ uv run python scripts/train.py carla_test \
     --encoder qwenvl \
     --image_processor_type ae \
     --step_limit 400_000 \
-    --target_score 100.0 \
     --disable_state_predictor 1 \
     --seq_len 1 \
     --use_quantization 0 \

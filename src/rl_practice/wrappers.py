@@ -3,6 +3,7 @@ import cv2
 import gymnasium as gym
 import minigrid
 import numpy as np
+from gymnasium.envs.registration import EnvSpec
 
 from rl_practice.envs.simple_four_quadrant_env import SimpleFourQuadrantEnv
 
@@ -19,6 +20,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec.reward_threshold = 0.95
         return env
 
     elif env_id == "CarRacing-v3":
@@ -32,6 +34,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec.reward_threshold = 800.0
         return env
 
     elif env_id == "CARLA-Leaderboard-v0":
@@ -40,6 +43,7 @@ def make_env(env_id: str) -> gym.Env:
         env = CARLALeaderboardEnv()
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=100.0)
         return env
 
     elif env_id == "LetterTracing-v0":
@@ -54,6 +58,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         return env
 
     elif env_id == "FourQuadrant-v0":
@@ -69,6 +74,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         return env
 
     elif env_id == "ColorPanel-v0":
@@ -83,6 +89,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         return env
 
     else:

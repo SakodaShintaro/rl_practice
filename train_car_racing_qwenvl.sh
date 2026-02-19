@@ -8,7 +8,6 @@ uv run python scripts/train.py qwenvl$suffix \
   --env_id CarRacing-v3 \
   --agent_type off_policy \
   --action_norm_penalty 1.0 \
-  --target_score 800.0 \
   --encoder qwenvl \
   --num_bins 1 \
   --value_range 200.0 \

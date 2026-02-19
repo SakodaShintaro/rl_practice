@@ -9,7 +9,6 @@ uv run python scripts/train.py baseline$suffix \
   --agent_type on_policy \
   --network_class actor_critic_with_state_value \
   --action_norm_penalty 1.0 \
-  --target_score 800.0 \
   --encoder temporal_only \
   --temporal_model_type identity \
   --num_bins 1 \
