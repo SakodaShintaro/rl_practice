@@ -72,7 +72,7 @@ class ColorPanelGame:
         self.state = STATE_PLAYING
         self.score = 0.0
         self.state_timer = 0
-        self.score_duration = 500
+        self.score_duration = 250
         self.waiting_duration = 200
 
         # Time limit (milliseconds)
