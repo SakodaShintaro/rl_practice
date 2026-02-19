@@ -21,6 +21,7 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec.reward_threshold = 0.95
+        env.unwrapped.eval_range = 100
         return env
 
     elif env_id == "CarRacing-v3":
@@ -35,6 +36,7 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec.reward_threshold = 800.0
+        env.unwrapped.eval_range = 20
         return env
 
     elif env_id == "CARLA-Leaderboard-v0":
@@ -44,6 +46,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=100.0)
+        env.unwrapped.eval_range = 100
         return env
 
     elif env_id == "LetterTracing-v0":
@@ -59,6 +62,7 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
         return env
 
     elif env_id == "FourQuadrant-v0":
@@ -75,6 +79,7 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
         return env
 
     elif env_id == "ColorPanel-v0":
@@ -90,6 +95,7 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
         return env
 
     else:

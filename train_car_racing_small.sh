@@ -12,7 +12,6 @@ uv run python scripts/train.py small$suffix \
   --num_bins 1 \
   --value_range 200.0 \
   --step_limit 400_000 \
-  --eval_range 20 \
   --image_processor_type ae \
   --seq_len 1 \
   --batch_size 1 \

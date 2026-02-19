@@ -145,7 +145,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sparsity", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--step_limit", type=int, default=1_000_000)
-    parser.add_argument("--eval_range", type=int, default=100)
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--action_norm_penalty", type=float, default=0.0)
@@ -241,6 +240,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     env.action_space.seed(seed)
 
     target_score = env.spec.reward_threshold
+    eval_range = env.unwrapped.eval_range
 
     start_time = time.time()
 
@@ -346,7 +346,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
         score = env_info["episode"]["r"]
         score_list.append(score)
-        score_list = score_list[-args.eval_range :]
+        score_list = score_list[-eval_range:]
         recent_average_score = np.mean(score_list)
 
         if args.normalizing_by_return:
@@ -371,7 +371,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             log_episode_writer.writerow(data_dict)
             log_episode_file.flush()
 
-        is_solved = recent_average_score > target_score and episode_id >= args.eval_range
+        is_solved = recent_average_score > target_score and episode_id >= eval_range
 
         if episode_id % 5 == 0 or is_solved:
             print(

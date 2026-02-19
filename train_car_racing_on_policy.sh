@@ -14,7 +14,6 @@ uv run python scripts/train.py baseline$suffix \
   --num_bins 1 \
   --value_range 60.0 \
   --step_limit 200_000 \
-  --eval_range 20 \
   --image_processor_type simple_cnn \
   --seq_len 1 \
   --batch_size 16 \
