@@ -96,8 +96,8 @@ class GenericGUIEnv(gym.Env):
     Generic GUI environment wrapper (using PyAutoGui)
 
     Action Space: Box(3,)
-        - action[0]: x coordinate (0.0 ~ 1.0, relative position to screen width)
-        - action[1]: y coordinate (0.0 ~ 1.0, relative position to screen height)
+        - action[0]: x delta (-1.0 ~ 1.0, relative movement from current position, ±1.0 = half screen width)
+        - action[1]: y delta (-1.0 ~ 1.0, relative movement from current position, ±1.0 = half screen height)
         - action[2]: mouse button state (0.0 ~ 1.0, 1 for down, 0 for up)
 
     Observation Space: Box(height, width, 3)
@@ -165,10 +165,10 @@ class GenericGUIEnv(gym.Env):
         self.height = region[3]
         print(f"Window detected: '{region[4]}' at {self.region}")
 
-        # Action space: [x, y, button_state]
+        # Action space: [dx, dy, button_state]
         self.action_space = spaces.Box(
-            low=np.array([0.0, 0.0, 0.0]),
-            high=np.array([1.0, 1.0, 1.0]),
+            low=np.array([-1.0, -1.0, 0.0]),
+            high=np.array([+1.0, +1.0, 1.0]),
             dtype=np.float32,
         )
 
@@ -222,22 +222,31 @@ class GenericGUIEnv(gym.Env):
         Execute one step
 
         Args:
-            action: [x, y, button_state]
+            action: [dx, dy, button_state]
         """
         # Interpret action
-        x_norm, y_norm, button_state = action
+        dx_norm, dy_norm, button_state = action
 
-        # Clip action to 0.0-1.0 range
-        x_norm_clipped = np.clip(x_norm, 0.0, 1.0)
-        y_norm_clipped = np.clip(y_norm, 0.0, 1.0)
+        # Clip delta to -1.0 ~ 1.0 range
+        dx_norm_clipped = np.clip(dx_norm, -1.0, 1.0)
+        dy_norm_clipped = np.clip(dy_norm, -1.0, 1.0)
 
-        # Convert to screen coordinates (relative to region)
+        # Convert delta to pixel offset (±1.0 = full screen width/height)
+        dx_pixels = int(dx_norm_clipped * (self.width))
+        dy_pixels = int(dy_norm_clipped * (self.height))
+
+        # Get current mouse position and compute new position
+        current_x, current_y = pyautogui.position()
         region_x, region_y, _, _ = self.region
-        x = int(region_x + x_norm_clipped * (self.width - 1))
-        y = int(region_y + y_norm_clipped * (self.height - 1))
+        new_x = current_x + dx_pixels
+        new_y = current_y + dy_pixels
+
+        # Clamp to window region
+        new_x = int(np.clip(new_x, region_x, region_x + self.width - 1))
+        new_y = int(np.clip(new_y, region_y, region_y + self.height - 1))
 
         # Move mouse
-        pyautogui.moveTo(x, y)
+        pyautogui.moveTo(new_x, new_y)
 
         # Update mouse button state
         desired_state = button_state > 0.5
