@@ -7,6 +7,7 @@ import torch
 from torch import optim
 
 from rl_practice.networks.actor_critic_with_action_value import ActorCriticWithActionValue
+from rl_practice.networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
 from rl_practice.replay_buffer import ReplayBuffer
 from rl_practice.reward_processor import RewardProcessor
 
@@ -50,6 +51,10 @@ class OffPolicyAgent:
 
         if args.network_class == "actor_critic_with_action_value":
             self.network = ActorCriticWithActionValue(
+                observation_space.shape, action_space.shape, args
+            ).to(self.device)
+        elif args.network_class == "vlm_actor_critic_with_action_value":
+            self.network = VLMActorCriticWithActionValue(
                 observation_space.shape, action_space.shape, args
             ).to(self.device)
         else:
