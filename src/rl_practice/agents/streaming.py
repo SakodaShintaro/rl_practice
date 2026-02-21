@@ -8,6 +8,7 @@ from torch import optim
 
 from rl_practice.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from rl_practice.networks.actor_critic_with_state_value import ActorCriticWithStateValue
+from rl_practice.networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
 from rl_practice.networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue
 from rl_practice.replay_buffer import ReplayBuffer
 from rl_practice.reward_processor import RewardProcessor
@@ -62,6 +63,10 @@ class StreamingAgent:
             self.network = VLMActorCriticWithStateValue(
                 observation_space.shape, action_space.shape, args
             )
+        elif args.network_class == "vlm_actor_critic_with_action_value":
+            self.network = VLMActorCriticWithActionValue(
+                observation_space.shape, action_space.shape, args
+            ).to(self.device)
         else:
             raise ValueError(f"Unknown network class: {args.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
