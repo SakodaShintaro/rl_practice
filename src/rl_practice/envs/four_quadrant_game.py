@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """
-Four Quadrant Click Game
-Divides the screen into 4 quadrants, with 1 quadrant colored red and the rest white
-Clicking red -> reward +1, Clicking white -> reward -1
+Red Rectangle Click Game
+Places a red rectangle (half screen size) at a random position.
+Clicking red -> reward +1, Clicking white -> reward -0.01
 """
 
 import argparse
@@ -19,7 +19,7 @@ STATE_WAITING = "WAITING"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--time_limit_sec", type=int, default=5)
+    parser.add_argument("--time_limit_sec", type=int, default=10)
     return parser.parse_args()
 
 
@@ -43,15 +43,12 @@ class FourQuadrantGame:
         self.SCORE_BG = (255, 255, 200)
         self.SCORE_BORDER = (200, 150, 0)
 
-        # Define 4 quadrant rectangles
-        half_w = self.width // 2
-        half_h = self.height // 2
-        self.quadrants = [
-            pygame.Rect(0, 0, half_w, half_h),  # Top-left
-            pygame.Rect(half_w, 0, half_w, half_h),  # Top-right
-            pygame.Rect(0, half_h, half_w, half_h),  # Bottom-left
-            pygame.Rect(half_w, half_h, half_w, half_h),  # Bottom-right
-        ]
+        # Red rectangle size (half of screen)
+        self.rect_w = self.width // 2
+        self.rect_h = self.height // 2
+
+        # Red rectangle position (set in new_question)
+        self.red_rect = pygame.Rect(0, 0, self.rect_w, self.rect_h)
 
         # State management
         self.state = STATE_PLAYING
@@ -68,16 +65,15 @@ class FourQuadrantGame:
         self.cooldown_duration = 150
         self.cooldown_end_time = 0
 
-        # Index of the current correct quadrant
-        self.correct_quadrant = 0
-
         # Generate a new question
         self.new_question()
 
     def new_question(self) -> None:
         """Generate a new question"""
-        # Randomly select one quadrant
-        self.correct_quadrant = random.randint(0, 3)
+        # Random top-left position: x in [0, W/2], y in [0, H/2]
+        rx = random.randint(0, self.width // 2)
+        ry = random.randint(0, self.height // 2)
+        self.red_rect = pygame.Rect(rx, ry, self.rect_w, self.rect_h)
 
         # Reset state
         self.state = STATE_PLAYING
@@ -105,7 +101,7 @@ class FourQuadrantGame:
         # Process based on state
         if self.state == STATE_WAITING and mouse_pressed:
             # Clicked in no-red state
-            self.score = -0.5
+            self.score = -0.1
             self.state = STATE_SHOW_SCORE
             self.state_timer = pygame.time.get_ticks()
         elif self.state == STATE_PLAYING and mouse_pressed:
@@ -117,18 +113,13 @@ class FourQuadrantGame:
 
     def _on_click(self, pos: tuple[int, int]) -> None:
         """Process click event"""
-        # Determine which quadrant was clicked
-        clicked_quadrant = None
-        for i, rect in enumerate(self.quadrants):
-            if rect.collidepoint(pos):
-                clicked_quadrant = i
-                break
-
-        # Calculate score
-        if clicked_quadrant == self.correct_quadrant:
-            self.score = 1.0  # Correct
-        else:
-            self.score = -0.01  # Incorrect
+        # Distance from click to nearest point on red rectangle
+        nearest_x = max(self.red_rect.left, min(pos[0], self.red_rect.right))
+        nearest_y = max(self.red_rect.top, min(pos[1], self.red_rect.bottom))
+        dist = ((pos[0] - nearest_x) ** 2 + (pos[1] - nearest_y) ** 2) ** 0.5
+        max_dist = ((self.width / 2) ** 2 + (self.height / 2) ** 2) ** 0.5
+        normalized_dist = dist / max_dist
+        self.score = 1.0 if self.red_rect.collidepoint(pos) else 0.5 / (1 + 10 * normalized_dist)
 
         # Transition to score display mode
         self.state = STATE_SHOW_SCORE
@@ -170,14 +161,8 @@ class FourQuadrantGame:
             # No-red state (all white)
             pass
         else:
-            # Draw each quadrant
-            for i, rect in enumerate(self.quadrants):
-                if i == self.correct_quadrant:
-                    # Correct quadrant is red
-                    pygame.draw.rect(self.screen, self.RED, rect)
-                else:
-                    # Others are white (background is already white, so just draw border)
-                    pygame.draw.rect(self.screen, self.BLACK, rect, 1)
+            # Draw red rectangle at random position
+            pygame.draw.rect(self.screen, self.RED, self.red_rect)
 
         pygame.display.flip()
 
