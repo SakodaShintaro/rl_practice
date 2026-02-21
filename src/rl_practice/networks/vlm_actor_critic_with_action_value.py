@@ -244,6 +244,14 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.num_layers = num_layers
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
+        self.target_layer_idx = args.target_layer_idx
+        self.task_prompt = ""
+
+        # State projection (matching QwenVLEncoder)
+        state_out_dim = 4
+        self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
+        self._target_seq_len, state_dim = self._compute_state_dim()
+        torch.cuda.empty_cache()
 
         # Action Expert
         expert_hidden = args.expert_hidden_size
@@ -265,9 +273,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.time_mlp_in = nn.Linear(expert_hidden, expert_hidden)
         self.time_mlp_out = nn.Linear(expert_hidden, expert_hidden)
 
-        # Critic (state from VLM final layer output)
+        # Critic (state from VLM layer output, projected and flattened)
         self.value_head = ActionValueHead(
-            in_channels=vlm_hidden_size,
+            in_channels=state_dim,
             action_dim=self.action_dim,
             horizon=args.horizon,
             hidden_dim=args.critic_hidden_dim,
@@ -284,7 +292,6 @@ class VLMActorCriticWithActionValue(nn.Module):
                 clamp_to_range=True,
             )
 
-        self.task_prompt = ""
         self._dummy_state = torch.zeros(1, 1, 1)
 
     def init_state(self) -> torch.Tensor:
@@ -416,6 +423,22 @@ class VLMActorCriticWithActionValue(nn.Module):
     # Internal methods #
     ####################
 
+    @torch.no_grad()
+    def _compute_state_dim(self) -> tuple[int, int]:
+        """Compute target sequence length and state dimension via dummy forward pass."""
+        dummy_images = torch.zeros(
+            1, self.seq_len, *self.observation_space_shape, device=self.device
+        )
+        dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
+        model_inputs = prepare_vlm_inputs(
+            self.processor, dummy_images, dummy_rewards, self.task_prompt
+        )
+        output = self.vlm_model.forward(**model_inputs, output_hidden_states=True)
+        hidden = output["hidden_states"][self.target_layer_idx]
+        target_seq_len = hidden.shape[1]
+        state_dim = target_seq_len * self.state_out_proj.out_features
+        return target_seq_len, state_dim
+
     def _vlm_forward(
         self, images: torch.Tensor, rewards: torch.Tensor
     ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
@@ -426,7 +449,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             rewards: (B, T, 1)
 
         Returns:
-            state: (B, vlm_hidden_size) final layer hidden state (last token)
+            state: (B, state_dim) projected and flattened hidden state
             vlm_kv_list: list of (K, V) per layer, each (B, vlm_len, num_kv_heads, head_dim)
         """
         inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
@@ -441,23 +464,32 @@ class VLMActorCriticWithActionValue(nn.Module):
                 return_dict=True,
             )
 
-        # hidden_states[0] = embedding, hidden_states[j] = output of layer j-1 = input to layer j
         all_hidden_states = outputs.hidden_states
 
-        # State: final layer output, last token
-        state = all_hidden_states[-1][:, -1, :].to(torch.float32).detach()
+        # State: matching QwenVLEncoder (target_layer_idx → out_proj → pad/truncate → flatten)
+        hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
+        state = self.state_out_proj(hidden)  # (B, vlm_seq_len, state_out_dim)
+        seq_len = state.shape[1]
+        if seq_len > self._target_seq_len:
+            state = state[:, seq_len - self._target_seq_len :, :]
+        elif seq_len < self._target_seq_len:
+            pad = torch.zeros(
+                state.shape[0], self._target_seq_len - seq_len, state.shape[2], device=state.device
+            )
+            state = torch.cat([pad, state], dim=1)
+        state = state.flatten(start_dim=1)  # (B, state_dim)
 
         # Extract K/V from each VLM layer using VLM's own projections
         vlm_layers = self.vlm_model.model.language_model.layers
         vlm_kv_list = []
         for j in range(self.num_layers):
-            hs_j = all_hidden_states[j].detach()  # input to VLM layer j
+            hs_j = all_hidden_states[j].detach()
             normed = vlm_layers[j].input_layernorm(hs_j)
             k = vlm_layers[j].self_attn.k_proj(normed)
             v = vlm_layers[j].self_attn.v_proj(normed)
-            B, seq_len = k.shape[:2]
-            k = k.view(B, seq_len, self.vlm_num_kv_heads, self.vlm_head_dim)
-            v = v.view(B, seq_len, self.vlm_num_kv_heads, self.vlm_head_dim)
+            B, vlm_len = k.shape[:2]
+            k = k.view(B, vlm_len, self.vlm_num_kv_heads, self.vlm_head_dim)
+            v = v.view(B, vlm_len, self.vlm_num_kv_heads, self.vlm_head_dim)
             k = vlm_layers[j].self_attn.k_norm(k)
             vlm_kv_list.append((k.detach(), v.detach()))
 
