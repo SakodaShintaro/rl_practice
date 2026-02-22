@@ -17,4 +17,3 @@ uv run python scripts/train.py carla_test \
     --seq_len 1 \
     --use_quantization 0 \
     --use_lora 0 \
-    --target_layer_idx -1 \
