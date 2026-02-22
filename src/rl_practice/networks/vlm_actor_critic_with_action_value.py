@@ -218,6 +218,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.observation_space_shape = observation_space_shape
         self.critic_loss_weight = args.critic_loss_weight
         self.denoising_steps = args.denoising_steps
+        self.denoising_time = args.denoising_time
         self.dacer_loss_weight = args.dacer_loss_weight
 
         # Image processor (for replay buffer obs_z encoding)
@@ -312,9 +313,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         B = s_seq.shape[0]
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
         x_t = noise
-        dt = -1.0 / self.denoising_steps
+        dt = self.denoising_time / self.denoising_steps
 
-        time_val = 1.0
+        time_val = 0.0
         for _ in range(self.denoising_steps):
             timestep = torch.full((B,), time_val, device=self.device)
             v_t = self._denoise(x_t, vlm_kv_list, timestep)
@@ -392,8 +393,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         with torch.no_grad():
             noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
             x_t = noise
-            dt = -1.0 / self.denoising_steps
-            time_val = 1.0
+            dt = self.denoising_time / self.denoising_steps
+            time_val = 0.0
             for _ in range(self.denoising_steps):
                 timestep = torch.full((B,), time_val, device=self.device)
                 v_t = self._denoise(x_t, vlm_kv_list, timestep)
@@ -525,8 +526,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         B = next_obs.shape[0]
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
         x_t = noise
-        dt = -1.0 / self.denoising_steps
-        time_val = 1.0
+        dt = self.denoising_time / self.denoising_steps
+        time_val = 0.0
         for _ in range(self.denoising_steps):
             timestep = torch.full((B,), time_val, device=self.device)
             v_t = self._denoise(x_t, next_vlm_kv, timestep)
@@ -598,8 +599,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         # Generate action via Euler denoising
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
         x_t = noise
-        dt = -1.0 / self.denoising_steps
-        time_val = 1.0
+        dt = self.denoising_time / self.denoising_steps
+        time_val = 0.0
         for _ in range(self.denoising_steps):
             timestep = torch.full((B,), time_val, device=self.device)
             v_t = self._denoise(x_t, vlm_kv_list, timestep)
