@@ -467,14 +467,6 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return state, vlm_kv_list
 
-    def _compute_adarms_cond(self, timestep: torch.Tensor) -> torch.Tensor:
-        """Compute adaRMS conditioning from timestep. timestep: (B,) -> (B, expert_hidden)."""
-        expert_hidden = self.time_mlp_in.in_features
-        time_emb = create_sinusoidal_pos_embedding(
-            timestep, expert_hidden, min_period=4e-3, max_period=4.0
-        )
-        return F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
-
     def _denoise(
         self,
         noisy_actions: torch.Tensor,
@@ -482,7 +474,11 @@ class VLMActorCriticWithActionValue(nn.Module):
         timestep: torch.Tensor,
     ) -> torch.Tensor:
         """Run one denoising step through the Action Expert."""
-        adarms_cond = self._compute_adarms_cond(timestep)
+        expert_hidden = self.time_mlp_in.in_features
+        time_emb = create_sinusoidal_pos_embedding(
+            timestep, expert_hidden, min_period=4e-3, max_period=4.0
+        )
+        adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
         action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
         expert_out = self.action_expert(action_embs, vlm_kv_list, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
