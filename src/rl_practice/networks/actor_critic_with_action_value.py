@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 
 from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from rl_practice.networks.diffusion_utils import compute_actor_loss_with_dacer
 from rl_practice.networks.image_processor import ImageProcessor
 from rl_practice.networks.policy_head import BetaPolicy, CFGDiffusionPolicy, DiffusionPolicy
 from rl_practice.networks.prediction_head import StatePredictionHead
@@ -377,74 +378,30 @@ class ActorCriticWithActionValue(nn.Module):
             curr_state = curr_state.detach()
         action, log_pi = self.policy_head.get_action(curr_state)  # (B, horizon, action_dim)
 
-        for param in self.value_head.parameters():
-            param.requires_grad_(False)
+        bs = action.shape[0]
+        actor_activation = {}
 
-        advantage_dict = self.value_head.get_advantage(curr_state, action)
-        advantage = advantage_dict["output"]
-        if self.num_bins > 1:
-            advantage = self.hl_gauss_loss(advantage)
-        advantage = advantage.view(-1, 1)
-        actor_loss = -advantage.mean()
+        def predict_velocity_fn(a_t, t):
+            a_flat = a_t.view(bs, -1)
+            result = self.policy_head.forward(a_flat, t, curr_state)
+            actor_activation["value"] = result["activation"]
+            return result["output"].view(bs, self.horizon, self.action_dim)
 
-        for param in self.value_head.parameters():
-            param.requires_grad_(True)
-
-        # DACER2 loss (https://arxiv.org/abs/2505.23426)
-        batch_size = action.shape[0]
-        device = action.device
-        # Flatten action chunk for gradient computation: (B, horizon, action_dim) -> (B, horizon * action_dim)
-        action_flat = action.view(batch_size, -1)
-        actions = action_flat.clone().detach()
-        actions.requires_grad = True
-        eps = 1e-4
-        t = (torch.rand((batch_size, 1), device=device)) * (1 - eps) + eps
-        c = 0.4
-        d = -1.8
-        w_t = torch.exp(c * t + d)
-
-        def calc_target(q_network, actions_flat):
-            # Reshape back to (B, horizon, action_dim) for value_head
-            actions_chunk = actions_flat.view(batch_size, self.horizon, self.action_dim)
-            q_output_dict = q_network(curr_state, actions_chunk)
-            q_values = q_output_dict["output"]
-            if self.num_bins > 1:
-                q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
-            else:
-                q_values = q_values.unsqueeze(-1)
-            q_grad = torch.autograd.grad(
-                outputs=q_values.sum(),
-                inputs=actions_flat,
-                create_graph=True,
-            )[0]
-            with torch.no_grad():
-                target = (1 - t) / t * q_grad + 1 / t * actions_flat
-                target /= target.norm(dim=1, keepdim=True) + 1e-8
-                return w_t * target
-
-        target = calc_target(self.value_head, actions)
-        noise = torch.randn_like(actions)
-        noise = torch.clamp(noise, -3.0, 3.0)
-        a_t = (1.0 - t) * noise + t * actions
-        # Reshape a_t back to (B, horizon * action_dim) for policy_head.forward
-        actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), curr_state)
-        v = actor_output_dict["output"]
-        dacer_loss = F.mse_loss(v, target)
-
-        # Combine actor losses
-        total_actor_loss = actor_loss + dacer_loss * self.dacer_loss_weight
+        total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
+            curr_state,
+            action,
+            self.value_head,
+            getattr(self, "hl_gauss_loss", None),
+            self.num_bins,
+            self.dacer_loss_weight,
+            predict_velocity_fn,
+        )
 
         activations_dict = {
-            "actor": actor_output_dict["activation"],
+            "actor": actor_activation["value"],
             "critic": advantage_dict["activation"],
         }
-
-        info_dict = {
-            "actor_loss": actor_loss.item(),
-            "dacer_loss": dacer_loss.item(),
-            "log_pi": log_pi.mean().item(),
-            "advantage": advantage.mean().item(),
-        }
+        info_dict["log_pi"] = log_pi.mean().item()
 
         return total_actor_loss, activations_dict, info_dict
 

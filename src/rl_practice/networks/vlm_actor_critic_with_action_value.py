@@ -8,6 +8,7 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
+from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
 from .value_head import ActionValueHead
 from .vlm_backbone import load_model, prepare_vlm_inputs
@@ -499,17 +500,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         B: int,
         vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
     ) -> torch.Tensor:
-        """Generate action via Euler denoising (forward: 0→denoising_time). Returns (B, horizon, action_dim)."""
+        """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
-        x_t = noise
-        dt = self.denoising_time / self.denoising_steps
-        time_val = 0.0
-        for _ in range(self.denoising_steps):
-            timestep = torch.full((B,), time_val, device=self.device)
-            v_t = self._denoise(x_t, vlm_kv_list, timestep)
-            x_t = x_t + dt * v_t
-            time_val += dt
-        return torch.tanh(x_t)
+
+        def predict_velocity_fn(x_t, t):
+            return self._denoise(x_t, vlm_kv_list, t)
+
+        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
     @torch.no_grad()
     def _compute_target_value(self, data) -> dict:
@@ -583,67 +580,19 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         action = self._generate_action(B, vlm_kv_list)
 
-        # Advantage-based loss
-        for param in self.value_head.parameters():
-            param.requires_grad_(False)
+        def predict_velocity_fn(a_t, t):
+            return self._denoise(a_t, vlm_kv_list, t)
 
-        advantage_dict = self.value_head.get_advantage(state, action)
-        advantage = advantage_dict["output"]
-        if self.num_bins > 1:
-            advantage = self.hl_gauss_loss(advantage)
-        advantage = advantage.view(-1, 1)
-        actor_loss = -advantage.mean()
+        total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
+            state,
+            action,
+            self.value_head,
+            getattr(self, "hl_gauss_loss", None),
+            self.num_bins,
+            self.dacer_loss_weight,
+            predict_velocity_fn,
+        )
 
-        for param in self.value_head.parameters():
-            param.requires_grad_(True)
-
-        # DACER2 loss (https://arxiv.org/abs/2505.23426)
-        action_flat = action.view(B, -1)
-        actions = action_flat.clone().detach()
-        actions.requires_grad = True
-        eps = 1e-4
-        t = (torch.rand((B, 1), device=self.device)) * (1 - eps) + eps
-        c = 0.4
-        d = -1.8
-        w_t = torch.exp(c * t + d)
-
-        def calc_target(q_network, actions_flat):
-            actions_chunk = actions_flat.view(B, self.horizon, self.action_dim)
-            q_output_dict = q_network(state, actions_chunk)
-            q_values = q_output_dict["output"]
-            if self.num_bins > 1:
-                q_values = self.hl_gauss_loss(q_values).unsqueeze(-1)
-            else:
-                q_values = q_values.unsqueeze(-1)
-            q_grad = torch.autograd.grad(
-                outputs=q_values.sum(),
-                inputs=actions_flat,
-                create_graph=True,
-            )[0]
-            with torch.no_grad():
-                target = (1 - t) / t * q_grad + 1 / t * actions_flat
-                target /= target.norm(dim=1, keepdim=True) + 1e-8
-                return w_t * target
-
-        target = calc_target(self.value_head, actions)
-        dacer_noise = torch.randn_like(actions)
-        dacer_noise = torch.clamp(dacer_noise, -3.0, 3.0)
-        a_t = (1.0 - t) * dacer_noise + t * actions
-        a_t_chunk = a_t.view(B, self.horizon, self.action_dim)
-        v_pred = self._denoise(a_t_chunk, vlm_kv_list, t.squeeze(1))
-        v_pred_flat = v_pred.view(B, -1)
-        dacer_loss = F.mse_loss(v_pred_flat, target)
-
-        total_actor_loss = actor_loss + dacer_loss * self.dacer_loss_weight
-
-        activations_dict = {
-            "critic": advantage_dict["activation"],
-        }
-
-        info_dict = {
-            "actor_loss": actor_loss.item(),
-            "dacer_loss": dacer_loss.item(),
-            "advantage": advantage.mean().item(),
-        }
+        activations_dict = {"critic": advantage_dict["activation"]}
 
         return total_actor_loss, activations_dict, info_dict

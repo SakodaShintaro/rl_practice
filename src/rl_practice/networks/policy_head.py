@@ -7,6 +7,7 @@ from torch.distributions import Beta, Categorical
 from torch.nn import functional as F
 
 from .blocks import SimbaBlock
+from .diffusion_utils import euler_denoise
 from .sparse_utils import apply_one_shot_pruning
 
 
@@ -104,25 +105,13 @@ class DiffusionPolicy(nn.Module):
 
     def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         bs = x.size(0)
-        total_action_dim = self.action_dim * self.horizon
-        normal = torch.distributions.Normal(
-            torch.zeros((bs, total_action_dim), device=x.device),
-            torch.ones((bs, total_action_dim), device=x.device),
-        )
-        action = normal.sample().to(x.device)
-        action = torch.clamp(action, -3.0, 3.0)
-        dt = self.denoising_time / self.step_num
+        noise = torch.randn(bs, self.horizon, self.action_dim, device=x.device)
 
-        curr_time = torch.zeros((bs), device=x.device)
+        def predict_velocity_fn(x_t, t):
+            x_flat = x_t.view(bs, -1)
+            return self.forward(x_flat, t, x)["output"].view(bs, self.horizon, self.action_dim)
 
-        for _ in range(self.step_num):
-            tmp_dict = self.forward(action, curr_time, x)
-            v = tmp_dict["output"]
-            action = action + dt * v
-            curr_time += dt
-
-        action = torch.tanh(action)
-        action = action.view(bs, self.horizon, self.action_dim)
+        action = euler_denoise(noise, self.denoising_time, self.step_num, predict_velocity_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
