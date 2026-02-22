@@ -309,20 +309,8 @@ class VLMActorCriticWithActionValue(nn.Module):
     ) -> dict:
         state, vlm_kv_list = self._vlm_forward(s_seq, r_seq)
 
-        # Sample noise and denoise
         B = s_seq.shape[0]
-        noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
-        x_t = noise
-        dt = self.denoising_time / self.denoising_steps
-
-        time_val = 0.0
-        for _ in range(self.denoising_steps):
-            timestep = torch.full((B,), time_val, device=self.device)
-            v_t = self._denoise(x_t, vlm_kv_list, timestep)
-            x_t = x_t + dt * v_t
-            time_val += dt
-
-        action = torch.tanh(x_t)  # (B, horizon, action_dim)
+        action = self._generate_action(B, vlm_kv_list)
 
         # Q value
         q_dict = self.value_head(state, action)
@@ -388,19 +376,9 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
-        # Inference action via denoising
         B = curr_obs.shape[0]
         with torch.no_grad():
-            noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
-            x_t = noise
-            dt = self.denoising_time / self.denoising_steps
-            time_val = 0.0
-            for _ in range(self.denoising_steps):
-                timestep = torch.full((B,), time_val, device=self.device)
-                v_t = self._denoise(x_t, vlm_kv_list, timestep)
-                x_t = x_t + dt * v_t
-                time_val += dt
-            infer_action = torch.tanh(x_t)
+            infer_action = self._generate_action(B, vlm_kv_list)
 
         c, h, w = self.observation_space_shape
         infer_dict = {
@@ -516,24 +494,31 @@ class VLMActorCriticWithActionValue(nn.Module):
         expert_out = self.action_expert(action_embs, vlm_kv_list, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
 
-    @torch.no_grad()
-    def _compute_target_value(self, data) -> dict:
-        next_obs = data.observations[:, self.horizon :]
-        next_rewards = data.rewards[:, self.horizon :]
-        next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
-
-        # Get action via denoising
-        B = next_obs.shape[0]
+    def _generate_action(
+        self,
+        B: int,
+        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+    ) -> torch.Tensor:
+        """Generate action via Euler denoising (forward: 0→denoising_time). Returns (B, horizon, action_dim)."""
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
         x_t = noise
         dt = self.denoising_time / self.denoising_steps
         time_val = 0.0
         for _ in range(self.denoising_steps):
             timestep = torch.full((B,), time_val, device=self.device)
-            v_t = self._denoise(x_t, next_vlm_kv, timestep)
+            v_t = self._denoise(x_t, vlm_kv_list, timestep)
             x_t = x_t + dt * v_t
             time_val += dt
-        next_action = torch.tanh(x_t)
+        return torch.tanh(x_t)
+
+    @torch.no_grad()
+    def _compute_target_value(self, data) -> dict:
+        next_obs = data.observations[:, self.horizon :]
+        next_rewards = data.rewards[:, self.horizon :]
+        next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
+
+        B = next_obs.shape[0]
+        next_action = self._generate_action(B, next_vlm_kv)
 
         next_q_dict = self.value_head(next_state, next_action)
         next_q = next_q_dict["output"]
@@ -596,17 +581,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         """Advantage-based loss + DACER loss, matching actor_critic_with_action_value."""
         B = state.shape[0]
 
-        # Generate action via Euler denoising
-        noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
-        x_t = noise
-        dt = self.denoising_time / self.denoising_steps
-        time_val = 0.0
-        for _ in range(self.denoising_steps):
-            timestep = torch.full((B,), time_val, device=self.device)
-            v_t = self._denoise(x_t, vlm_kv_list, timestep)
-            x_t = x_t + dt * v_t
-            time_val += dt
-        action = torch.tanh(x_t)  # (B, horizon, action_dim)
+        action = self._generate_action(B, vlm_kv_list)
 
         # Advantage-based loss
         for param in self.value_head.parameters():
