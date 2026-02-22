@@ -199,39 +199,20 @@ class CFGDiffusionPolicy(nn.Module):
         """
         bs = x.size(0)
         device = x.device
-        total_action_dim = self.action_dim * self.horizon
-
-        normal = torch.distributions.Normal(
-            torch.zeros((bs, total_action_dim), device=device),
-            torch.ones((bs, total_action_dim), device=device),
-        )
-        action = normal.sample()
-        action = torch.clamp(action, -3.0, 3.0)
-        dt = self.denoising_time / self.step_num
-
-        curr_time = torch.zeros((bs), device=device)
+        noise = torch.randn(bs, self.horizon, self.action_dim, device=device)
 
         # Condition labels: 1=positive, 2=unconditional
         cond_positive = torch.ones((bs,), dtype=torch.long, device=device)
         cond_uncond = torch.full((bs,), 2, dtype=torch.long, device=device)
 
-        for _ in range(self.step_num):
-            # Velocity with positive condition
-            v_positive_dict = self.forward(action, curr_time, x, cond_positive)
-            v_positive = v_positive_dict["output"]
+        def predict_velocity_fn(x_t, t):
+            x_flat = x_t.view(bs, -1)
+            v_pos = self.forward(x_flat, t, x, cond_positive)["output"]
+            v_unc = self.forward(x_flat, t, x, cond_uncond)["output"]
+            v = (1 - self.cfgrl_beta) * v_unc + self.cfgrl_beta * v_pos
+            return v.view(bs, self.horizon, self.action_dim)
 
-            # Velocity with unconditional condition
-            v_uncond_dict = self.forward(action, curr_time, x, cond_uncond)
-            v_uncond = v_uncond_dict["output"]
-
-            # Compose velocity with CFG
-            v = (1 - self.cfgrl_beta) * v_uncond + self.cfgrl_beta * v_positive
-
-            action = action + dt * v
-            curr_time += dt
-
-        action = torch.tanh(action)
-        action = action.view(bs, self.horizon, self.action_dim)
+        action = euler_denoise(noise, self.denoising_time, self.step_num, predict_velocity_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p
