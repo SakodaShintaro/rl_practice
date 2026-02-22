@@ -26,14 +26,6 @@ def create_sinusoidal_pos_embedding(
     return torch.cat([torch.sin(sin_input), torch.cos(sin_input)], dim=1).to(time.dtype)
 
 
-def sample_flow_timestep(batch_size: int, device: torch.device) -> torch.Tensor:
-    """Sample timestep from Beta(1.5, 1.0) scaled to [0.001, 1.0]."""
-    dist = torch.distributions.Beta(
-        torch.tensor(1.5, device=device), torch.tensor(1.0, device=device)
-    )
-    return (dist.sample((batch_size,)) * 0.999 + 0.001).to(torch.float32)
-
-
 class AdaptiveRMSNorm(nn.Module):
     """RMSNorm with adaptive modulation (scale, shift, gate) from conditioning signal."""
 
