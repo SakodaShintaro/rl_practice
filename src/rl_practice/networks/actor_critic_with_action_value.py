@@ -83,6 +83,7 @@ class ActorCriticWithActionValue(nn.Module):
                 denoising_time=args.denoising_time,
                 sparsity=args.sparsity,
                 horizon=args.horizon,
+                denoising_steps=args.denoising_steps,
             )
         elif self.policy_type == "beta":
             self.policy_head = BetaPolicy(
@@ -100,6 +101,7 @@ class ActorCriticWithActionValue(nn.Module):
                 sparsity=args.sparsity,
                 cfgrl_beta=1.5,
                 horizon=args.horizon,
+                denoising_steps=args.denoising_steps,
             )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,

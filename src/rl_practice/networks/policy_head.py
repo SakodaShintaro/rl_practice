@@ -62,6 +62,7 @@ class DiffusionPolicy(nn.Module):
         denoising_time: float,
         sparsity: float,
         horizon: int,
+        denoising_steps: int,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
@@ -72,7 +73,7 @@ class DiffusionPolicy(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, total_action_dim)
         self.action_dim = action_dim
-        self.step_num = 1
+        self.denoising_steps = denoising_steps
         self.denoising_time = denoising_time
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.sparse_mask = (
@@ -111,7 +112,7 @@ class DiffusionPolicy(nn.Module):
             x_flat = x_t.view(bs, -1)
             return self.forward(x_flat, t, x)["output"].view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(noise, self.denoising_time, self.step_num, predict_velocity_fn)
+        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
@@ -135,6 +136,7 @@ class CFGDiffusionPolicy(nn.Module):
         sparsity: float,
         cfgrl_beta: float,
         horizon: int,
+        denoising_steps: int,
     ) -> None:
         super().__init__()
         self.cfgrl_beta = cfgrl_beta
@@ -153,7 +155,7 @@ class CFGDiffusionPolicy(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.fc_out = nn.Linear(hidden_dim, total_action_dim)
         self.action_dim = action_dim
-        self.step_num = 1
+        self.denoising_steps = denoising_steps
         self.denoising_time = denoising_time
         self.t_embedder = TimestepEmbedder(time_embedding_size)
         self.sparse_mask = (
@@ -212,7 +214,7 @@ class CFGDiffusionPolicy(nn.Module):
             v = (1 - self.cfgrl_beta) * v_unc + self.cfgrl_beta * v_pos
             return v.view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(noise, self.denoising_time, self.step_num, predict_velocity_fn)
+        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p
