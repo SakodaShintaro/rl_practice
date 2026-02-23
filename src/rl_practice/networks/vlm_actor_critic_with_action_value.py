@@ -411,6 +411,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         state_dim = target_seq_len * self.state_out_proj.out_features
         return target_seq_len, state_dim
 
+    @torch.no_grad()
     def _vlm_forward(
         self, images: torch.Tensor, rewards: torch.Tensor
     ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
@@ -426,15 +427,14 @@ class VLMActorCriticWithActionValue(nn.Module):
         """
         inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
 
-        with torch.no_grad():
-            outputs = self.vlm_model.forward(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                pixel_values=inputs.get("pixel_values"),
-                image_grid_thw=inputs.get("image_grid_thw"),
-                output_hidden_states=True,
-                return_dict=True,
-            )
+        outputs = self.vlm_model.forward(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
+            output_hidden_states=True,
+            return_dict=True,
+        )
 
         all_hidden_states = outputs.hidden_states
 

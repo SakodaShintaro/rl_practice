@@ -172,8 +172,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--denoising_steps", type=int, default=1)
     parser.add_argument("--vlm_model_id", type=str, default="Qwen/Qwen3-VL-2B-Instruct")
     parser.add_argument("--encoder_task_prompt", type=str, default="")
-    parser.add_argument("--expert_hidden_size", type=int, default=1024)
-    parser.add_argument("--expert_intermediate_size", type=int, default=4096)
+    parser.add_argument("--expert_hidden_size", type=int, default=8)
+    parser.add_argument("--expert_intermediate_size", type=int, default=32)
 
     # for AVG
     parser.add_argument("--use_eligibility_trace", action="store_true")
