@@ -60,7 +60,6 @@ class ActionExpertLayer(nn.Module):
         num_attention_heads: int,
         num_kv_heads: int,
         head_dim: int,
-        intermediate_size: int,
         rms_norm_eps: float,
     ) -> None:
         super().__init__()
@@ -68,6 +67,7 @@ class ActionExpertLayer(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.head_dim = head_dim
         self.num_kv_groups = num_attention_heads // num_kv_heads
+        intermediate_size = hidden_size * 4
 
         # Pre-attention norm (adaptive)
         self.input_layernorm = AdaptiveRMSNorm(hidden_size, rms_norm_eps, hidden_size)
@@ -154,7 +154,6 @@ class ActionExpert(nn.Module):
         num_attention_heads: int,
         num_kv_heads: int,
         head_dim: int,
-        intermediate_size: int,
         rms_norm_eps: float,
     ) -> None:
         super().__init__()
@@ -166,7 +165,6 @@ class ActionExpert(nn.Module):
                     num_attention_heads,
                     num_kv_heads,
                     head_dim,
-                    intermediate_size,
                     rms_norm_eps,
                 )
                 for _ in range(num_layers)
@@ -255,7 +253,6 @@ class VLMActorCriticWithActionValue(nn.Module):
             num_attention_heads=vlm_cfg.num_attention_heads,
             num_kv_heads=vlm_cfg.num_key_value_heads,
             head_dim=vlm_cfg.head_dim,
-            intermediate_size=args.expert_intermediate_size,
             rms_norm_eps=vlm_cfg.rms_norm_eps,
         )
 
