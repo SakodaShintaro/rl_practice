@@ -284,9 +284,13 @@ class VLMActorCriticWithActionValue(nn.Module):
             )
 
         self._dummy_state = torch.zeros(1, 1, 1)
+        self._prev_cache = None  # Cross-step cache for critic loss
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
+
+    def reset_infer_cache(self) -> None:
+        self._prev_cache = None
 
     @torch.inference_mode()
     def infer(
@@ -348,32 +352,84 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        target_dict = self._compute_target_value(data)
-        target_value = target_dict["target_value"]
+        # (1) Single VLM forward on next observations
+        next_obs = data.observations[:, self.horizon :]
+        next_rewards = data.rewards[:, self.horizon :]
+        state, vlm_kv_list = self._vlm_forward(next_obs, next_rewards)
 
-        curr_obs = data.observations[:, : -self.horizon]
-        curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_kv_list = self._vlm_forward(curr_obs, curr_rewards)
-        action_chunk = data.actions[:, -self.horizon :]
+        B = next_obs.shape[0]
 
-        # Critic loss
-        critic_loss, critic_activations, critic_info = self._compute_critic_loss(
-            state, action_chunk, target_value
-        )
+        # (2) Generate action + compute Q (cache with gradients for next call's critic loss)
+        with torch.no_grad():
+            infer_action = self._generate_action(B, vlm_kv_list)
 
-        # Actor loss (advantage + DACER)
+        # Q(state, infer_action) for this step — cached WITH gradients through value_head
+        curr_q_dict = self.value_head(state, infer_action)
+        curr_q_output = curr_q_dict["output"]
+
+        # (3) Critic loss from previous step's cached value
+        if self._prev_cache is not None:
+            curr_q_scalar = (
+                self.hl_gauss_loss(curr_q_output).view(-1)
+                if self.num_bins > 1
+                else curr_q_output.view(-1)
+            )
+            # Discounted reward from current data's horizon chunk
+            chunk_rewards = data.rewards[:, -self.horizon :]
+            chunk_dones = data.dones[:, -self.horizon :]
+            batch_size = chunk_rewards.size(0)
+            discounted_reward = torch.zeros(batch_size, device=self.device)
+            gamma_power = 1.0
+            continuing = torch.ones(batch_size, device=self.device)
+            for i in range(self.horizon):
+                discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
+                gamma_power *= self.gamma
+                continuing *= 1 - chunk_dones[:, i].flatten()
+
+            target_value = discounted_reward + continuing * gamma_power * curr_q_scalar.detach()
+
+            prev_critic_output = self._prev_cache["critic_output"]
+            if self.num_bins > 1:
+                prev_critic_value = self.hl_gauss_loss(prev_critic_output).view(-1)
+                critic_loss = self.hl_gauss_loss(prev_critic_output, target_value)
+            else:
+                prev_critic_value = prev_critic_output.view(-1)
+                critic_loss = F.mse_loss(prev_critic_value, target_value)
+
+            delta = target_value - prev_critic_value
+            critic_info = {
+                "delta": delta.mean().item(),
+                "critic_loss": critic_loss.item(),
+                "curr_critic_value": prev_critic_value.mean().item(),
+                "target_value": target_value.mean().item(),
+            }
+        else:
+            critic_loss = torch.tensor(0.0, device=self.device)
+            critic_info = {
+                "delta": 0.0,
+                "critic_loss": 0.0,
+                "curr_critic_value": 0.0,
+                "target_value": 0.0,
+            }
+
+        # Actor loss (from current state)
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_kv_list)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
-        B = curr_obs.shape[0]
-        with torch.no_grad():
-            infer_action = self._generate_action(B, vlm_kv_list)
+        # Cache current Q for next call's critic loss
+        self._prev_cache = {"critic_output": curr_q_output}
+
+        q_value = (
+            self.hl_gauss_loss(curr_q_output).view(-1).item()
+            if self.num_bins > 1
+            else curr_q_output.view(-1).item()
+        )
 
         c, h, w = self.observation_space_shape
         infer_dict = {
             "action": infer_action,
-            "value": target_dict["q_value"].item(),
+            "value": q_value,
             "rnn_state": self._dummy_state.clone(),
             "next_image": np.zeros((h, w, c), dtype=np.float32),
             "next_reward": 0.0,
@@ -381,7 +437,6 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         activations_dict = {
             "state": state,
-            **critic_activations,
             **actor_activations,
         }
         info_dict = {**critic_info, **actor_info}

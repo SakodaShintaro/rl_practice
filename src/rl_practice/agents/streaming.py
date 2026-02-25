@@ -98,6 +98,8 @@ class StreamingAgent:
             self.action_chunk = None
             self.chunk_step = 0
             self.prev_action_token_ids = []
+            if hasattr(self.network, "reset_infer_cache"):
+                self.network.reset_infer_cache()
 
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
