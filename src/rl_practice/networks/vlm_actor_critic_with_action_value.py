@@ -321,7 +321,21 @@ class VLMActorCriticWithActionValue(nn.Module):
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
-        target_value = self._compute_target_value(data)["target_value"]
+        with torch.no_grad():
+            next_obs = data.observations[:, self.horizon :]
+            next_rewards = data.rewards[:, self.horizon :]
+            next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
+
+            B_next = next_obs.shape[0]
+            next_action = self._generate_action(B_next, next_vlm_kv)
+
+            next_q_dict = self.value_head(next_state, next_action)
+            next_q = next_q_dict["output"]
+            next_q = self.hl_gauss_loss(next_q).view(-1) if self.num_bins > 1 else next_q.view(-1)
+
+        chunk_rewards = data.rewards[:, -self.horizon :]
+        chunk_dones = data.dones[:, -self.horizon :]
+        target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
         curr_rewards = data.rewards[:, : -self.horizon]
@@ -348,8 +362,21 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        target_dict = self._compute_target_value(data)
-        target_value = target_dict["target_value"]
+        with torch.no_grad():
+            next_obs = data.observations[:, self.horizon :]
+            next_rewards = data.rewards[:, self.horizon :]
+            next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
+
+            B = next_obs.shape[0]
+            next_action = self._generate_action(B, next_vlm_kv)
+
+            next_q_dict = self.value_head(next_state, next_action)
+            next_q = next_q_dict["output"]
+            next_q = self.hl_gauss_loss(next_q).view(-1) if self.num_bins > 1 else next_q.view(-1)
+
+        chunk_rewards = data.rewards[:, -self.horizon :]
+        chunk_dones = data.dones[:, -self.horizon :]
+        target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
         curr_rewards = data.rewards[:, : -self.horizon]
@@ -366,14 +393,10 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
-        B = curr_obs.shape[0]
-        with torch.no_grad():
-            infer_action = self._generate_action(B, vlm_kv_list)
-
         c, h, w = self.observation_space_shape
         infer_dict = {
-            "action": infer_action,
-            "value": target_dict["q_value"].item(),
+            "action": next_action,
+            "value": next_q.item(),
             "rnn_state": self._dummy_state.clone(),
             "next_image": np.zeros((h, w, c), dtype=np.float32),
             "next_reward": 0.0,
@@ -494,21 +517,12 @@ class VLMActorCriticWithActionValue(nn.Module):
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
     @torch.no_grad()
-    def _compute_target_value(self, data) -> dict:
-        next_obs = data.observations[:, self.horizon :]
-        next_rewards = data.rewards[:, self.horizon :]
-        next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
-
-        B = next_obs.shape[0]
-        next_action = self._generate_action(B, next_vlm_kv)
-
-        next_q_dict = self.value_head(next_state, next_action)
-        next_q = next_q_dict["output"]
-        next_q = self.hl_gauss_loss(next_q).view(-1) if self.num_bins > 1 else next_q.view(-1)
-
-        # Discounted reward over horizon
-        chunk_rewards = data.rewards[:, -self.horizon :]
-        chunk_dones = data.dones[:, -self.horizon :]
+    def _compute_target_value(
+        self,
+        next_q: torch.Tensor,
+        chunk_rewards: torch.Tensor,
+        chunk_dones: torch.Tensor,
+    ) -> torch.Tensor:
         batch_size = chunk_rewards.size(0)
         discounted_reward = torch.zeros(batch_size, device=self.device)
         gamma_power = 1.0
@@ -517,15 +531,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
             gamma_power *= self.gamma
             continuing *= 1 - chunk_dones[:, i].flatten()
-
-        target_value = discounted_reward + continuing * gamma_power * next_q
-
-        return {
-            "target_value": target_value,
-            "action": next_action,
-            "q_value": next_q,
-            "next_state": next_state,
-        }
+        return discounted_reward + continuing * gamma_power * next_q
 
     def _compute_critic_loss(
         self,
