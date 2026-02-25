@@ -231,34 +231,36 @@ class ActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        """Combined inference and loss computation. Encoder runs 2x instead of 3x."""
+        """Combined inference and loss computation."""
         target_dict = self._compute_target_value(data)
         target_value = target_dict["target_value"]
 
-        curr_obs = data.observations[:, : -self.horizon]
-        curr_obs_z = data.obs_z[:, : -self.horizon]
-        curr_actions = data.actions[:, : -self.horizon]
-        curr_rewards = data.rewards[:, : -self.horizon]
-        curr_rnn_state = data.rnn_state[:, 0]
+        prev_obs = data.observations[:, : -self.horizon]
+        prev_obs_z = data.obs_z[:, : -self.horizon]
+        prev_actions = data.actions[:, : -self.horizon]
+        prev_rewards = data.rewards[:, : -self.horizon]
+        prev_rnn_state = data.rnn_state[:, 0]
 
-        curr_state, _ = self.encoder.forward(
-            curr_obs, curr_obs_z, curr_actions, curr_rewards, curr_rnn_state
+        prev_state, _ = self.encoder.forward(
+            prev_obs, prev_obs_z, prev_actions, prev_rewards, prev_rnn_state
         )
 
         action_chunk = data.actions[:, -self.horizon :]
 
         critic_loss, critic_activations, critic_info = self._compute_critic_loss(
-            curr_state, action_chunk, target_value
+            prev_state, action_chunk, target_value
         )
         if self.policy_type == "diffusion":
-            actor_loss, actor_activations, actor_info = self._compute_actor_loss(curr_state)
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss(prev_state)
         elif self.policy_type == "beta":
-            actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(curr_state)
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(prev_state)
         elif self.policy_type == "cfgrl":
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
-                curr_state, action_chunk
+                prev_state, action_chunk
             )
-        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, curr_state)
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(
+            data, target_dict["next_state"]
+        )
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
@@ -279,7 +281,7 @@ class ActorCriticWithActionValue(nn.Module):
         }
 
         activations_dict = {
-            "state": curr_state,
+            "state": target_dict["next_state"],
             **critic_activations,
             **actor_activations,
             **seq_activations,
