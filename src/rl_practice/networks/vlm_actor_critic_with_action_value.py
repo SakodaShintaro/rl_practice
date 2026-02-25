@@ -297,21 +297,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         r_seq: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> dict:
-        state, vlm_kv_list = self._vlm_forward(s_seq, r_seq)
-
-        B = s_seq.shape[0]
-        action = self._generate_action(B, vlm_kv_list)
-
-        # Q value
-        q_dict = self.value_head(state, action)
-        q_value = q_dict["output"]
-        q_value = self.hl_gauss_loss(q_value).item() if self.num_bins > 1 else q_value.item()
+        state, action, q_value = self._infer(s_seq, r_seq)
 
         c, h, w = self.observation_space_shape
         return {
             "action": action,
-            "a_logp": torch.zeros(B, 1, device=self.device),
-            "value": q_value,
+            "a_logp": torch.zeros(s_seq.shape[0], 1, device=self.device),
+            "value": q_value.item(),
             "x": state,
             "rnn_state": rnn_state,
             "next_image": np.zeros((h, w, c), dtype=np.float32),
@@ -321,18 +313,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
-        with torch.no_grad():
-            next_obs = data.observations[:, self.horizon :]
-            next_rewards = data.rewards[:, self.horizon :]
-            next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
-
-            B_next = next_obs.shape[0]
-            next_action = self._generate_action(B_next, next_vlm_kv)
-
-            next_q_dict = self.value_head(next_state, next_action)
-            next_q = next_q_dict["output"]
-            next_q = self.hl_gauss_loss(next_q).view(-1) if self.num_bins > 1 else next_q.view(-1)
-
+        _, _, next_q = self._infer(
+            data.observations[:, self.horizon :], data.rewards[:, self.horizon :]
+        )
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
@@ -362,18 +345,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        with torch.no_grad():
-            next_obs = data.observations[:, self.horizon :]
-            next_rewards = data.rewards[:, self.horizon :]
-            next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
-
-            B = next_obs.shape[0]
-            next_action = self._generate_action(B, next_vlm_kv)
-
-            next_q_dict = self.value_head(next_state, next_action)
-            next_q = next_q_dict["output"]
-            next_q = self.hl_gauss_loss(next_q).view(-1) if self.num_bins > 1 else next_q.view(-1)
-
+        _, next_action, next_q = self._infer(
+            data.observations[:, self.horizon :], data.rewards[:, self.horizon :]
+        )
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
@@ -515,6 +489,18 @@ class VLMActorCriticWithActionValue(nn.Module):
             return self._denoise(x_t, vlm_kv_list, t)
 
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
+
+    @torch.inference_mode()
+    def _infer(
+        self, obs: torch.Tensor, rewards: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        state, vlm_kv_list = self._vlm_forward(obs, rewards)
+        B = obs.shape[0]
+        action = self._generate_action(B, vlm_kv_list)
+        q_dict = self.value_head(state, action)
+        q = q_dict["output"]
+        q = self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
+        return state, action, q
 
     @torch.no_grad()
     def _compute_target_value(
