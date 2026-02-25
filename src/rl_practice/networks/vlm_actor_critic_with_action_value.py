@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
 from .value_head import ActionValueHead
-from .vlm_backbone import load_model, prepare_vlm_inputs
+from .vlm_backbone import get_action_prompt, load_model, parse_action_text, prepare_vlm_inputs
 
 
 def create_sinusoidal_pos_embedding(
@@ -185,13 +185,16 @@ class ActionExpert(nn.Module):
 
 
 class VLMActorCriticWithActionValue(nn.Module):
-    """VLM backbone + Action Expert (flow matching) + Action Value critic.
+    """VLM backbone + dual-action generation (text + diffusion) + Action Value critic.
 
-    Architecture (Knowledge Insulation):
-    - VLM (Qwen3-VL, frozen): processes images + text, provides intermediate representations
-    - Action Expert: transformer that cross-attends to VLM at each layer, denoises actions
+    Architecture (pi0.5-inspired):
+    - VLM (Qwen3-VL, optional LoRA): processes images + text
+    - Text Actor: VLM generates action text autoregressively (when LoRA enabled)
+    - Diffusion Actor: ActionExpert cross-attends to VLM KV, denoises actions via flow matching
     - Critic: Q(state, action) with dueling architecture
-    - Stop-gradient: VLM hidden states are detached before Expert uses them
+    - Action Selection: at inference, the action with higher Q-value is chosen
+    - Knowledge Insulation: VLM hidden states are detached before ActionExpert uses them;
+      only text actor loss flows gradients through LoRA
     """
 
     def __init__(
@@ -211,21 +214,24 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.denoising_steps = args.denoising_steps
         self.denoising_time = args.denoising_time
         self.dacer_loss_weight = args.dacer_loss_weight
+        self.max_new_tokens = args.max_new_tokens
 
         # Image processor (for replay buffer obs_z encoding)
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=args.image_processor_type
         )
 
-        # Load VLM (frozen)
+        # Load VLM (with optional LoRA for text actor)
         device = "cuda"
+        self.use_lora = bool(args.use_lora)
         self.vlm_model, self.processor = load_model(
             args.vlm_model_id,
             use_quantization=args.use_quantization,
-            use_lora=False,
+            use_lora=self.use_lora,
             device=device,
         )
-        self.vlm_model.requires_grad_(False)
+        if not self.use_lora:
+            self.vlm_model.requires_grad_(False)
         self.vlm_model.gradient_checkpointing_enable()
         self.device = device
 
@@ -237,7 +243,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        self.task_prompt = ""
+        self.task_prompt = get_action_prompt(self.horizon) if self.use_lora else ""
 
         # State projection (matching QwenVLEncoder)
         state_out_dim = 4
@@ -284,6 +290,20 @@ class VLMActorCriticWithActionValue(nn.Module):
             )
 
         self._dummy_state = torch.zeros(1, 1, 1)
+        self._last_vlm_inputs: dict | None = None
+
+    @property
+    def _vlm_language_layers(self):
+        """Access VLM transformer layers, handling PEFT wrapper."""
+        base = self.vlm_model.model
+        if hasattr(base, "model"):  # PEFT wrapper adds extra .model
+            base = base.model
+        return base.language_model.layers
+
+    def get_pad_token_id(self) -> int:
+        pad_token_id = self.processor.tokenizer.pad_token_id
+        eos_token_id = self.processor.tokenizer.eos_token_id
+        return pad_token_id if pad_token_id is not None else eos_token_id
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
@@ -300,9 +320,32 @@ class VLMActorCriticWithActionValue(nn.Module):
         state, vlm_kv_list = self._vlm_forward(s_seq, r_seq)
 
         B = s_seq.shape[0]
-        action = self._generate_action(B, vlm_kv_list)
+        diff_action = self._generate_action(B, vlm_kv_list)
 
-        # Q value
+        # Text action (if LoRA enabled)
+        generated_ids: list[int] = []
+        parse_success = True
+        action = diff_action
+
+        if self.use_lora:
+            text_action, generated_ids, parse_success = self._generate_text_action(
+                self._last_vlm_inputs
+            )
+            if parse_success:
+                # Select action with higher Q value
+                q_diff = self.value_head(state, diff_action)["output"]
+                q_text = self.value_head(state, text_action)["output"]
+                if self.num_bins > 1:
+                    q_diff_scalar = self.hl_gauss_loss(q_diff)
+                    q_text_scalar = self.hl_gauss_loss(q_text)
+                else:
+                    q_diff_scalar = q_diff.view(-1)
+                    q_text_scalar = q_text.view(-1)
+
+                if q_text_scalar.item() > q_diff_scalar.item():
+                    action = text_action
+
+        # Q value for selected action
         q_dict = self.value_head(state, action)
         q_value = q_dict["output"]
         q_value = self.hl_gauss_loss(q_value).item() if self.num_bins > 1 else q_value.item()
@@ -316,8 +359,8 @@ class VLMActorCriticWithActionValue(nn.Module):
             "rnn_state": rnn_state,
             "next_image": np.zeros((h, w, c), dtype=np.float32),
             "next_reward": 0.0,
-            "action_token_ids": [],
-            "parse_success": True,
+            "action_token_ids": generated_ids,
+            "parse_success": parse_success,
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
@@ -333,10 +376,19 @@ class VLMActorCriticWithActionValue(nn.Module):
             state, action_chunk, target_value
         )
 
-        # Actor loss (advantage + DACER)
+        # Diffusion actor loss (advantage + DACER)
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_kv_list)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
+
+        # Text actor loss (if LoRA enabled)
+        if self.use_lora:
+            curr_action_token_ids = data.action_token_ids[:, -1]  # (B, max_new_tokens)
+            text_actor_loss, text_info = self._compute_text_actor_loss(
+                state, curr_obs, curr_rewards, curr_action_token_ids
+            )
+            total_loss = total_loss + text_actor_loss
+            actor_info.update(text_info)
 
         activations_dict = {
             "state": state,
@@ -361,22 +413,52 @@ class VLMActorCriticWithActionValue(nn.Module):
             state, action_chunk, target_value
         )
 
-        # Actor loss (advantage + DACER)
+        # Diffusion actor loss (advantage + DACER)
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_kv_list)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
+        # Text actor loss (if LoRA enabled)
+        if self.use_lora:
+            curr_action_token_ids = data.action_token_ids[:, -1]
+            text_actor_loss, text_info = self._compute_text_actor_loss(
+                state, curr_obs, curr_rewards, curr_action_token_ids
+            )
+            total_loss = total_loss + text_actor_loss
+            actor_info.update(text_info)
+
         B = curr_obs.shape[0]
+        generated_ids: list[int] = []
+        parse_success = True
         with torch.no_grad():
-            infer_action = self._generate_action(B, vlm_kv_list)
+            diff_action = self._generate_action(B, vlm_kv_list)
+            infer_action = diff_action
+
+            if self.use_lora:
+                text_action, generated_ids, parse_success = self._generate_text_action(
+                    self._last_vlm_inputs
+                )
+                if parse_success:
+                    q_diff = self.value_head(state, diff_action)["output"]
+                    q_text = self.value_head(state, text_action)["output"]
+                    if self.num_bins > 1:
+                        q_diff_s = self.hl_gauss_loss(q_diff).item()
+                        q_text_s = self.hl_gauss_loss(q_text).item()
+                    else:
+                        q_diff_s = q_diff.item()
+                        q_text_s = q_text.item()
+                    if q_text_s > q_diff_s:
+                        infer_action = text_action
 
         c, h, w = self.observation_space_shape
         infer_dict = {
             "action": infer_action,
-            "value": target_dict["q_value"].item(),
+            "value": target_dict["q_value"].mean().item(),
             "rnn_state": self._dummy_state.clone(),
             "next_image": np.zeros((h, w, c), dtype=np.float32),
             "next_reward": 0.0,
+            "action_token_ids": generated_ids,
+            "parse_success": parse_success,
         }
 
         activations_dict = {
@@ -408,7 +490,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         state_dim = target_seq_len * self.state_out_proj.out_features
         return target_seq_len, state_dim
 
-    @torch.no_grad()
     def _vlm_forward(
         self, images: torch.Tensor, rewards: torch.Tensor
     ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
@@ -422,16 +503,18 @@ class VLMActorCriticWithActionValue(nn.Module):
             state: (B, state_dim) projected and flattened hidden state
             vlm_kv_list: list of (K, V) per layer, each (B, vlm_len, num_kv_heads, head_dim)
         """
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+        with torch.no_grad():
+            inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+            self._last_vlm_inputs = inputs
 
-        outputs = self.vlm_model.forward(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            pixel_values=inputs.get("pixel_values"),
-            image_grid_thw=inputs.get("image_grid_thw"),
-            output_hidden_states=True,
-            return_dict=True,
-        )
+            outputs = self.vlm_model.forward(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                pixel_values=inputs.get("pixel_values"),
+                image_grid_thw=inputs.get("image_grid_thw"),
+                output_hidden_states=True,
+                return_dict=True,
+            )
 
         all_hidden_states = outputs.hidden_states
 
@@ -449,7 +532,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         state = state.flatten(start_dim=1)  # (B, state_dim)
 
         # Extract K/V from each VLM layer using VLM's own projections
-        vlm_layers = self.vlm_model.model.language_model.layers
+        vlm_layers = self._vlm_language_layers
         vlm_kv_list = []
         for j in range(self.num_layers):
             hs_j = all_hidden_states[j].detach()
@@ -494,17 +577,196 @@ class VLMActorCriticWithActionValue(nn.Module):
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
     @torch.no_grad()
+    def _generate_text_action(
+        self, inputs: dict
+    ) -> tuple[torch.Tensor, list[int], bool]:
+        """Generate action via VLM text generation.
+
+        Args:
+            inputs: VLM model inputs from prepare_vlm_inputs
+
+        Returns:
+            action: (1, horizon, action_dim) tensor
+            generated_ids: list of token IDs
+            parse_success: whether parsing succeeded
+        """
+        pad_token_id = self.get_pad_token_id()
+        eos_token_id = self.processor.tokenizer.eos_token_id
+
+        generated = self.vlm_model.generate(
+            **inputs,
+            max_new_tokens=self.max_new_tokens,
+            num_beams=1,
+            do_sample=False,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+        )
+
+        input_len = inputs["input_ids"].shape[1]
+        new_tokens = generated[:, input_len:]
+        generated_ids = new_tokens[0].tolist()
+
+        action_text = self.processor.tokenizer.decode(
+            generated_ids, skip_special_tokens=True
+        ).strip()
+
+        action_array, parse_success = parse_action_text(action_text, self.horizon)
+        action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(self.device)
+
+        return action_tensor, generated_ids, parse_success
+
+    def _compute_text_log_prob(
+        self,
+        images: torch.Tensor,
+        rewards: torch.Tensor,
+        action_token_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute log prob of stored action tokens via teacher-forced VLM forward.
+
+        Args:
+            images: (B, T, C, H, W)
+            rewards: (B, T, 1)
+            action_token_ids: (B, max_new_tokens) - padded token IDs
+
+        Returns:
+            log_probs: (B,)
+        """
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+
+        pad_token_id = self.get_pad_token_id()
+        target_mask = (action_token_ids != pad_token_id).float()
+        action_len = action_token_ids.size(1)
+        prompt_len = inputs["input_ids"].size(1)
+
+        # Concatenate prompt + action tokens
+        combined_input_ids = torch.cat([inputs["input_ids"], action_token_ids], dim=1)
+        combined_attention_mask = torch.cat(
+            [inputs["attention_mask"], target_mask.long()], dim=1
+        )
+
+        # Forward pass with gradient (LoRA)
+        outputs = self.vlm_model.forward(
+            input_ids=combined_input_ids,
+            attention_mask=combined_attention_mask,
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
+            return_dict=True,
+        )
+
+        # Log prob from logits predicting action tokens
+        relevant_logits = outputs.logits[:, prompt_len - 1 : prompt_len + action_len - 1, :]
+        log_prob_dist = F.log_softmax(relevant_logits, dim=-1)
+        token_log_probs = log_prob_dist.gather(
+            2, action_token_ids.unsqueeze(2)
+        ).squeeze(2)
+        batch_log_probs = (token_log_probs * target_mask).sum(dim=1)
+
+        return batch_log_probs
+
+    def _compute_text_actor_loss(
+        self,
+        state: torch.Tensor,
+        curr_obs: torch.Tensor,
+        curr_rewards: torch.Tensor,
+        action_token_ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict]:
+        """Advantage-weighted text actor loss.
+
+        Args:
+            state: (B, state_dim) - detached state for advantage computation
+            curr_obs: (B, T, C, H, W)
+            curr_rewards: (B, T, 1)
+            action_token_ids: (B, max_new_tokens) - stored action token IDs
+
+        Returns:
+            loss: scalar
+            info: dict with metrics
+        """
+        pad_token_id = self.get_pad_token_id()
+
+        # Check which samples have valid (non-empty) action tokens
+        has_tokens = (action_token_ids != pad_token_id).any(dim=1)  # (B,)
+
+        if not has_tokens.any():
+            zero = torch.tensor(0.0, device=self.device, requires_grad=True)
+            return zero, {"text_actor_loss": 0.0}
+
+        # Filter to valid samples only
+        valid_obs = curr_obs[has_tokens]
+        valid_rewards = curr_rewards[has_tokens]
+        valid_tokens = action_token_ids[has_tokens]
+        valid_state = state[has_tokens].detach()
+
+        # Compute log prob with gradient through LoRA
+        log_prob = self._compute_text_log_prob(valid_obs, valid_rewards, valid_tokens)
+
+        # Parse tokens back to action tensors for advantage computation
+        actions_list = []
+        for i in range(valid_tokens.shape[0]):
+            token_ids = valid_tokens[i].tolist()
+            token_ids = [t for t in token_ids if t != pad_token_id]
+            action_text = self.processor.tokenizer.decode(
+                token_ids, skip_special_tokens=True
+            ).strip()
+            action_array, _ = parse_action_text(action_text, self.horizon)
+            actions_list.append(torch.from_numpy(action_array).to(self.device))
+        parsed_actions = torch.stack(actions_list)  # (valid_B, horizon, action_dim)
+
+        # Compute advantage (no grad through value head)
+        with torch.no_grad():
+            for param in self.value_head.parameters():
+                param.requires_grad_(False)
+            adv_dict = self.value_head.get_advantage(valid_state, parsed_actions)
+            advantage = adv_dict["output"]
+            if self.num_bins > 1:
+                advantage = self.hl_gauss_loss(advantage)
+            advantage = advantage.view(-1)
+            for param in self.value_head.parameters():
+                param.requires_grad_(True)
+
+        # Advantage-weighted policy gradient
+        text_actor_loss = -(log_prob * advantage.detach()).mean()
+
+        info = {"text_actor_loss": text_actor_loss.item()}
+        return text_actor_loss, info
+
+    @torch.no_grad()
     def _compute_target_value(self, data) -> dict:
         next_obs = data.observations[:, self.horizon :]
         next_rewards = data.rewards[:, self.horizon :]
         next_state, next_vlm_kv = self._vlm_forward(next_obs, next_rewards)
 
         B = next_obs.shape[0]
-        next_action = self._generate_action(B, next_vlm_kv)
 
-        next_q_dict = self.value_head(next_state, next_action)
-        next_q = next_q_dict["output"]
-        next_q = self.hl_gauss_loss(next_q).view(-1) if self.num_bins > 1 else next_q.view(-1)
+        # Diffusion action
+        next_diff_action = self._generate_action(B, next_vlm_kv)
+        next_q_diff = self.value_head(next_state, next_diff_action)["output"]
+        next_q_diff = (
+            self.hl_gauss_loss(next_q_diff).view(-1)
+            if self.num_bins > 1
+            else next_q_diff.view(-1)
+        )
+
+        next_action = next_diff_action
+        next_q = next_q_diff
+
+        # Text action (if LoRA enabled) — select max Q across both
+        if self.use_lora:
+            text_action, _, text_parse_ok = self._generate_text_action(self._last_vlm_inputs)
+            if text_parse_ok:
+                next_q_text = self.value_head(next_state, text_action)["output"]
+                next_q_text = (
+                    self.hl_gauss_loss(next_q_text).view(-1)
+                    if self.num_bins > 1
+                    else next_q_text.view(-1)
+                )
+                use_text = next_q_text > next_q_diff
+                next_q = torch.where(use_text, next_q_text, next_q_diff)
+                next_action = torch.where(
+                    use_text.unsqueeze(-1).unsqueeze(-1).expand_as(next_diff_action),
+                    text_action.expand_as(next_diff_action),
+                    next_diff_action,
+                )
 
         # Discounted reward over horizon
         chunk_rewards = data.rewards[:, -self.horizon :]

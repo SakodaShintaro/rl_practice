@@ -81,6 +81,7 @@ class OffPolicyAgent:
         # Initialize gradient norm targets
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        self.prev_action_token_ids: list[int] = []
 
     @torch.inference_mode()
     def select_action(
@@ -118,7 +119,7 @@ class OffPolicyAgent:
             torch.from_numpy(normalized_action).to(self.device),
             0.0,
             0.0,
-            [],
+            self.prev_action_token_ids,
         )
 
         # Use cached action from chunk if available (except during random exploration)
@@ -165,6 +166,7 @@ class OffPolicyAgent:
             action = action * self.action_scale + self.action_bias
             action = np.clip(action, self.action_low, self.action_high)
         self.prev_action = action
+        self.prev_action_token_ids = infer_dict.get("action_token_ids", [])
 
         info_dict["chunk_step"] = self.chunk_step
         return action, info_dict
