@@ -14,6 +14,21 @@ from .value_head import ActionValueHead
 from .vlm_backbone import load_model, prepare_vlm_inputs
 
 
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_pos_emb(
+    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply RoPE to Q and K. q/k: (B, heads, seq, head_dim), cos/sin: (B, seq, head_dim)."""
+    cos = cos.unsqueeze(1)  # (B, 1, seq, head_dim)
+    sin = sin.unsqueeze(1)
+    return (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+
+
 def create_sinusoidal_pos_embedding(
     time: torch.Tensor, dim: int, min_period: float, max_period: float
 ) -> torch.Tensor:
@@ -97,8 +112,10 @@ class ActionExpertLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,  # (B, action_len, hidden_size)
-        vlm_k: torch.Tensor,  # (B, vlm_len, num_kv_heads, head_dim)
-        vlm_v: torch.Tensor,  # (B, vlm_len, num_kv_heads, head_dim)
+        vlm_k: torch.Tensor,  # (B, num_kv_heads, vlm_len, head_dim) with RoPE
+        vlm_v: torch.Tensor,  # (B, num_kv_heads, vlm_len, head_dim)
+        cos: torch.Tensor,  # (B, action_len, head_dim)
+        sin: torch.Tensor,  # (B, action_len, head_dim)
         adarms_cond: torch.Tensor,  # (B, cond_dim)
     ) -> torch.Tensor:
         residual = hidden_states
@@ -115,13 +132,16 @@ class ActionExpertLayer(nn.Module):
         q = self.q_norm(q)
         k_self = self.k_norm(k_self)
 
-        # Concat VLM K/V with self K/V: [vlm_tokens, action_tokens]
-        k = torch.cat([vlm_k, k_self], dim=1)  # (B, vlm_len+action_len, num_kv_heads, head_dim)
-        v = torch.cat([vlm_v, v_self], dim=1)
-
         q = q.transpose(1, 2)  # (B, num_heads, action_len, head_dim)
-        k = k.transpose(1, 2)  # (B, num_kv_heads, vlm_len+action_len, head_dim)
-        v = v.transpose(1, 2)  # (B, num_kv_heads, vlm_len+action_len, head_dim)
+        k_self = k_self.transpose(1, 2)  # (B, num_kv_heads, action_len, head_dim)
+        v_self = v_self.transpose(1, 2)  # (B, num_kv_heads, action_len, head_dim)
+
+        # RoPE on Q and self K to match VLM K
+        q, k_self = apply_rotary_pos_emb(q, k_self, cos, sin)
+
+        # Concat VLM K/V with self K/V: [vlm_tokens, action_tokens]
+        k = torch.cat([vlm_k, k_self], dim=2)  # (B, num_kv_heads, vlm_len+action_len, head_dim)
+        v = torch.cat([vlm_v, v_self], dim=2)
 
         # GQA: expand KV heads
         k = self._repeat_kv(k)  # (B, num_heads, vlm_len+action_len, head_dim)
@@ -155,9 +175,11 @@ class ActionExpert(nn.Module):
         num_kv_heads: int,
         head_dim: int,
         rms_norm_eps: float,
+        rotary_emb: nn.Module,
     ) -> None:
         super().__init__()
         self.num_layers = num_layers
+        self.rotary_emb = rotary_emb
         self.layers = nn.ModuleList(
             [
                 ActionExpertLayer(
@@ -175,12 +197,22 @@ class ActionExpert(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+        vlm_past_kv,
         adarms_cond: torch.Tensor,
     ) -> torch.Tensor:
+        B, action_len, _ = hidden_states.shape
+        vlm_seq_len = vlm_past_kv[0][0].shape[2]
+
+        # RoPE positions for action tokens: right after VLM sequence
+        action_pos = torch.arange(
+            vlm_seq_len, vlm_seq_len + action_len, device=hidden_states.device
+        )
+        action_pos_ids = action_pos.unsqueeze(0).expand(B, -1)  # (B, action_len)
+        cos, sin = self.rotary_emb(hidden_states, position_ids=action_pos_ids)
+
         for j in range(self.num_layers):
-            vlm_k, vlm_v = vlm_kv_list[j]
-            hidden_states = self.layers[j](hidden_states, vlm_k, vlm_v, adarms_cond)
+            vlm_k, vlm_v = vlm_past_kv[j]
+            hidden_states = self.layers[j](hidden_states, vlm_k, vlm_v, cos, sin, adarms_cond)
         return self.norm(hidden_states)
 
 
@@ -247,6 +279,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # Action Expert
         expert_hidden = args.expert_hidden_size
+        rotary_emb = self.vlm_model.model.language_model.rotary_emb
         self.action_expert = ActionExpert(
             num_layers=num_layers,
             expert_hidden_size=expert_hidden,
@@ -254,6 +287,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             num_kv_heads=vlm_cfg.num_key_value_heads,
             head_dim=vlm_cfg.head_dim,
             rms_norm_eps=vlm_cfg.rms_norm_eps,
+            rotary_emb=rotary_emb,
         )
 
         # Action in/out projections
@@ -322,7 +356,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         curr_obs = data.observations[:, : -self.horizon]
         curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_kv_list = self._vlm_forward(curr_obs, curr_rewards)
+        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -331,7 +365,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
 
         # Actor loss (advantage + DACER)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_kv_list)
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
@@ -354,7 +388,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         curr_obs = data.observations[:, : -self.horizon]
         curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_kv_list = self._vlm_forward(curr_obs, curr_rewards)
+        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -363,7 +397,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
 
         # Actor loss (advantage + DACER)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_kv_list)
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
@@ -406,29 +440,22 @@ class VLMActorCriticWithActionValue(nn.Module):
         return target_seq_len, state_dim
 
     @torch.no_grad()
-    def _vlm_forward(
-        self, images: torch.Tensor, rewards: torch.Tensor
-    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
-        """Run VLM forward and extract state + KV for each layer.
-
-        Args:
-            images: (B, T, C, H, W)
-            rewards: (B, T, 1)
-
-        Returns:
-            state: (B, state_dim) projected and flattened hidden state
-            vlm_kv_list: list of (K, V) per layer, each (B, vlm_len, num_kv_heads, head_dim)
-        """
+    def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
+        """Run VLM forward and extract state + past_key_values (with RoPE)."""
         inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
 
+        # eval mode: bypass gradient checkpointing forcing use_cache=False
+        self.vlm_model.eval()
         outputs = self.vlm_model.forward(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
             pixel_values=inputs.get("pixel_values"),
             image_grid_thw=inputs.get("image_grid_thw"),
             output_hidden_states=True,
+            use_cache=True,
             return_dict=True,
         )
+        self.vlm_model.train()
 
         all_hidden_states = outputs.hidden_states
 
@@ -445,26 +472,12 @@ class VLMActorCriticWithActionValue(nn.Module):
             state = torch.cat([pad, state], dim=1)
         state = state.flatten(start_dim=1)  # (B, state_dim)
 
-        # Extract K/V from each VLM layer using VLM's own projections
-        vlm_layers = self.vlm_model.model.language_model.layers
-        vlm_kv_list = []
-        for j in range(self.num_layers):
-            hs_j = all_hidden_states[j].detach()
-            normed = vlm_layers[j].input_layernorm(hs_j)
-            k = vlm_layers[j].self_attn.k_proj(normed)
-            v = vlm_layers[j].self_attn.v_proj(normed)
-            B, vlm_len = k.shape[:2]
-            k = k.view(B, vlm_len, self.vlm_num_kv_heads, self.vlm_head_dim)
-            v = v.view(B, vlm_len, self.vlm_num_kv_heads, self.vlm_head_dim)
-            k = vlm_layers[j].self_attn.k_norm(k)
-            vlm_kv_list.append((k.detach(), v.detach()))
-
-        return state, vlm_kv_list
+        return state, outputs.past_key_values
 
     def _denoise(
         self,
         noisy_actions: torch.Tensor,
-        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+        vlm_past_kv,
         timestep: torch.Tensor,
     ) -> torch.Tensor:
         """Run one denoising step through the Action Expert."""
@@ -474,19 +487,19 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
         action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
-        expert_out = self.action_expert(action_embs, vlm_kv_list, adarms_cond)
+        expert_out = self.action_expert(action_embs, vlm_past_kv, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
 
     def _generate_action(
         self,
         B: int,
-        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+        vlm_past_kv,
     ) -> torch.Tensor:
         """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
 
         def predict_velocity_fn(x_t, t):
-            return self._denoise(x_t, vlm_kv_list, t)
+            return self._denoise(x_t, vlm_past_kv, t)
 
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
@@ -494,9 +507,9 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _infer(
         self, obs: torch.Tensor, rewards: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        state, vlm_kv_list = self._vlm_forward(obs, rewards)
+        state, vlm_past_kv = self._vlm_forward(obs, rewards)
         B = obs.shape[0]
-        action = self._generate_action(B, vlm_kv_list)
+        action = self._generate_action(B, vlm_past_kv)
         q_dict = self.value_head(state, action)
         q = q_dict["output"]
         q = self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
@@ -550,15 +563,15 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _compute_actor_loss(
         self,
         state: torch.Tensor,
-        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+        vlm_past_kv,
     ) -> tuple[torch.Tensor, dict, dict]:
         """Advantage-based loss + DACER loss, matching actor_critic_with_action_value."""
         B = state.shape[0]
 
-        action = self._generate_action(B, vlm_kv_list)
+        action = self._generate_action(B, vlm_past_kv)
 
         def predict_velocity_fn(a_t, t):
-            return self._denoise(a_t, vlm_kv_list, t)
+            return self._denoise(a_t, vlm_past_kv, t)
 
         total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
             state,
