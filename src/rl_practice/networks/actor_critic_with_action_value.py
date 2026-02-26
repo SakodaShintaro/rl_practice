@@ -183,8 +183,16 @@ class ActorCriticWithActionValue(nn.Module):
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
-        # compute target value
-        target_value = self._compute_target_value(data)["target_value"]  # (B,)
+        _, _, next_q, _ = self._infer(
+            data.observations[:, self.horizon :],
+            data.obs_z[:, self.horizon :],
+            data.actions[:, self.horizon :],
+            data.rewards[:, self.horizon :],
+            data.rnn_state[:, self.horizon],
+        )
+        chunk_rewards = data.rewards[:, -self.horizon :]
+        chunk_dones = data.dones[:, -self.horizon :]
+        target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         # Use seq_len frames (excluding last horizon frames)
         curr_obs = data.observations[:, : -self.horizon]
@@ -232,8 +240,16 @@ class ActorCriticWithActionValue(nn.Module):
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
         """Combined inference and loss computation."""
-        target_dict = self._compute_target_value(data)
-        target_value = target_dict["target_value"]
+        next_state, next_action, next_q, next_rnn_state = self._infer(
+            data.observations[:, self.horizon :],
+            data.obs_z[:, self.horizon :],
+            data.actions[:, self.horizon :],
+            data.rewards[:, self.horizon :],
+            data.rnn_state[:, self.horizon],
+        )
+        chunk_rewards = data.rewards[:, -self.horizon :]
+        chunk_dones = data.dones[:, -self.horizon :]
+        target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         prev_obs = data.observations[:, : -self.horizon]
         prev_obs_z = data.obs_z[:, : -self.horizon]
@@ -258,30 +274,28 @@ class ActorCriticWithActionValue(nn.Module):
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
                 prev_state, action_chunk
             )
-        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(
-            data, target_dict["next_state"]
-        )
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, prev_state)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
         next_image, next_reward = self.prediction_head.predict_next_state(
-            target_dict["next_state"],
-            target_dict["action"][:, 0],
+            next_state,
+            next_action[:, 0],
             self.observation_space_shape,
             self.predictor_step_num,
             self.disable_state_predictor,
         )
 
         infer_dict = {
-            "action": target_dict["action"],
-            "value": target_dict["q_value"].item(),
-            "rnn_state": target_dict["rnn_state"],
+            "action": next_action,
+            "value": next_q.item(),
+            "rnn_state": next_rnn_state,
             "next_image": next_image,
             "next_reward": next_reward,
         }
 
         activations_dict = {
-            "state": target_dict["next_state"],
+            "state": next_state,
             **critic_activations,
             **actor_activations,
             **seq_activations,
@@ -299,47 +313,39 @@ class ActorCriticWithActionValue(nn.Module):
     # Internal methods #
     ####################
 
+    @torch.inference_mode()
+    def _infer(
+        self,
+        obs: torch.Tensor,
+        obs_z: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        rnn_state: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        state, rnn_state_out = self.encoder.forward(obs, obs_z, actions, rewards, rnn_state)
+        action, _ = self.policy_head.get_action(state)
+        q_dict = self.value_head(state, action)
+        q = q_dict["output"]
+        q = self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
+        return state, action, q, rnn_state_out
+
     @torch.no_grad()
-    def _compute_target_value(self, data) -> dict:
-        next_obs = data.observations[:, self.horizon :]
-        next_obs_z = data.obs_z[:, self.horizon :]
-        next_actions = data.actions[:, self.horizon :]
-        next_rewards = data.rewards[:, self.horizon :]
-        next_rnn_state = data.rnn_state[:, self.horizon]
-
-        next_state, rnn_state_out = self.encoder.forward(
-            next_obs, next_obs_z, next_actions, next_rewards, next_rnn_state
-        )
-        action, _ = self.policy_head.get_action(next_state)
-        next_critic_output_dict = self.value_head(next_state, action)
-        next_critic_value = next_critic_output_dict["output"]
-        if self.num_bins > 1:
-            next_critic_value = self.hl_gauss_loss(next_critic_value).view(-1)
-        else:
-            next_critic_value = next_critic_value.view(-1)
-
-        chunk_rewards = data.rewards[:, -self.horizon :]
-        chunk_dones = data.dones[:, -self.horizon :]
+    def _compute_target_value(
+        self,
+        next_q: torch.Tensor,
+        chunk_rewards: torch.Tensor,
+        chunk_dones: torch.Tensor,
+    ) -> torch.Tensor:
         batch_size = chunk_rewards.size(0)
         device = chunk_rewards.device
         discounted_reward = torch.zeros(batch_size, device=device)
         gamma_power = 1.0
         continuing = torch.ones(batch_size, device=device)
-
         for i in range(self.horizon):
             discounted_reward += continuing * gamma_power * chunk_rewards[:, i].flatten()
             gamma_power *= self.gamma
             continuing *= 1 - chunk_dones[:, i].flatten()
-
-        target_value = discounted_reward + continuing * gamma_power * next_critic_value
-
-        return {
-            "target_value": target_value,
-            "action": action,
-            "rnn_state": rnn_state_out,
-            "q_value": next_critic_value,
-            "next_state": next_state,
-        }
+        return discounted_reward + continuing * gamma_power * next_q
 
     def _compute_critic_loss(self, curr_state, action_chunk, target_value):
         """
