@@ -243,6 +243,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.denoising_steps = args.denoising_steps
         self.denoising_time = args.denoising_time
         self.dacer_loss_weight = args.dacer_loss_weight
+        self.text_q_margin = args.text_q_margin
 
         # Image processor (for replay buffer obs_z encoding)
         self.image_processor = ImageProcessor(
@@ -560,7 +561,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         text_q = self._compute_q(state, text_action)
 
         # Pick action with higher Q-value (per batch element)
-        use_text = text_q > diff_q  # (B,)
+        use_text = text_q > diff_q + self.text_q_margin  # (B,)
         action = torch.where(use_text.unsqueeze(-1).unsqueeze(-1), text_action, diff_action)
         q = torch.where(use_text, text_q, diff_q)
 
