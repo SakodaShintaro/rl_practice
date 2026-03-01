@@ -18,4 +18,4 @@ uv run python scripts/train.py qwenvl$suffix \
   --use_quantization 1 \
   --use_lora 0 \
   --batch_size 8 \
-  --learning_rate 1e-5 \
+  --learning_rate 5e-6 \
