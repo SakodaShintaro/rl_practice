@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
 from .value_head import ActionValueHead
-from .vlm_backbone import load_model, prepare_vlm_inputs
+from .vlm_backbone import get_action_prompt, load_model, parse_action_text, prepare_vlm_inputs
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -270,6 +270,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
         self.task_prompt = ""
+        self.text_action_prompt = get_action_prompt(args.horizon)
+        self.max_new_tokens = args.max_new_tokens
 
         # State projection (matching QwenVLEncoder)
         state_out_dim = 4
@@ -503,16 +505,71 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
+    def _generate_text_action(
+        self, obs: torch.Tensor, rewards: torch.Tensor
+    ) -> tuple[torch.Tensor, str, bool]:
+        """Generate action via VLM text generation. Returns (action_tensor, action_text, parse_success)."""
+        inputs = prepare_vlm_inputs(self.processor, obs, rewards, self.text_action_prompt)
+
+        pad_token_id = self.processor.tokenizer.pad_token_id
+        eos_token_id = self.processor.tokenizer.eos_token_id
+        if pad_token_id is None:
+            pad_token_id = eos_token_id
+
+        self.vlm_model.eval()
+        generated = self.vlm_model.generate(
+            **inputs,
+            max_new_tokens=self.max_new_tokens,
+            num_beams=1,
+            do_sample=False,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+        )
+        self.vlm_model.train()
+
+        input_len = inputs["input_ids"].shape[1]
+        new_tokens = generated[:, input_len:]
+        generated_ids = new_tokens[0].tolist()
+        action_text = self.processor.tokenizer.decode(
+            generated_ids, skip_special_tokens=True
+        ).strip()
+
+        action_array, parse_success = parse_action_text(action_text, self.horizon)
+        action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
+        return action_tensor, action_text, parse_success
+
+    def _compute_q(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """Compute scalar Q-value for a (state, action) pair."""
+        q_dict = self.value_head(state, action)
+        q = q_dict["output"]
+        return self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
+
     @torch.inference_mode()
     def _infer(
         self, obs: torch.Tensor, rewards: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         state, vlm_past_kv = self._vlm_forward(obs, rewards)
         B = obs.shape[0]
-        action = self._generate_action(B, vlm_past_kv)
-        q_dict = self.value_head(state, action)
-        q = q_dict["output"]
-        q = self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
+
+        # Diffusion action
+        diff_action = self._generate_action(B, vlm_past_kv)
+        diff_q = self._compute_q(state, diff_action)
+
+        # Text action
+        text_action, action_text, parse_success = self._generate_text_action(obs, rewards)
+        text_q = self._compute_q(state, text_action)
+
+        # Pick action with higher Q-value (per batch element)
+        use_text = text_q > diff_q  # (B,)
+        action = torch.where(use_text.unsqueeze(-1).unsqueeze(-1), text_action, diff_action)
+        q = torch.where(use_text, text_q, diff_q)
+
+        print(
+            f"[ActionSelect] diff_q={diff_q.item():.3f}, text_q={text_q.item():.3f}, "
+            f"use_text={use_text.item()}, parse_success={parse_success}, "
+            f"action_text={action_text}"
+        )
+
         return state, action, q
 
     @torch.no_grad()
