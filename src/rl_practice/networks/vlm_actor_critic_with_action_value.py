@@ -201,7 +201,7 @@ class ActionExpert(nn.Module):
         adarms_cond: torch.Tensor,
     ) -> torch.Tensor:
         B, action_len, _ = hidden_states.shape
-        vlm_seq_len = vlm_past_kv[0][0].shape[2]
+        vlm_seq_len = vlm_past_kv.layers[0].keys.shape[2]
 
         # RoPE positions for action tokens: right after VLM sequence
         action_pos = torch.arange(
@@ -211,8 +211,10 @@ class ActionExpert(nn.Module):
         cos, sin = self.rotary_emb(hidden_states, position_ids=action_pos_ids)
 
         for j in range(self.num_layers):
-            vlm_k, vlm_v = vlm_past_kv[j]
-            hidden_states = self.layers[j](hidden_states, vlm_k, vlm_v, cos, sin, adarms_cond)
+            layer = vlm_past_kv.layers[j]
+            hidden_states = self.layers[j](
+                hidden_states, layer.keys, layer.values, cos, sin, adarms_cond
+            )
         return self.norm(hidden_states)
 
 
