@@ -98,6 +98,16 @@ def make_env(env_id: str) -> gym.Env:
         env.unwrapped.eval_range = 20
         return env
 
+    elif env_id == "Hopper-v5":
+        env = gym.make(env_id, render_mode="rgb_array")
+        env = PixelObsWrapper(env, height=96, width=96)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec.reward_threshold = 3800.0
+        env.unwrapped.eval_range = 20
+        return env
+
     else:
         raise ValueError(f"Unsupported environment: {env_id}")
 
@@ -258,6 +268,23 @@ class ResizeObs(gym.ObservationWrapper):
         # obs is (H, W, C), resize and return (H, W, C)
         h, w = self.shape[1:]  # target height and width
         return cv2.resize(obs, (w, h), interpolation=cv2.INTER_AREA)
+
+
+class PixelObsWrapper(gym.ObservationWrapper):
+    """Replace state-vector observation with rendered RGB pixels."""
+
+    def __init__(self, env: gym.Env, height: int, width: int) -> None:
+        super().__init__(env)
+        self.height = height
+        self.width = width
+        self.observation_space = gym.spaces.Box(
+            low=0, high=255, shape=(height, width, 3), dtype=np.uint8
+        )
+
+    def observation(self, obs: np.ndarray) -> np.ndarray:
+        img = self.env.render()
+        img = cv2.resize(img, (self.width, self.height), interpolation=cv2.INTER_AREA)
+        return img
 
 
 class ZeroObsOnDoneWrapper(gym.ObservationWrapper):
