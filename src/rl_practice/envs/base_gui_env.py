@@ -41,8 +41,8 @@ class BaseGUIEnv(gym.Env):
 
     def _update_cursor(self, dx, dy):
         """Update cursor position from delta action."""
-        self.cursor_x = np.clip(self.cursor_x + dx * 0.5, 0.0, 1.0)
-        self.cursor_y = np.clip(self.cursor_y + dy * 0.5, 0.0, 1.0)
+        self.cursor_x = np.clip(self.cursor_x + dx * 0.25, 0.0, 1.0)
+        self.cursor_y = np.clip(self.cursor_y + dy * 0.25, 0.0, 1.0)
 
     def _cursor_pixel(self):
         """Get cursor position in pixel coordinates."""
@@ -54,16 +54,24 @@ class BaseGUIEnv(gym.Env):
     def _draw_cursor(self, image):
         """Draw crosshair cursor on image."""
         cx, cy = self._cursor_pixel()
-        size = 5
+        size = 10
+        thickness = 3
         color = np.array([0, 0, 0], dtype=np.uint8)
-        # Horizontal line
+        half_t = thickness // 2
         x_start = max(0, cx - size)
         x_end = min(self.width, cx + size + 1)
-        image[max(0, cy), x_start:x_end] = color
-        # Vertical line
         y_start = max(0, cy - size)
         y_end = min(self.height, cy + size + 1)
-        image[y_start:y_end, max(0, cx)] = color
+        # Horizontal bar
+        for dy in range(-half_t, half_t + 1):
+            row = cy + dy
+            if 0 <= row < self.height:
+                image[row, x_start:x_end] = color
+        # Vertical bar
+        for dx in range(-half_t, half_t + 1):
+            col = cx + dx
+            if 0 <= col < self.width:
+                image[y_start:y_end, col] = color
 
     def _render_human(self, frame):
         """Display frame in Pygame window."""

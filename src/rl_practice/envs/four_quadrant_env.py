@@ -29,27 +29,31 @@ class FourQuadrantEnv(BaseGUIEnv):
         self.SCORE_BG = np.array([255, 255, 200], dtype=np.uint8)
         self.SCORE_BORDER = np.array([200, 150, 0], dtype=np.uint8)
 
-        # 4 quadrants (x, y, w, h)
-        half_w = self.width // 2
-        half_h = self.height // 2
-        self.quadrants = [
-            (0, 0, half_w, half_h),
-            (half_w, 0, half_w, half_h),
-            (0, half_h, half_w, half_h),
-            (half_w, half_h, half_w, half_h),
-        ]
-
+        self.randomize = True
+        self.rect_x = 0
+        self.rect_y = 0
         self.correct_quadrant = 0
         self.prev_button_state = False
 
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        self.score_duration = 3
+        self.score_duration = 0
+
+    def _place_rect(self):
+        half_w = self.width // 2
+        half_h = self.height // 2
+        if self.randomize:
+            self.rect_x = random.randint(0, half_w)
+            self.rect_y = random.randint(0, half_h)
+        else:
+            self.correct_quadrant = random.randint(0, 3)
+            origins = [(0, 0), (half_w, 0), (0, half_h), (half_w, half_h)]
+            self.rect_x, self.rect_y = origins[self.correct_quadrant]
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.correct_quadrant = random.randint(0, 3)
+        self._place_rect()
         self.step_count = 0
         self.cursor_x = 0.5
         self.cursor_y = 0.5
@@ -72,22 +76,22 @@ class FourQuadrantEnv(BaseGUIEnv):
             self.state_timer += 1
             if self.state_timer >= self.score_duration:
                 self.state = STATE_PLAYING
-                self.correct_quadrant = random.randint(0, 3)
+                self._place_rect()
                 self.state_timer = 0
         else:
             if current_button_state:
-                clicked_quadrant = None
-                for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
-                    if qx <= x < qx + qw and qy <= y < qy + qh:
-                        clicked_quadrant = i
-                        break
-                if clicked_quadrant == self.correct_quadrant:
+                rx, ry = self.rect_x, self.rect_y
+                rw, rh = self.width // 2, self.height // 2
+                if rx <= x < rx + rw and ry <= y < ry + rh:
                     reward = 1.0
                 else:
                     reward = -0.01
                 self.current_score = reward
-                self.state = STATE_SHOW_SCORE
-                self.state_timer = 0
+                if self.render_mode == "human":
+                    self.state = STATE_SHOW_SCORE
+                    self.state_timer = 0
+                else:
+                    self._place_rect()
 
         self.prev_button_state = current_button_state
         observation = self._get_observation()
@@ -107,14 +111,19 @@ class FourQuadrantEnv(BaseGUIEnv):
         if self.state == STATE_SHOW_SCORE:
             self._draw_score(image)
         else:
-            for i, (x, y, w, h) in enumerate(self.quadrants):
-                if i == self.correct_quadrant:
-                    image[y : y + h, x : x + w] = self.RED
-                else:
-                    image[y, x : x + w] = self.BLACK
-                    image[y + h - 1, x : x + w] = self.BLACK
-                    image[y : y + h, x] = self.BLACK
-                    image[y : y + h, x + w - 1] = self.BLACK
+            rx, ry = self.rect_x, self.rect_y
+            rw, rh = self.width // 2, self.height // 2
+            image[ry : ry + rh, rx : rx + rw] = self.RED
+            if not self.randomize:
+                half_w = self.width // 2
+                half_h = self.height // 2
+                origins = [(0, 0), (half_w, 0), (0, half_h), (half_w, half_h)]
+                for i, (ox, oy) in enumerate(origins):
+                    if i != self.correct_quadrant:
+                        image[oy, ox : ox + half_w] = self.BLACK
+                        image[oy + half_h - 1, ox : ox + half_w] = self.BLACK
+                        image[oy : oy + half_h, ox] = self.BLACK
+                        image[oy : oy + half_h, ox + half_w - 1] = self.BLACK
 
         self._draw_cursor(image)
         return image
