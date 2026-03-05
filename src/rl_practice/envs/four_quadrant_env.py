@@ -15,7 +15,6 @@ from rl_practice.envs.base_gui_env import BaseGUIEnv
 
 STATE_PLAYING = "PLAYING"
 STATE_SHOW_SCORE = "SHOW_SCORE"
-STATE_WAITING = "WAITING"
 
 
 class FourQuadrantEnv(BaseGUIEnv):
@@ -47,7 +46,6 @@ class FourQuadrantEnv(BaseGUIEnv):
         self.current_score = 0.0
         self.state_timer = 0
         self.score_duration = 3
-        self.waiting_duration = 1
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -73,20 +71,10 @@ class FourQuadrantEnv(BaseGUIEnv):
         if self.state == STATE_SHOW_SCORE:
             self.state_timer += 1
             if self.state_timer >= self.score_duration:
-                self.state = STATE_WAITING
-                self.state_timer = 0
-        elif self.state == STATE_WAITING:
-            self.state_timer += 1
-            if current_button_state:
-                self.current_score = -0.5
-                self.state = STATE_SHOW_SCORE
-                self.state_timer = 0
-                reward = self.current_score
-            elif self.state_timer >= self.waiting_duration:
                 self.state = STATE_PLAYING
                 self.correct_quadrant = random.randint(0, 3)
+                self.state_timer = 0
         else:
-            reward = -0.5
             if current_button_state:
                 clicked_quadrant = None
                 for i, (qx, qy, qw, qh) in enumerate(self.quadrants):
@@ -118,8 +106,6 @@ class FourQuadrantEnv(BaseGUIEnv):
 
         if self.state == STATE_SHOW_SCORE:
             self._draw_score(image)
-        elif self.state == STATE_WAITING:
-            pass
         else:
             for i, (x, y, w, h) in enumerate(self.quadrants):
                 if i == self.correct_quadrant:
