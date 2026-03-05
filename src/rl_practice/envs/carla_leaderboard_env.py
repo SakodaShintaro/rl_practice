@@ -80,7 +80,7 @@ class CARLALeaderboardEnv(gym.Env):
             shape=(3, self.image_size[1], self.image_size[0]),
             dtype=np.float32,
         )
-        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
+        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
 
         # CARLA connection
         self.client = carla.Client("localhost", 2000)
@@ -231,12 +231,11 @@ class CARLALeaderboardEnv(gym.Env):
         return self.current_image.copy(), {}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
-        # Apply action
+        # Apply action: action[0]=steer, action[1]=gas_or_brake (same as CarRacing)
         steer = float(np.clip(action[0], -1.0, 1.0))
-        throttle = float(np.clip((action[1] + 1.0) / 2.0, 0.0, 1.0))
-        brake = float(np.clip((action[2] + 1.0) / 2.0, 0.0, 1.0))
-
-        brake = 0.0
+        gas_or_brake = float(np.clip(action[1], -1.0, 1.0))
+        throttle = max(gas_or_brake, 0.0)
+        brake = max(-gas_or_brake, 0.0)
 
         control = carla.VehicleControl(
             steer=steer, throttle=throttle, brake=brake, hand_brake=False, manual_gear_shift=False
