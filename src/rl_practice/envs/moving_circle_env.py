@@ -48,11 +48,11 @@ CIRCLE_TYPES = {
 
 
 class MovingCircleEnv(BaseGUIEnv):
-    def __init__(self, render_mode="rgb_array", num_green=1, num_yellow=1, num_red=1):
-        super().__init__(render_mode=render_mode)
+    def __init__(self, render_mode):
+        super().__init__(render_mode)
         self._window_title = "Moving Circle Game"
 
-        self.num_circles = {"green": num_green, "yellow": num_yellow, "red": num_red}
+        self.num_circles = {"green": 1, "yellow": 1, "red": 1}
 
         self.circles = []
         self.state = STATE_PLAYING
@@ -204,4 +204,4 @@ class MovingCircleEnv(BaseGUIEnv):
 
 
 if __name__ == "__main__":
-    MovingCircleEnv().run()
+    MovingCircleEnv(render_mode="human").run()

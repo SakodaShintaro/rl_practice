@@ -26,8 +26,8 @@ COLOR_NAMES = list(COLORS.keys())
 
 
 class ColorPanelEnv(BaseGUIEnv):
-    def __init__(self, render_mode="rgb_array"):
-        super().__init__(render_mode=render_mode)
+    def __init__(self, render_mode):
+        super().__init__(render_mode)
         self._window_title = "Color Panel Game"
 
         half_w = self.width // 2
@@ -179,4 +179,4 @@ class ColorPanelEnv(BaseGUIEnv):
 
 
 if __name__ == "__main__":
-    ColorPanelEnv().run()
+    ColorPanelEnv(render_mode="human").run()

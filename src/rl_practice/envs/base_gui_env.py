@@ -19,11 +19,11 @@ class BaseGUIEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
-    def __init__(self, render_mode="rgb_array", width=192, height=192):
+    def __init__(self, render_mode):
         super().__init__()
         self.render_mode = render_mode
-        self.width = width
-        self.height = height
+        self.width = 192
+        self.height = 192
 
         # Action: (dx, dy, button) ∈ [-1, 1]³
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)

@@ -20,12 +20,12 @@ STATE_SHOW_SCORE = "SHOW_SCORE"
 
 
 class LetterTracingEnv(BaseGUIEnv):
-    def __init__(self, render_mode="rgb_array", sequential=False):
-        super().__init__(render_mode=render_mode)
+    def __init__(self, render_mode):
+        super().__init__(render_mode)
         self._window_title = "Letter Tracing Game"
 
         self.font_size = 150
-        self.sequential = sequential
+        self.sequential = False
         self.current_index = 0
 
         # Load font once
@@ -185,4 +185,4 @@ class LetterTracingEnv(BaseGUIEnv):
 
 
 if __name__ == "__main__":
-    LetterTracingEnv().run()
+    LetterTracingEnv(render_mode="human").run()

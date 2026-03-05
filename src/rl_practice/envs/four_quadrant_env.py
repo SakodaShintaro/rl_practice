@@ -18,8 +18,8 @@ STATE_SHOW_SCORE = "SHOW_SCORE"
 
 
 class FourQuadrantEnv(BaseGUIEnv):
-    def __init__(self, render_mode="rgb_array"):
-        super().__init__(render_mode=render_mode)
+    def __init__(self, render_mode):
+        super().__init__(render_mode)
         self._window_title = "Four Quadrant Game"
 
         # Colors (RGB)
@@ -147,4 +147,4 @@ class FourQuadrantEnv(BaseGUIEnv):
 
 
 if __name__ == "__main__":
-    FourQuadrantEnv().run()
+    FourQuadrantEnv(render_mode="human").run()
