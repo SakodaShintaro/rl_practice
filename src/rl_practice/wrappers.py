@@ -5,7 +5,10 @@ import minigrid
 import numpy as np
 from gymnasium.envs.registration import EnvSpec
 
-from rl_practice.envs.simple_four_quadrant_env import SimpleFourQuadrantEnv
+from rl_practice.envs.color_panel_env import ColorPanelEnv
+from rl_practice.envs.four_quadrant_env import FourQuadrantEnv
+from rl_practice.envs.letter_tracing_env import LetterTracingEnv
+from rl_practice.envs.moving_circle_env import MovingCircleEnv
 
 REPEAT = 4
 
@@ -50,14 +53,7 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "LetterTracing-v0":
-        from rl_practice.envs.generic_gui_env import GenericGUIEnv, create_score_reward_detector
-
-        reward_detector = create_score_reward_detector()
-        env = GenericGUIEnv(
-            reward_detector=reward_detector,
-            render_mode="rgb_array",
-            window_title="Letter Tracing Game",
-        )
+        env = LetterTracingEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
@@ -66,15 +62,7 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "FourQuadrant-v0":
-        from rl_practice.envs.generic_gui_env import GenericGUIEnv, create_score_reward_detector
-
-        reward_detector = create_score_reward_detector()
-        env = GenericGUIEnv(
-            reward_detector=reward_detector,
-            render_mode="rgb_array",
-            window_title="Four Quadrant Game",
-        )
-        # env = SimpleFourQuadrantEnv(render_mode="rgb_array")
+        env = FourQuadrantEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
@@ -83,14 +71,16 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "ColorPanel-v0":
-        from rl_practice.envs.generic_gui_env import GenericGUIEnv, create_score_reward_detector
+        env = ColorPanelEnv(render_mode="rgb_array")
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
+        return env
 
-        reward_detector = create_score_reward_detector()
-        env = GenericGUIEnv(
-            reward_detector=reward_detector,
-            render_mode="rgb_array",
-            window_title="Color Panel Game",
-        )
+    elif env_id == "MovingCircle-v0":
+        env = MovingCircleEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)

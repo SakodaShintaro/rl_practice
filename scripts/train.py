@@ -84,6 +84,7 @@ def parse_args() -> argparse.Namespace:
             "LetterTracing-v0",
             "FourQuadrant-v0",
             "ColorPanel-v0",
+            "MovingCircle-v0",
             "Hopper-v5",
         ],
     )
