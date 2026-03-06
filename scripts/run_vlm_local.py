@@ -15,18 +15,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--images_dir", type=Path, required=True)
     parser.add_argument(
-        "--seq_len", type=int, required=True, help="Number of images per inference step"
+        "--model_id",
+        type=str,
+        choices=["Qwen/Qwen3-VL-2B-Instruct", "Qwen/Qwen3.5-0.8B"],
+        required=True,
     )
-    parser.add_argument(
-        "--tokens_per_step", type=int, required=True, help="Tokens to generate per step"
-    )
-    parser.add_argument(
-        "--max_context_words", type=int, required=True, help="Max words to keep in context"
-    )
-    parser.add_argument("--prompt", type=str, required=True)
-    parser.add_argument("--mode", choices=["image", "video"], required=True)
-    parser.add_argument("--model_id", type=str, required=True)
-    parser.add_argument("--model_type", choices=["qwen35", "qwenvl"], required=True)
+    parser.add_argument("--seq_len", type=int, default=1)
+    parser.add_argument("--tokens_per_step", type=int, default=10)
+    parser.add_argument("--max_context_words", type=int, default=50)
+    parser.add_argument("--prompt", type=str, default="Describe the scene.")
+    parser.add_argument("--mode", choices=["image", "video"], default="image")
     parser.add_argument("--use_quantization", action="store_true")
     return parser.parse_args()
 
@@ -232,13 +230,19 @@ def sliding_window_generate(
     print(f"Average time per step: {total_time / num_steps:.2f} ms")
 
 
+MODEL_TYPE_MAP = {
+    "Qwen/Qwen3.5-0.8B": "qwen35",
+    "Qwen/Qwen3-VL-2B-Instruct": "qwenvl",
+}
+
+
 def main() -> None:
     args = parse_args()
 
     all_image_paths = collect_image_paths(args.images_dir)
     assert all_image_paths, f"No images found in {args.images_dir}"
 
-    config = MODEL_CONFIG[args.model_type]
+    config = MODEL_CONFIG[MODEL_TYPE_MAP[args.model_id]]
     model, processor = config["load_model"](args.model_id, args.use_quantization, "cuda")
 
     sliding_window_generate(
