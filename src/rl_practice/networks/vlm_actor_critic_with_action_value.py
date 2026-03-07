@@ -430,6 +430,16 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss
 
+        # Actor-only loss (no critic component)
+        actor_entropy_loss = actor_loss
+
+        # -Q(s,a) for eligibility trace backward (detached from encoder)
+        et_critic_dict = self.value_head(state.detach(), action_chunk.detach())
+        if self.num_bins > 1:
+            neg_value_detached = -self.hl_gauss_loss(et_critic_dict["output"]).mean()
+        else:
+            neg_value_detached = -et_critic_dict["output"].mean()
+
         c, h, w = self.observation_space_shape
         infer_dict = {
             "action": next_action,
@@ -446,7 +456,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         }
         info_dict = {**critic_info, **actor_info}
 
-        return infer_dict, total_loss, activations_dict, info_dict
+        et_info = {
+            "actor_entropy_loss": actor_entropy_loss,
+            "neg_value": neg_value_detached,
+            "delta": critic_info["delta"],
+        }
+
+        return infer_dict, total_loss, activations_dict, info_dict, et_info
 
     ####################
     # Internal methods #
