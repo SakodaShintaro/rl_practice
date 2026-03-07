@@ -12,7 +12,7 @@ from transformers import (
 )
 
 
-def _is_qwen35(model_id: str) -> bool:
+def is_qwen35(model_id: str) -> bool:
     return "Qwen3.5" in model_id
 
 
@@ -34,7 +34,7 @@ def load_model(
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
 
-    attn_impl = "sdpa" if _is_qwen35(model_id) else "flash_attention_2"
+    attn_impl = "sdpa" if is_qwen35(model_id) else "flash_attention_2"
     model = AutoModelForImageTextToText.from_pretrained(
         model_id,
         quantization_config=bnb_config,

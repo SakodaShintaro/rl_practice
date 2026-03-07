@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
 from .value_head import ActionValueHead
-from .vlm_backbone import _is_qwen35, load_model, prepare_vlm_inputs
+from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -223,9 +223,7 @@ class ActionExpert(nn.Module):
 
         for j in range(self.num_layers):
             k, v = vlm_kv_list[j]
-            hidden_states = self.layers[j](
-                hidden_states, k, v, cos, sin, adarms_cond
-            )
+            hidden_states = self.layers[j](hidden_states, k, v, cos, sin, adarms_cond)
         return self.norm(hidden_states)
 
 
@@ -276,7 +274,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.device = device
 
         # VLM config
-        self.is_qwen35 = _is_qwen35(args.vlm_model_id)
+        self.is_qwen35 = is_qwen35(args.vlm_model_id)
         vlm_cfg = self.vlm_model.config.text_config
         vlm_hidden_size = vlm_cfg.hidden_size
         num_layers = vlm_cfg.num_hidden_layers
@@ -487,7 +485,9 @@ class VLMActorCriticWithActionValue(nn.Module):
     @torch.no_grad()
     def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
         """Run VLM forward and extract state + past_key_values (with RoPE)."""
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt, self.is_qwen35)
+        inputs = prepare_vlm_inputs(
+            self.processor, images, rewards, self.task_prompt, self.is_qwen35
+        )
 
         # eval mode: bypass gradient checkpointing forcing use_cache=False
         self.vlm_model.eval()
@@ -519,9 +519,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return state, outputs.past_key_values
 
-    def _extract_kv(
-        self, vlm_past_kv
-    ) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
+    def _extract_kv(self, vlm_past_kv) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
         """Extract (K, V) pairs for the attention layers used by ActionExpert.
 
         Returns:
