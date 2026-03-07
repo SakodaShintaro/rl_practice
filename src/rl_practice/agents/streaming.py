@@ -65,17 +65,22 @@ class StreamingAgent:
             raise ValueError(f"Unknown network class: {args.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
 
+        self.use_eligibility_trace = bool(args.use_eligibility_trace)
         lr = args.learning_rate
-        critic_params = list(self.network.value_head.parameters())
-        critic_param_ids = {id(p) for p in critic_params}
-        other_params = [p for p in self.network.parameters() if id(p) not in critic_param_ids]
-        self.critic_optimizer = AdamET(
-            critic_params,
-            lr=lr,
-            gamma=args.gamma,
-            et_lambda=args.et_lambda,
-        )
-        self.optimizer = optim.AdamW(other_params, lr=lr, weight_decay=0.1)
+        self.critic_optimizer = None
+        if self.use_eligibility_trace:
+            critic_params = list(self.network.value_head.parameters())
+            critic_param_ids = {id(p) for p in critic_params}
+            other_params = [p for p in self.network.parameters() if id(p) not in critic_param_ids]
+            self.critic_optimizer = AdamET(
+                critic_params,
+                lr=lr,
+                gamma=args.gamma,
+                et_lambda=args.et_lambda,
+            )
+            self.optimizer = optim.AdamW(other_params, lr=lr, weight_decay=0.1)
+        else:
+            self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.1)
 
         if args.network_class != "vlm_actor_critic_with_action_value":
             self.network = torch.compile(self.network)
@@ -203,22 +208,27 @@ class StreamingAgent:
 
         info_dict.update({f"losses/{key}": value for key, value in loss_info.items()})
 
-        # Actor: backward actor-only loss → encoder + actor grads
-        actor_loss = et_info["actor_entropy_loss"] / self.accumulation_steps
-        actor_loss.backward(retain_graph=True)
+        if self.use_eligibility_trace:
+            # Actor: backward actor-only loss → encoder + actor grads
+            actor_loss = et_info["actor_entropy_loss"] / self.accumulation_steps
+            actor_loss.backward(retain_graph=True)
 
-        # Critic: backward -V(s) → value_head grads only (detached from encoder)
-        neg_value = et_info["neg_value"] / self.accumulation_steps
-        neg_value.backward()
+            # Critic: backward -V(s) → value_head grads only (detached from encoder)
+            neg_value = et_info["neg_value"] / self.accumulation_steps
+            neg_value.backward()
+        else:
+            scaled_loss = loss / self.accumulation_steps
+            scaled_loss.backward()
 
         self._accumulation_count += 1
         if self._accumulation_count % self.accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
             self.optimizer.step()
-            self.critic_optimizer.step(delta=et_info["delta"], reset=self._episode_reset)
-            self._episode_reset = False
+            if self.use_eligibility_trace:
+                self.critic_optimizer.step(delta=et_info["delta"], reset=self._episode_reset)
+                self._episode_reset = False
+                self.critic_optimizer.zero_grad()
             self.optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
 
         return action, info_dict
 
