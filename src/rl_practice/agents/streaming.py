@@ -196,22 +196,29 @@ class StreamingAgent:
         data = self.rb.get_latest(self.seq_len + self.horizon)
         data.rewards = self.reward_processor.normalize(data.rewards)
 
-        infer_dict, loss, activation_dict, loss_info = self.network.infer_and_compute_loss(data)
+        infer_dict, loss, activation_dict, loss_info, et_info = self.network.infer_and_compute_loss(
+            data
+        )
         action = self._start_new_chunk(infer_dict, info_dict)
 
         info_dict.update({f"losses/{key}": value for key, value in loss_info.items()})
-        scaled_loss = loss / self.accumulation_steps
-        scaled_loss.backward()
+
+        # Actor: backward actor-only loss → encoder + actor grads
+        actor_loss = et_info["actor_entropy_loss"] / self.accumulation_steps
+        actor_loss.backward(retain_graph=True)
+
+        # Critic: backward -V(s) → value_head grads only (detached from encoder)
+        neg_value = et_info["neg_value"] / self.accumulation_steps
+        neg_value.backward()
 
         self._accumulation_count += 1
         if self._accumulation_count % self.accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
-            delta = loss_info["delta"]
-            self.critic_optimizer.step(delta=delta, reset=self._episode_reset)
             self.optimizer.step()
+            self.critic_optimizer.step(delta=et_info["delta"], reset=self._episode_reset)
             self._episode_reset = False
-            self.critic_optimizer.zero_grad()
             self.optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
 
         return action, info_dict
 

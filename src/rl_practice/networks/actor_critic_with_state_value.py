@@ -319,6 +319,21 @@ class ActorCriticWithStateValue(nn.Module):
 
         total_loss = action_loss + self.critic_loss_weight * value_loss - 0.02 * entropy.mean()
 
+        # Actor-only loss (no critic component)
+        actor_entropy_loss = action_loss - 0.02 * entropy.mean()
+
+        # -V(s) for eligibility trace backward (detached from encoder)
+        value_for_et_dict = (
+            self.value_head(curr_obs[:, -1].detach())
+            if self.separate_critic
+            else self.value_head(curr_state.detach())
+        )
+        value_for_et = value_for_et_dict["output"]
+        if self.num_bins > 1:
+            neg_value_detached = -self.hl_gauss_loss(value_for_et).mean()
+        else:
+            neg_value_detached = -value_for_et.mean()
+
         # Prediction for inference visualization
         next_image, next_reward = self.prediction_head.predict_next_state(
             next_state,
@@ -350,4 +365,10 @@ class ActorCriticWithStateValue(nn.Module):
             "delta": advantage.mean().item(),
         }
 
-        return infer_dict, total_loss, activations_dict, loss_info
+        et_info = {
+            "actor_entropy_loss": actor_entropy_loss,
+            "neg_value": neg_value_detached,
+            "delta": advantage.mean().item(),
+        }
+
+        return infer_dict, total_loss, activations_dict, loss_info, et_info

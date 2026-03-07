@@ -181,8 +181,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     # for AVG
-    parser.add_argument("--use_eligibility_trace", action="store_true")
-    parser.add_argument("--et_lambda", default=0.8, type=float)
+    parser.add_argument("--et_lambda", default=0.5, type=float)
 
     # for on_policy
     parser.add_argument("--buffer_capacity", type=int, default=4096)

@@ -267,6 +267,16 @@ class ActorCriticWithActionValue(nn.Module):
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
+        # Actor-only loss (no critic component)
+        actor_entropy_loss = actor_loss + seq_loss
+
+        # -Q(s,a) for eligibility trace backward (detached from encoder)
+        et_critic_dict = self.value_head(prev_state.detach(), action_chunk.detach())
+        if self.num_bins > 1:
+            neg_value_detached = -self.hl_gauss_loss(et_critic_dict["output"]).mean()
+        else:
+            neg_value_detached = -et_critic_dict["output"].mean()
+
         next_image, next_reward = self.prediction_head.predict_next_state(
             next_state,
             next_action[:, 0],
@@ -296,7 +306,13 @@ class ActorCriticWithActionValue(nn.Module):
             **seq_info,
         }
 
-        return infer_dict, total_loss, activations_dict, info_dict
+        et_info = {
+            "actor_entropy_loss": actor_entropy_loss,
+            "neg_value": neg_value_detached,
+            "delta": critic_info["delta"],
+        }
+
+        return infer_dict, total_loss, activations_dict, info_dict, et_info
 
     ####################
     # Internal methods #
