@@ -76,6 +76,7 @@ def prepare_vlm_inputs(
     images: torch.Tensor,
     rewards: torch.Tensor,
     task_prompt: str,
+    is_qwen35: bool,
 ) -> dict[str, torch.Tensor]:
     """Build VLM messages and prepare model inputs.
 
@@ -84,6 +85,7 @@ def prepare_vlm_inputs(
         images: (B, T, C, H, W) tensor
         rewards: (B, T, 1) tensor
         task_prompt: Task prompt string (can be empty)
+        is_qwen35: Whether the model is Qwen3.5
 
     Returns:
         Dictionary of model inputs
@@ -110,29 +112,18 @@ def prepare_vlm_inputs(
         add_generation_prompt=True,
     )
 
-    proc_images, videos, video_kwargs = process_vision_info(
-        messages,
-        image_patch_size=16,
-        return_video_kwargs=True,
-        return_video_metadata=True,
-    )
-
-    if videos:
-        videos, video_metadata = zip(*videos)
-        videos, video_metadata = list(videos), list(video_metadata)
+    if is_qwen35:
+        proc_images, _ = process_vision_info(messages)
     else:
-        videos = None
-        video_metadata = None
+        proc_images, _ = process_vision_info(messages, image_patch_size=16)
 
     inputs = processor(
         text=text,
         images=proc_images,
-        videos=videos,
-        video_metadata=video_metadata,
         return_tensors="pt",
         padding=True,
-        **video_kwargs,
     )
+
     inputs.pop("token_type_ids", None)
     inputs = {
         k: v.to(device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(device)
