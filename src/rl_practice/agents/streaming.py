@@ -9,6 +9,7 @@ from torch import optim
 from rl_practice.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from rl_practice.networks.actor_critic_with_state_value import ActorCriticWithStateValue
 from rl_practice.networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
+from rl_practice.optimizers.adam_et import AdamET
 from rl_practice.replay_buffer import ReplayBuffer
 from rl_practice.reward_processor import RewardProcessor
 
@@ -52,12 +53,10 @@ class StreamingAgent:
             self.network = ActorCriticWithActionValue(
                 observation_space.shape, action_space.shape, args
             ).to(self.device)
-            self.network = torch.compile(self.network)
         elif args.network_class == "actor_critic_with_state_value":
             self.network = ActorCriticWithStateValue(
                 observation_space.shape, action_space.shape, args
             ).to(self.device)
-            self.network = torch.compile(self.network)
         elif args.network_class == "vlm_actor_critic_with_action_value":
             self.network = VLMActorCriticWithActionValue(
                 observation_space.shape, action_space.shape, args
@@ -65,8 +64,21 @@ class StreamingAgent:
         else:
             raise ValueError(f"Unknown network class: {args.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
+
         lr = args.learning_rate
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.1)
+        critic_params = list(self.network.value_head.parameters())
+        critic_param_ids = {id(p) for p in critic_params}
+        other_params = [p for p in self.network.parameters() if id(p) not in critic_param_ids]
+        self.critic_optimizer = AdamET(
+            critic_params,
+            lr=lr,
+            gamma=args.gamma,
+            et_lambda=args.et_lambda,
+        )
+        self.optimizer = optim.AdamW(other_params, lr=lr, weight_decay=0.1)
+
+        if args.network_class != "vlm_actor_critic_with_action_value":
+            self.network = torch.compile(self.network)
 
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
@@ -85,6 +97,7 @@ class StreamingAgent:
         self.network_class = args.network_class
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_action_token_ids = []
+        self._episode_reset = False
 
     def _prepare_step(
         self, obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info_dict: dict
@@ -93,6 +106,7 @@ class StreamingAgent:
             self.action_chunk = None
             self.chunk_step = 0
             self.prev_action_token_ids = []
+            self._episode_reset = True
 
         action_norm = np.linalg.norm(self.prev_action)
         reward_with_penalty = reward - self.action_norm_penalty * action_norm
@@ -192,7 +206,11 @@ class StreamingAgent:
         self._accumulation_count += 1
         if self._accumulation_count % self.accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=self.max_grad_norm)
+            delta = loss_info["delta"]
+            self.critic_optimizer.step(delta=delta, reset=self._episode_reset)
             self.optimizer.step()
+            self._episode_reset = False
+            self.critic_optimizer.zero_grad()
             self.optimizer.zero_grad()
 
         return action, info_dict

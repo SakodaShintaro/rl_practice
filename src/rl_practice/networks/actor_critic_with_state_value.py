@@ -347,6 +347,7 @@ class ActorCriticWithStateValue(nn.Module):
             "actor_loss": action_loss.item(),
             "critic_loss": value_loss.item(),
             "entropy": entropy.mean().item(),
+            "delta": advantage.mean().item(),
         }
 
         return infer_dict, total_loss, activations_dict, loss_info
