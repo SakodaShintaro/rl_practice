@@ -8,7 +8,6 @@ from torch import nn, optim
 
 from rl_practice.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from rl_practice.networks.actor_critic_with_state_value import ActorCriticWithStateValue
-from rl_practice.networks.vlm_actor_critic_with_state_value import VLMActorCriticWithStateValue
 from rl_practice.replay_buffer import ReplayBuffer, ReplayBufferData
 from rl_practice.reward_processor import RewardProcessor
 
@@ -94,10 +93,6 @@ class OnPolicyAgent:
                 observation_space.shape, action_space.shape, args
             ).to(self.device)
             self.network = torch.compile(self.network)
-        elif self.network_class == "vlm_actor_critic_with_state_value":
-            self.network = VLMActorCriticWithStateValue(
-                observation_space.shape, action_space.shape, args
-            )
         else:
             raise ValueError(f"Invalid network_class: {self.network_class}")
         self.rnn_state = self.network.init_state().to(self.device)
@@ -213,7 +208,7 @@ class OnPolicyAgent:
 
         # value
         value = result_dict["value"]
-        if self.num_bins > 1 and self.network_class not in ["vlm_actor_critic_with_state_value"]:
+        if self.num_bins > 1:
             value = self.network.hl_gauss_loss(value)
         value = value.item()
         self.prev_value = value
@@ -246,29 +241,7 @@ class OnPolicyAgent:
         return action, info_dict
 
     def on_episode_end(self, score: float, feedback_text: str) -> dict:
-        info_dict = {}
-
-        # Train with feedback text when using VLM
-        if self.network_class != "vlm_actor_critic_with_state_value":
-            return info_dict
-        if not feedback_text:
-            return info_dict
-
-        latest_data = self.rb.get_latest(self.seq_len)
-        loss_dict = self.network.train_with_feedback(
-            latest_data.observations,
-            latest_data.rewards,
-            feedback_text,
-        )
-
-        self.optimizer.zero_grad()
-        loss_dict["feedback_loss"].backward()
-        nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
-        self.optimizer.step()
-
-        info_dict["losses/feedback_loss"] = loss_dict["feedback_loss"].item()
-        print(f"Feedback training loss: {info_dict['losses/feedback_loss']:.4f}")
-        return info_dict
+        return {}
 
     ####################
     # Internal methods #
@@ -353,10 +326,6 @@ class OnPolicyAgent:
                 elif self.network_class == "actor_critic_with_action_value":
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v.squeeze(1)
-                    )
-                elif self.network_class == "vlm_actor_critic_with_state_value":
-                    loss, activations_dict, info_dict = self.network.compute_loss(
-                        data, curr_target_v.squeeze(1), curr_adv
                     )
                 else:
                     raise ValueError(f"Invalid network_class: {self.network_class}")
