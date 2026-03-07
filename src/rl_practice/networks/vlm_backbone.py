@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: MIT
-import re
-
 import numpy as np
 import torch
 from peft import LoraConfig, get_peft_model
@@ -12,19 +10,6 @@ from transformers import (
     AutoProcessor,
     BitsAndBytesConfig,
 )
-
-
-def get_action_prompt(horizon: int) -> str:
-    """Generate action prompt based on horizon."""
-    base = (
-        "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
-        "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
-        "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
-    )
-    example_actions = "; ".join([f"t{i}: steer=0.00, accel=0.10" for i in range(horizon)])
-    return (
-        base + f"Respond with {horizon} sequential actions in format: 'Actions: {example_actions}'"
-    )
 
 
 def _is_qwen35(model_id: str) -> bool:
@@ -149,34 +134,3 @@ def prepare_vlm_inputs(
         for k, v in inputs.items()
     }
     return inputs
-
-
-def parse_action_text(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
-    """Parse action text and extract steer, accel values for multiple timesteps.
-
-    Args:
-        action_text: Text in format 'Actions: t0: steer=X.XX, accel=X.XX; t1: steer=X.XX, accel=X.XX; ...'
-        horizon: Number of timesteps to parse
-
-    Returns:
-        tuple of (action_array, success)
-        - action_array: np.ndarray of shape (horizon, 2) containing [steer, accel] for each timestep
-        - success: True if all timesteps were successfully parsed
-    """
-    action_array = np.zeros((horizon, 2), dtype=np.float32)
-    success = True
-
-    # Find all steer=X and accel=X pairs with optional t prefix
-    pattern = r"(?:t\d+:\s*)?steer=([+-]?\d*\.?\d+),\s*accel=([+-]?\d*\.?\d+)"
-    matches = re.findall(pattern, action_text)
-
-    parsed_count = min(len(matches), horizon)
-    success = parsed_count == horizon
-
-    for i in range(parsed_count):
-        steer = float(matches[i][0])
-        accel = float(matches[i][1])
-        action_array[i, 0] = np.clip(steer, -1.0, 1.0)
-        action_array[i, 1] = np.clip(accel, -1.0, 1.0)
-
-    return action_array, success

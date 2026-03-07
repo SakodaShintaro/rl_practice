@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
 from .value_head import ActionValueHead
-from .vlm_backbone import get_action_prompt, load_model, parse_action_text, prepare_vlm_inputs
+from .vlm_backbone import load_model, prepare_vlm_inputs
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -274,7 +274,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
         self.task_prompt = ""
-        self.text_action_prompt = get_action_prompt(args.horizon)
+        self.parse_action_text = args.parse_action_text
+        self.text_action_prompt = args.get_action_prompt(args.horizon)
         self.high_level_prompt = "Choose one action: Turn left, Go straight, Turn right. Answer:"
         self.max_new_tokens = args.max_new_tokens
 
@@ -539,7 +540,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             generated_ids, skip_special_tokens=True
         ).strip()
 
-        action_array, parse_success = parse_action_text(action_text, self.horizon)
+        action_array, parse_success = self.parse_action_text(action_text, self.horizon)
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
         return action_tensor, action_text, parse_success
 
@@ -622,7 +623,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # For text_action mode, parse generated text and compare Q values
         if mode == "text_action":
-            action_array, parse_success = parse_action_text(generated_text, self.horizon)
+            action_array, parse_success = self.parse_action_text(generated_text, self.horizon)
             text_action = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
             text_q = self._compute_q(state, text_action)
             use_text = text_q > diff_q + self.text_q_margin

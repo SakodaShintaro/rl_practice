@@ -12,7 +12,7 @@ from torchvision import transforms
 from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from rl_practice.networks.image_processor import ImageProcessor
 from rl_practice.networks.reward_processor import RewardProcessor
-from rl_practice.networks.vlm_backbone import parse_action_text
+from rl_practice.wrappers import _car_racing_parse_action
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     print(f"  Representation shape: {representation.shape}")
     print(f"  Elapsed time: {mean_time:.1f} ms (±{std_time:.1f} ms)")
     print(f"  Action text: '{action_text}'")
-    action_values, parse_success = parse_action_text(action_text)
+    action_values, parse_success = _car_racing_parse_action(action_text, 1)
     print(
         f"  Parsed action: steering={action_values[0]:.3f}, gas={action_values[1]:.3f}, braking={action_values[2]:.3f}, success={parse_success}"
     )

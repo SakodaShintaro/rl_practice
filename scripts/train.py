@@ -252,6 +252,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
     target_score = env.spec.reward_threshold
     eval_range = env.unwrapped.eval_range
+    args.get_action_prompt = getattr(env.unwrapped, "get_action_prompt", None)
+    args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
 
     start_time = time.time()
 
