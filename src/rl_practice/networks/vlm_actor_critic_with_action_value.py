@@ -511,39 +511,6 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
-    def _generate_text_action(
-        self, obs: torch.Tensor, rewards: torch.Tensor
-    ) -> tuple[torch.Tensor, str, bool]:
-        """Generate action via VLM text generation. Returns (action_tensor, action_text, parse_success)."""
-        inputs = prepare_vlm_inputs(self.processor, obs, rewards, self.text_action_prompt)
-
-        pad_token_id = self.processor.tokenizer.pad_token_id
-        eos_token_id = self.processor.tokenizer.eos_token_id
-        if pad_token_id is None:
-            pad_token_id = eos_token_id
-
-        self.vlm_model.eval()
-        generated = self.vlm_model.generate(
-            **inputs,
-            max_new_tokens=self.max_new_tokens,
-            num_beams=1,
-            do_sample=False,
-            eos_token_id=eos_token_id,
-            pad_token_id=pad_token_id,
-        )
-        self.vlm_model.train()
-
-        input_len = inputs["input_ids"].shape[1]
-        new_tokens = generated[:, input_len:]
-        generated_ids = new_tokens[0].tolist()
-        action_text = self.processor.tokenizer.decode(
-            generated_ids, skip_special_tokens=True
-        ).strip()
-
-        action_array, parse_success = self.parse_action_text(action_text, self.horizon)
-        action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
-        return action_tensor, action_text, parse_success
-
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
         """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache)."""
         tokenizer = self.processor.tokenizer
