@@ -3,17 +3,13 @@ import re
 
 import numpy as np
 import torch
-import torchvision.transforms as T
-from mamba_ssm.utils.generation import InferenceParams
 from peft import LoraConfig, get_peft_model
 from PIL import Image
 from qwen_vl_utils import process_vision_info
 from torch import nn
-from torchvision.transforms.functional import InterpolationMode
 from transformers import (
     AutoModelForImageTextToText,
     AutoProcessor,
-    AutoTokenizer,
     BitsAndBytesConfig,
 )
 
@@ -184,84 +180,3 @@ def parse_action_text(action_text: str, horizon: int) -> tuple[np.ndarray, bool]
         action_array[i, 1] = np.clip(accel, -1.0, 1.0)
 
     return action_array, success
-
-
-class QwenVLEncoder(nn.Module):
-    def __init__(
-        self,
-        use_quantization: bool,
-        use_lora: bool,
-        target_layer_idx: int,
-        seq_len: int,
-        task_prompt: str,
-    ) -> None:
-        super().__init__()
-
-        self.use_lora = use_lora
-        self.target_layer_idx = target_layer_idx
-        self.seq_len = seq_len
-        self.task_prompt = task_prompt
-
-        device = torch.device("cuda")
-
-        model_id = "Qwen/Qwen3-VL-2B-Instruct"
-        self.model, self.processor = load_model(model_id, use_quantization, use_lora, device)
-
-        out_dim = 4
-        self.out_proj = nn.Linear(2048, out_dim)
-        self.device = device
-        self.out_proj = self.out_proj.to(device)
-        self.video_fps = 50 / 8
-        self._dummy_state = torch.zeros(1, 1, 1)
-
-        # Compute target sequence length and output_dim via dummy forward pass
-        self._target_seq_len, self.output_dim = self._compute_output_dim()
-        torch.cuda.empty_cache()
-
-    @torch.no_grad()
-    def _compute_output_dim(self) -> tuple[int, int]:
-        """Compute target sequence length and output dimension by running a dummy forward pass."""
-        dummy_images = torch.zeros(1, self.seq_len, 3, 96, 96, device=self.device)
-        dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
-
-        model_inputs = prepare_vlm_inputs(
-            self.processor, dummy_images, dummy_rewards, self.task_prompt
-        )
-
-        output = self.model.forward(**model_inputs, output_hidden_states=True)
-        hidden = output["hidden_states"][self.target_layer_idx]
-
-        target_seq_len = hidden.shape[1]
-        output_dim = target_seq_len * self.out_proj.out_features
-        return target_seq_len, output_dim
-
-    def init_state(self) -> torch.Tensor:
-        return self._dummy_state.clone()
-
-    def forward(
-        self,
-        images: torch.Tensor,
-        obs_z: torch.Tensor,
-        actions: torch.Tensor,
-        rewards: torch.Tensor,
-        rnn_state: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        with torch.enable_grad() if self.use_lora else torch.no_grad():
-            model_inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
-
-            output = self.model.forward(**model_inputs, output_hidden_states=True)
-            hidden = output["hidden_states"][self.target_layer_idx]
-
-        x = hidden.to(torch.float32)
-        x = self.out_proj(x)  # (B, seq_len, out_dim)
-        seq_len = x.shape[1]
-        if seq_len > self._target_seq_len:
-            x = x[:, seq_len - self._target_seq_len :, :]
-        elif seq_len < self._target_seq_len:
-            pad = torch.zeros(
-                x.shape[0], self._target_seq_len - seq_len, x.shape[2], device=x.device
-            )
-            x = torch.cat([pad, x], dim=1)
-        x = x.flatten(start_dim=1)
-
-        return x, rnn_state

@@ -12,7 +12,6 @@ from rl_practice.networks.policy_head import BetaPolicy, CategoricalPolicy
 from rl_practice.networks.prediction_head import StatePredictionHead
 from rl_practice.networks.reward_processor import RewardProcessor
 from rl_practice.networks.value_head import SeparateCritic, StateValueHead
-from rl_practice.networks.vlm_backbone import QwenVLEncoder
 
 
 class ActorCriticWithStateValue(nn.Module):
@@ -58,13 +57,6 @@ class ActorCriticWithStateValue(nn.Module):
                 action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
                 use_image_only=True,
-            )
-        elif args.encoder == "qwenvl":
-            self.encoder = QwenVLEncoder(
-                use_quantization=args.use_quantization,
-                use_lora=args.use_lora,
-                target_layer_idx=args.target_layer_idx,
-                seq_len=args.seq_len,
             )
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")

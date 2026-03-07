@@ -13,7 +13,6 @@ from rl_practice.networks.policy_head import BetaPolicy, CFGDiffusionPolicy, Dif
 from rl_practice.networks.prediction_head import StatePredictionHead
 from rl_practice.networks.reward_processor import RewardProcessor
 from rl_practice.networks.value_head import ActionValueHead
-from rl_practice.networks.vlm_backbone import QwenVLEncoder
 
 
 class ActorCriticWithActionValue(nn.Module):
@@ -60,14 +59,6 @@ class ActorCriticWithActionValue(nn.Module):
                 action_dim=self.action_dim,
                 temporal_model_type=args.temporal_model_type,
                 use_image_only=False,
-            )
-        elif args.encoder == "qwenvl":
-            self.encoder = QwenVLEncoder(
-                use_quantization=args.use_quantization,
-                use_lora=args.use_lora,
-                target_layer_idx=args.target_layer_idx,
-                seq_len=args.seq_len,
-                task_prompt=args.encoder_task_prompt,
             )
         else:
             raise ValueError(f"Unknown encoder: {args.encoder=}")
@@ -125,9 +116,7 @@ class ActorCriticWithActionValue(nn.Module):
         self.detach_predictor = args.detach_predictor
         # CFGRL parameters
         self.condition_drop_prob = 0.1
-        # Disable state prediction when using VLM encoder
-        is_vlm_encoder = args.encoder == "qwenvl"
-        self.disable_state_predictor = args.disable_state_predictor or is_vlm_encoder
+        self.disable_state_predictor = args.disable_state_predictor
 
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(

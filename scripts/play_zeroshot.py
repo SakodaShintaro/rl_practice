@@ -12,7 +12,6 @@ import imageio
 import numpy as np
 import torch
 
-from rl_practice.networks.vlm_backbone import QwenVLEncoder, parse_action_text
 from rl_practice.utils import concat_images, convert_to_uint8
 from rl_practice.wrappers import make_env
 
@@ -27,7 +26,7 @@ def parse_args() -> argparse.Namespace:
         default="CarRacing-v3",
         choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
     )
-    parser.add_argument("--agent_type", type=str, default="qwenvl", choices=["random", "qwenvl"])
+    parser.add_argument("--agent_type", type=str, choices=["random"])
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--num_episodes", type=int, default=10)
@@ -41,34 +40,6 @@ class RandomAgent:
 
     def select_action(self, obs):
         return self.action_space.sample()
-
-
-class VLMAgent:
-    def __init__(self, encoder_type, observation_space_shape, device=None):
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        if encoder_type == "qwenvl":
-            self.encoder = QwenVLEncoder(observation_space_shape=observation_space_shape)
-        else:
-            raise ValueError(f"Unknown encoder type: {encoder_type}")
-
-    @torch.inference_mode()
-    def select_action(self, obs, prev_reward):
-        # obs: (C, H, W) -> (B=1, T=1, C, H, W)
-        obs_tensor = (
-            torch.tensor(obs, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
-        )
-
-        # Create dummy obs_z, actions, rewards, rnn_state
-        obs_z = torch.zeros(1, 1, 1, device=self.device)  # dummy
-        actions = torch.zeros(1, 1, 3, device=self.device)  # dummy actions
-        rewards = torch.tensor([[[prev_reward]]], device=self.device)  # use previous reward
-        rnn_state = self.encoder.init_state().to(self.device)
-
-        _, _, action_text = self.encoder(obs_tensor, obs_z, actions, rewards, rnn_state)
-        print(f"{action_text=}")
-        action_array, _ = parse_action_text(action_text)
-        return action_array
 
 
 def run_episode(env, agent, render=False):
@@ -141,10 +112,7 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
     # agent setup
-    if args.agent_type == "random":
-        agent = RandomAgent(env.action_space)
-    else:
-        agent = VLMAgent(args.agent_type, env.observation_space.shape)
+    agent = RandomAgent(env.action_space)
 
     print(f"Running {args.num_episodes} episodes with {args.agent_type} agent...")
 

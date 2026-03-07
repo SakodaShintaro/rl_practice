@@ -275,12 +275,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.target_layer_idx = args.target_layer_idx
         self.task_prompt = ""
         self.text_action_prompt = get_action_prompt(args.horizon)
-        self.high_level_prompt = (
-            "Choose one action: Turn left, Go straight, Turn right. Answer:"
-        )
+        self.high_level_prompt = "Choose one action: Turn left, Go straight, Turn right. Answer:"
         self.max_new_tokens = args.max_new_tokens
 
-        # State projection (matching QwenVLEncoder)
+        # State projection
         state_out_dim = 4
         self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
         self._target_seq_len, state_dim = self._compute_state_dim()
@@ -468,7 +466,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         all_hidden_states = outputs.hidden_states
 
-        # State: matching QwenVLEncoder (target_layer_idx → out_proj → pad/truncate → flatten)
+        # State: target_layer_idx → out_proj → pad/truncate → flatten
         hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
         state = self.state_out_proj(hidden)  # (B, vlm_seq_len, state_out_dim)
         seq_len = state.shape[1]
@@ -545,9 +543,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
         return action_tensor, action_text, parse_success
 
-    def _generate_text_and_extend_kv(
-        self, prompt: str, vlm_past_kv, max_new_tokens: int
-    ):
+    def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
         """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache)."""
         tokenizer = self.processor.tokenizer
         prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
