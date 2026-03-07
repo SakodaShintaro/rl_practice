@@ -257,7 +257,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         device = "cuda"
         self.vlm_model, self.processor = load_model(
             args.vlm_model_id,
-            use_quantization=args.use_quantization,
             use_lora=False,
             device=device,
         )

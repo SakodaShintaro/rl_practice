@@ -17,9 +17,14 @@ def _is_qwen35(model_id: str) -> bool:
 
 
 def load_model(
-    model_id: str, use_quantization: bool, use_lora: bool, device: torch.device
+    model_id: str, use_lora: bool, device: torch.device
 ) -> tuple[nn.Module, AutoProcessor]:
     """Load Qwen-VL or Qwen3.5 model and processor."""
+
+    # quantization has a negative effect on performance, so we disable it by default for now
+    # True:4.30 steps/sec, False 5.40 steps/sec
+    use_quantization = False
+
     bnb_config = None
     if use_quantization:
         bnb_config = BitsAndBytesConfig(

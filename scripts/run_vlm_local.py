@@ -25,7 +25,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", type=str, default="Describe the scene.")
     parser.add_argument("--mode", choices=["image", "video"], default="image")
     parser.add_argument("--max_images", type=int, default=10)
-    parser.add_argument("--use_quantization", action="store_true")
     return parser.parse_args()
 
 
@@ -208,9 +207,7 @@ def main() -> None:
     assert all_image_paths, f"No images found in {args.images_dir}"
 
     model_type = MODEL_TYPE_MAP[args.model_id]
-    model, processor = load_model(
-        args.model_id, args.use_quantization, use_lora=False, device="cuda"
-    )
+    model, processor = load_model(args.model_id, use_lora=False, device="cuda")
 
     sliding_window_generate(
         model,
