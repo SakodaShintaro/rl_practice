@@ -15,5 +15,4 @@ uv run python scripts/train.py carla_test \
     --step_limit 400_000 \
     --disable_state_predictor 1 \
     --seq_len 1 \
-    --use_quantization 0 \
     --use_lora 0 \

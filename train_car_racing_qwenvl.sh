@@ -15,7 +15,6 @@ uv run python scripts/train.py qwenvl$suffix \
   --image_processor_type ae \
   --disable_state_predictor 0 \
   --seq_len 1 \
-  --use_quantization 1 \
   --use_lora 0 \
   --batch_size 1 \
   --learning_rate 5e-6 \
