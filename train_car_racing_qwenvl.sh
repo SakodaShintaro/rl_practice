@@ -8,7 +8,7 @@ uv run python scripts/train.py qwenvl$suffix \
   --env_id CarRacing-v3 \
   --agent_type off_policy \
   --action_norm_penalty 1.0 \
-  --encoder qwenvl \
+  --network_class vlm_actor_critic_with_action_value \
   --num_bins 1 \
   --value_range 200.0 \
   --step_limit 400_000 \
