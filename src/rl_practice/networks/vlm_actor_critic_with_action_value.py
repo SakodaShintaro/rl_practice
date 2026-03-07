@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
 from .value_head import ActionValueHead
-from .vlm_backbone import load_model, prepare_vlm_inputs
+from .vlm_backbone import _is_qwen35, load_model, prepare_vlm_inputs
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -23,9 +23,20 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
 def apply_rotary_pos_emb(
     q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Apply RoPE to Q and K. q/k: (B, heads, seq, head_dim), cos/sin: (B, seq, head_dim)."""
-    cos = cos.unsqueeze(1)  # (B, 1, seq, head_dim)
+    """Apply RoPE to Q and K. q/k: (B, heads, seq, head_dim), cos/sin: (B, seq, rope_dim).
+
+    Supports partial rotary embedding: if rope_dim < head_dim, RoPE is applied
+    only to the first rope_dim dimensions and the rest pass through unchanged.
+    """
+    cos = cos.unsqueeze(1)  # (B, 1, seq, rope_dim)
     sin = sin.unsqueeze(1)
+    rope_dim = cos.shape[-1]
+    if rope_dim < q.shape[-1]:
+        q_rot, q_pass = q[..., :rope_dim], q[..., rope_dim:]
+        k_rot, k_pass = k[..., :rope_dim], k[..., rope_dim:]
+        q_rot = (q_rot * cos) + (rotate_half(q_rot) * sin)
+        k_rot = (k_rot * cos) + (rotate_half(k_rot) * sin)
+        return torch.cat([q_rot, q_pass], dim=-1), torch.cat([k_rot, k_pass], dim=-1)
     return (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
 
 
@@ -197,11 +208,11 @@ class ActionExpert(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        vlm_past_kv,
+        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+        vlm_seq_len: int,
         adarms_cond: torch.Tensor,
     ) -> torch.Tensor:
         B, action_len, _ = hidden_states.shape
-        vlm_seq_len = vlm_past_kv.layers[0].keys.shape[2]
 
         # RoPE positions for action tokens: right after VLM sequence
         action_pos = torch.arange(
@@ -211,9 +222,9 @@ class ActionExpert(nn.Module):
         cos, sin = self.rotary_emb(hidden_states, position_ids=action_pos_ids)
 
         for j in range(self.num_layers):
-            layer = vlm_past_kv.layers[j]
+            k, v = vlm_kv_list[j]
             hidden_states = self.layers[j](
-                hidden_states, layer.keys, layer.values, cos, sin, adarms_cond
+                hidden_states, k, v, cos, sin, adarms_cond
             )
         return self.norm(hidden_states)
 
@@ -265,9 +276,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.device = device
 
         # VLM config
+        self.is_qwen35 = _is_qwen35(args.vlm_model_id)
         vlm_cfg = self.vlm_model.config.text_config
-        vlm_hidden_size = vlm_cfg.hidden_size  # 2048
-        num_layers = vlm_cfg.num_hidden_layers  # 28
+        vlm_hidden_size = vlm_cfg.hidden_size
+        num_layers = vlm_cfg.num_hidden_layers
         self.num_layers = num_layers
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
@@ -277,6 +289,16 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.text_action_prompt = args.get_action_prompt(args.horizon)
         self.high_level_prompt = "Choose one action: Turn left, Go straight, Turn right. Answer:"
         self.max_new_tokens = args.max_new_tokens
+
+        # Determine which VLM layers have KV cache for cross-attention
+        if self.is_qwen35:
+            layer_types = vlm_cfg.layer_types
+            self.attn_layer_indices = [
+                i for i, lt in enumerate(layer_types) if lt == "full_attention"
+            ]
+        else:
+            self.attn_layer_indices = list(range(num_layers))
+        num_expert_layers = len(self.attn_layer_indices)
 
         # State projection
         state_out_dim = 4
@@ -288,7 +310,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         expert_hidden = args.expert_hidden_size
         rotary_emb = self.vlm_model.model.language_model.rotary_emb
         self.action_expert = ActionExpert(
-            num_layers=num_layers,
+            num_layers=num_expert_layers,
             expert_hidden_size=expert_hidden,
             num_attention_heads=vlm_cfg.num_attention_heads,
             num_kv_heads=vlm_cfg.num_key_value_heads,
@@ -438,7 +460,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
         model_inputs = prepare_vlm_inputs(
-            self.processor, dummy_images, dummy_rewards, self.task_prompt
+            self.processor, dummy_images, dummy_rewards, self.task_prompt, self.is_qwen35
         )
         output = self.vlm_model.forward(**model_inputs, output_hidden_states=True)
         hidden = output["hidden_states"][self.target_layer_idx]
@@ -449,7 +471,7 @@ class VLMActorCriticWithActionValue(nn.Module):
     @torch.no_grad()
     def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
         """Run VLM forward and extract state + past_key_values (with RoPE)."""
-        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt)
+        inputs = prepare_vlm_inputs(self.processor, images, rewards, self.task_prompt, self.is_qwen35)
 
         # eval mode: bypass gradient checkpointing forcing use_cache=False
         self.vlm_model.eval()
@@ -481,6 +503,27 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return state, outputs.past_key_values
 
+    def _extract_kv(
+        self, vlm_past_kv
+    ) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
+        """Extract (K, V) pairs for the attention layers used by ActionExpert.
+
+        Returns:
+            vlm_kv_list: list of (K, V) tuples, one per expert layer
+            vlm_seq_len: sequence length of the VLM KV cache
+        """
+        kv_list = []
+        if self.is_qwen35:
+            for idx in self.attn_layer_indices:
+                kv_list.append((vlm_past_kv.key_cache[idx], vlm_past_kv.value_cache[idx]))
+            seq_len = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[2]
+        else:
+            for j in range(self.num_layers):
+                layer = vlm_past_kv.layers[j]
+                kv_list.append((layer.keys, layer.values))
+            seq_len = vlm_past_kv.layers[0].keys.shape[2]
+        return kv_list, seq_len
+
     def _denoise(
         self,
         noisy_actions: torch.Tensor,
@@ -494,7 +537,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
         action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
-        expert_out = self.action_expert(action_embs, vlm_past_kv, adarms_cond)
+        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
+        expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
 
     def _generate_action(
@@ -514,7 +558,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache)."""
         tokenizer = self.processor.tokenizer
         prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
-        kv_len = vlm_past_kv.layers[0].keys.shape[2]
+        _, kv_len = self._extract_kv(vlm_past_kv)
         attn_mask = torch.ones(1, kv_len + prompt_ids.shape[1], device=self.device)
 
         pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
