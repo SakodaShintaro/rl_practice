@@ -76,10 +76,7 @@ def load_model(
     # Enable gradient checkpointing to reduce memory usage
     model.gradient_checkpointing_enable()
 
-    processor_kwargs = {"cache_dir": "./cache"}
-    if not _is_qwen35(model_id):
-        processor_kwargs["device_map"] = device
-    processor = AutoProcessor.from_pretrained(model_id, **processor_kwargs)
+    processor = AutoProcessor.from_pretrained(model_id, cache_dir="./cache", device_map=device)
 
     return model, processor
 
