@@ -246,6 +246,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.denoising_time = args.denoising_time
         self.dacer_loss_weight = args.dacer_loss_weight
         self.text_q_margin = args.text_q_margin
+        self.text_action_mode = args.text_action_mode
 
         # Image processor (for replay buffer obs_z encoding)
         self.image_processor = ImageProcessor(
@@ -274,6 +275,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.target_layer_idx = args.target_layer_idx
         self.task_prompt = ""
         self.text_action_prompt = get_action_prompt(args.horizon)
+        self.high_level_prompt = (
+            "Choose one action: Turn left, Go straight, Turn right. Answer:"
+        )
         self.max_new_tokens = args.max_new_tokens
 
         # State projection (matching QwenVLEncoder)
@@ -541,6 +545,50 @@ class VLMActorCriticWithActionValue(nn.Module):
         action_tensor = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
         return action_tensor, action_text, parse_success
 
+    def _generate_text_and_extend_kv(
+        self, prompt: str, vlm_past_kv, max_new_tokens: int
+    ):
+        """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache)."""
+        tokenizer = self.processor.tokenizer
+        prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+        kv_len = vlm_past_kv.layers[0].keys.shape[2]
+        attn_mask = torch.ones(1, kv_len + prompt_ids.shape[1], device=self.device)
+
+        pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+        eos_token_id = tokenizer.eos_token_id
+
+        self.vlm_model.eval()
+        outputs = self.vlm_model.generate(
+            input_ids=prompt_ids,
+            attention_mask=attn_mask,
+            past_key_values=vlm_past_kv,
+            max_new_tokens=max_new_tokens,
+            num_beams=1,
+            do_sample=False,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+            return_dict_in_generate=True,
+        )
+        self.vlm_model.train()
+
+        generated_ids = outputs.sequences[0, prompt_ids.shape[1] :].tolist()
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+        # Re-run forward to get past_key_values covering the full sequence (prompt + generated)
+        full_ids = outputs.sequences
+        full_attn_mask = torch.ones(1, kv_len + full_ids.shape[1], device=self.device)
+        self.vlm_model.eval()
+        full_outputs = self.vlm_model.forward(
+            input_ids=full_ids,
+            attention_mask=full_attn_mask,
+            past_key_values=vlm_past_kv,
+            use_cache=True,
+            return_dict=True,
+        )
+        self.vlm_model.train()
+
+        return generated_text, full_outputs.past_key_values
+
     def _compute_q(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Compute scalar Q-value for a (state, action) pair."""
         q_dict = self.value_head(state, action)
@@ -553,25 +601,45 @@ class VLMActorCriticWithActionValue(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         state, vlm_past_kv = self._vlm_forward(obs, rewards)
         B = obs.shape[0]
+        mode = self.text_action_mode
 
-        # Diffusion action
-        diff_action = self._generate_action(B, vlm_past_kv)
+        if mode == "none":
+            action_kv = vlm_past_kv
+        elif mode == "high_level":
+            generated_text, action_kv = self._generate_text_and_extend_kv(
+                self.high_level_prompt, vlm_past_kv, max_new_tokens=8
+            )
+            print(f"[HighLevel] {generated_text}")
+        elif mode == "text_action":
+            generated_text, action_kv = self._generate_text_and_extend_kv(
+                self.text_action_prompt, vlm_past_kv, max_new_tokens=self.max_new_tokens
+            )
+            print(f"[TextAction] {generated_text}")
+        elif mode == "pi_fast":
+            raise NotImplementedError("pi_fast mode is not yet implemented")
+        else:
+            raise ValueError(f"Unknown text_action_mode: {mode}")
+
+        # Diffusion action using (possibly extended) kv_cache
+        diff_action = self._generate_action(B, action_kv)
         diff_q = self._compute_q(state, diff_action)
 
-        # Text action
-        text_action, action_text, parse_success = self._generate_text_action(obs, rewards)
-        text_q = self._compute_q(state, text_action)
-
-        # Pick action with higher Q-value (per batch element)
-        use_text = text_q > diff_q + self.text_q_margin  # (B,)
-        action = torch.where(use_text.unsqueeze(-1).unsqueeze(-1), text_action, diff_action)
-        q = torch.where(use_text, text_q, diff_q)
-
-        print(
-            f"[ActionSelect] diff_q={diff_q.item():.3f}, text_q={text_q.item():.3f}, "
-            f"use_text={use_text.item()}, parse_success={parse_success}, "
-            f"action_text={action_text}"
-        )
+        # For text_action mode, parse generated text and compare Q values
+        if mode == "text_action":
+            action_array, parse_success = parse_action_text(generated_text, self.horizon)
+            text_action = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
+            text_q = self._compute_q(state, text_action)
+            use_text = text_q > diff_q + self.text_q_margin
+            action = torch.where(use_text.unsqueeze(-1).unsqueeze(-1), text_action, diff_action)
+            q = torch.where(use_text, text_q, diff_q)
+            print(
+                f"[ActionSelect] diff_q={diff_q.item():.3f}, text_q={text_q.item():.3f}, "
+                f"use_text={use_text.item()}, parse_success={parse_success}, "
+                f"action_text={generated_text}"
+            )
+        else:
+            action = diff_action
+            q = diff_q
 
         return state, action, q
 
