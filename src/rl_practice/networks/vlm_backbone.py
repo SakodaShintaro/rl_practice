@@ -27,10 +27,15 @@ def get_action_prompt(horizon: int) -> str:
     )
 
 
+def _is_qwen35(model_id: str) -> bool:
+    return "Qwen3.5" in model_id
+
+
 def load_model(
     model_id: str, use_quantization: bool, use_lora: bool, device: torch.device
 ) -> tuple[nn.Module, AutoProcessor]:
-    """Load Qwen-VL model and processor."""
+    """Load Qwen-VL or Qwen3.5 model and processor."""
+    bnb_config = None
     if use_quantization:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -38,14 +43,13 @@ def load_model(
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
-    else:
-        bnb_config = None
 
+    attn_impl = "sdpa" if _is_qwen35(model_id) else "flash_attention_2"
     model = AutoModelForImageTextToText.from_pretrained(
         model_id,
         quantization_config=bnb_config,
         dtype=torch.bfloat16,
-        _attn_implementation="flash_attention_2",
+        attn_implementation=attn_impl,
         cache_dir="./cache",
         device_map=device,
     )
@@ -72,11 +76,10 @@ def load_model(
     # Enable gradient checkpointing to reduce memory usage
     model.gradient_checkpointing_enable()
 
-    processor = AutoProcessor.from_pretrained(
-        model_id,
-        cache_dir="./cache",
-        device_map=device,
-    )
+    processor_kwargs = {"cache_dir": "./cache"}
+    if not _is_qwen35(model_id):
+        processor_kwargs["device_map"] = device
+    processor = AutoProcessor.from_pretrained(model_id, **processor_kwargs)
 
     return model, processor
 

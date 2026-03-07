@@ -6,9 +6,8 @@ from typing import Callable
 
 import torch
 from qwen_vl_utils import process_vision_info
-from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
-from rl_practice.networks.vlm_backbone import load_model as load_model_qwenvl
+from rl_practice.networks.vlm_backbone import load_model
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,35 +24,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_context_words", type=int, default=50)
     parser.add_argument("--prompt", type=str, default="Describe the scene.")
     parser.add_argument("--mode", choices=["image", "video"], default="image")
+    parser.add_argument("--max_images", type=int, default=10)
     parser.add_argument("--use_quantization", action="store_true")
     return parser.parse_args()
-
-
-def load_model_qwen35(model_id: str, use_quantization: bool, device: torch.device) -> tuple:
-    bnb_config = None
-    if use_quantization:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
-
-    model = AutoModelForImageTextToText.from_pretrained(
-        model_id,
-        quantization_config=bnb_config,
-        dtype=torch.bfloat16,
-        attn_implementation="sdpa",
-        cache_dir="./cache",
-        device_map=device,
-    )
-
-    processor = AutoProcessor.from_pretrained(
-        model_id,
-        cache_dir="./cache",
-    )
-
-    return model, processor
 
 
 def prepare_inputs_qwen35(processor, text, messages):
@@ -91,17 +64,9 @@ def prepare_inputs_qwenvl(processor, text, messages):
     )
 
 
-MODEL_CONFIG = {
-    "qwen35": {
-        "load_model": load_model_qwen35,
-        "prepare_inputs": prepare_inputs_qwen35,
-    },
-    "qwenvl": {
-        "load_model": lambda model_id, use_quantization, device: load_model_qwenvl(
-            model_id, use_quantization=use_quantization, use_lora=False, device=device
-        ),
-        "prepare_inputs": prepare_inputs_qwenvl,
-    },
+PREPARE_INPUTS_FN = {
+    "qwen35": prepare_inputs_qwen35,
+    "qwenvl": prepare_inputs_qwenvl,
 }
 
 
@@ -239,11 +204,13 @@ MODEL_TYPE_MAP = {
 def main() -> None:
     args = parse_args()
 
-    all_image_paths = collect_image_paths(args.images_dir)
+    all_image_paths = collect_image_paths(args.images_dir)[: args.max_images]
     assert all_image_paths, f"No images found in {args.images_dir}"
 
-    config = MODEL_CONFIG[MODEL_TYPE_MAP[args.model_id]]
-    model, processor = config["load_model"](args.model_id, args.use_quantization, "cuda")
+    model_type = MODEL_TYPE_MAP[args.model_id]
+    model, processor = load_model(
+        args.model_id, args.use_quantization, use_lora=False, device="cuda"
+    )
 
     sliding_window_generate(
         model,
@@ -254,7 +221,7 @@ def main() -> None:
         args.seq_len,
         args.tokens_per_step,
         args.max_context_words,
-        config["prepare_inputs"],
+        PREPARE_INPUTS_FN[model_type],
     )
 
 
