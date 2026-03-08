@@ -11,6 +11,5 @@ uv run python scripts/train.py qwenvl$suffix \
   --step_limit 400_000 \
   --disable_state_predictor 0 \
   --seq_len 1 \
-  --use_lora 0 \
   --batch_size 16 \
   --learning_rate 1e-5 \
