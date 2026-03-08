@@ -10,7 +10,6 @@ uv run python scripts/train.py qwenvl$suffix \
   --vlm_model_id "Qwen/Qwen3.5-0.8B" \
   --network_class vlm_actor_critic_with_action_value \
   --step_limit 400_000 \
-  --image_processor_type ae \
   --disable_state_predictor 0 \
   --seq_len 1 \
   --use_lora 0 \

@@ -120,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         choices=["gru", "transformer", "gdn", "mamba", "identity"],
     )
     parser.add_argument(
-        "--image_processor_type", type=str, default="simple_cnn", choices=["simple_cnn", "ae"]
+        "--image_processor_type", type=str, default="ae", choices=["simple_cnn", "ae"]
     )
     parser.add_argument(
         "--policy_type",

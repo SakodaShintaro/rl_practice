@@ -9,4 +9,3 @@ uv run python scripts/train.py pathwise$suffix \
   --encoder temporal_only \
   --step_limit 800_000 \
   --denoising_time 0.8 \
-  --image_processor_type=ae \

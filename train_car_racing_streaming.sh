@@ -9,7 +9,6 @@ uv run python scripts/train.py baseline$suffix \
   --agent_type streaming \
   --network_class actor_critic_with_action_value \
   --step_limit 400_000 \
-  --image_processor_type ae \
   --seq_len 8 \
   --batch_size 1 \
   --accumulation_steps 1 \
