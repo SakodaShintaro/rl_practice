@@ -73,7 +73,6 @@ class OnPolicyAgent:
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
         self.use_weight_projection = args.use_weight_projection
-        self.apply_masks_during_training = args.apply_masks_during_training
 
         # Action chunking state
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
