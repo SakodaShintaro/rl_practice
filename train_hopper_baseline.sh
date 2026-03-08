@@ -8,7 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id Hopper-v5 \
   --agent_type off_policy \
   --network_class actor_critic_with_action_value \
-  --encoder spatial_temporal \
   --step_limit 500_000 \
   --image_processor_type ae \
   --seq_len 8 \

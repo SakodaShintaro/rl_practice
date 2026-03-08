@@ -110,7 +110,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--encoder",
         type=str,
-        default="temporal_only",
+        default="spatial_temporal",
         choices=["spatial_temporal", "temporal_only"],
     )
     parser.add_argument(

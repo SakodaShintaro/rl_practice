@@ -8,7 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id CarRacing-v3 \
   --agent_type streaming \
   --network_class actor_critic_with_action_value \
-  --encoder spatial_temporal \
   --step_limit 400_000 \
   --image_processor_type ae \
   --seq_len 8 \
