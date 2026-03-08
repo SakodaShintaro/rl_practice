@@ -94,14 +94,10 @@ class OffPolicyAgent:
 
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
-        reward_with_penalty = reward
         if not self.normalizing_by_return:
-            self.reward_processor.update(reward_with_penalty)
+            self.reward_processor.update(reward)
         info_dict["action_norm"] = action_norm
-        info_dict["reward_with_penalty"] = reward_with_penalty
-        info_dict["processed_reward"] = self.reward_processor.normalize(
-            torch.tensor(reward_with_penalty)
-        ).item()
+        info_dict["processed_reward"] = self.reward_processor.normalize(torch.tensor(reward)).item()
 
         # add to replay buffer
         obs_tensor = torch.from_numpy(obs).to(self.device)
@@ -111,7 +107,7 @@ class OffPolicyAgent:
         self.rb.add(
             obs_tensor,
             obs_z,
-            reward_with_penalty,
+            reward,
             (terminated or truncated) if self.use_done else False,
             self.rnn_state.squeeze(0),
             torch.from_numpy(normalized_action).to(self.device),
