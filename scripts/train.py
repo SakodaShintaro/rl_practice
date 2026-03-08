@@ -369,11 +369,13 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         if args.normalizing_by_return:
             agent.reward_processor.update(score)
 
+        elapsed_time_sec = time.time() - start_time
         data_dict = {
             "global_step": global_step,
             "episodic_return": env_info["episode"]["r"],
             "episodic_length": env_info["episode"]["l"],
             "recent_average_score": recent_average_score,
+            "SPS": global_step / elapsed_time_sec,
         }
         wandb.log(data_dict)
 
