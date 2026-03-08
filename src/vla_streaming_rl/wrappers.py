@@ -67,7 +67,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
-        env.unwrapped.spec.reward_threshold = 800.0
+        env.unwrapped.spec.reward_threshold = 2000.0
         env.unwrapped.eval_range = 20
         env.unwrapped.get_action_prompt = _car_racing_action_prompt
         env.unwrapped.parse_action_text = _car_racing_parse_action
