@@ -11,6 +11,5 @@ uv run python scripts/train.py baseline$suffix \
   --step_limit 400_000 \
   --seq_len 8 \
   --batch_size 1 \
-  --accumulation_steps 1 \
   --learning_rate 1e-5 \
   --policy_type diffusion \

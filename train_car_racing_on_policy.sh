@@ -23,4 +23,3 @@ uv run python scripts/train.py baseline$suffix \
   --critic_loss_weight 2.0 \
   --max_grad_norm 0.5 \
   --separate_critic 1 \
-  --accumulation_steps 1 \
