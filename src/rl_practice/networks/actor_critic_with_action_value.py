@@ -12,7 +12,7 @@ from rl_practice.networks.image_processor import ImageProcessor
 from rl_practice.networks.policy_head import BetaPolicy, CFGDiffusionPolicy, DiffusionPolicy
 from rl_practice.networks.prediction_head import StatePredictionHead
 from rl_practice.networks.reward_processor import RewardProcessor
-from rl_practice.networks.value_head import ActionValueHead
+from rl_practice.networks.value_head import ActionValueHead, maybe_update_hl_gauss_range
 
 
 class ActorCriticWithActionValue(nn.Module):
@@ -118,10 +118,11 @@ class ActorCriticWithActionValue(nn.Module):
         self.condition_drop_prob = 0.1
         self.disable_state_predictor = args.disable_state_predictor
 
+        self.value_range = 1.0
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
-                min_value=-args.value_range,
-                max_value=+args.value_range,
+                min_value=-self.value_range,
+                max_value=+self.value_range,
                 num_bins=self.num_bins,
                 clamp_to_range=True,
             )
@@ -365,6 +366,7 @@ class ActorCriticWithActionValue(nn.Module):
         curr_critic_output_dict = self.value_head(curr_state, action_chunk)
 
         if self.num_bins > 1:
+            maybe_update_hl_gauss_range(self, target_value)
             curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
             critic_loss = self.hl_gauss_loss(curr_critic_output_dict["output"], target_value)
         else:
@@ -380,6 +382,7 @@ class ActorCriticWithActionValue(nn.Module):
             "critic_loss": critic_loss.item(),
             "curr_critic_value": curr_critic_value.mean().item(),
             "target_value": target_value.mean().item(),
+            "value_range": self.value_range,
         }
 
         return critic_loss, activations_dict, info_dict

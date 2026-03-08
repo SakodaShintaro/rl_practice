@@ -8,7 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id FourQuadrant-v0 \
   --agent_type off_policy \
   --encoder spatial_temporal \
-  --value_range 200.0 \
   --step_limit 40_000 \
   --image_processor_type ae \
   --seq_len 1 \

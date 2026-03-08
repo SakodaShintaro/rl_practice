@@ -1,10 +1,28 @@
 # SPDX-License-Identifier: MIT
 import torch
+from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 
 from .blocks import SimbaBlock
 from .image_processor import ImageProcessor
 from .sparse_utils import apply_one_shot_pruning
+
+
+def maybe_update_hl_gauss_range(
+    module: nn.Module,
+    target_value: torch.Tensor,
+) -> None:
+    observed_max = target_value.abs().max().item()
+    if observed_max <= module.value_range:
+        return
+    module.value_range = observed_max
+    device = module.hl_gauss_loss.support.device
+    module.hl_gauss_loss = HLGaussLoss(
+        min_value=-module.value_range,
+        max_value=+module.value_range,
+        num_bins=module.num_bins,
+        clamp_to_range=True,
+    ).to(device)
 
 
 def weights_init_(m: nn.Module) -> None:

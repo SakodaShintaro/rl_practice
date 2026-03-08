@@ -10,7 +10,6 @@ uv run python scripts/train.py baseline$suffix \
   --network_class actor_critic_with_state_value \
   --encoder temporal_only \
   --temporal_model_type identity \
-  --value_range 60.0 \
   --step_limit 200_000 \
   --image_processor_type simple_cnn \
   --seq_len 1 \

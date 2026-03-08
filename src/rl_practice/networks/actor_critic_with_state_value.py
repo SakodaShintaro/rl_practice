@@ -11,7 +11,11 @@ from rl_practice.networks.image_processor import ImageProcessor
 from rl_practice.networks.policy_head import BetaPolicy, CategoricalPolicy
 from rl_practice.networks.prediction_head import StatePredictionHead
 from rl_practice.networks.reward_processor import RewardProcessor
-from rl_practice.networks.value_head import SeparateCritic, StateValueHead
+from rl_practice.networks.value_head import (
+    SeparateCritic,
+    StateValueHead,
+    maybe_update_hl_gauss_range,
+)
 
 
 class ActorCriticWithStateValue(nn.Module):
@@ -101,10 +105,11 @@ class ActorCriticWithStateValue(nn.Module):
 
         self.apply(self._init_weights)
 
+        self.value_range = 1.0
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
-                min_value=-args.value_range,
-                max_value=+args.value_range,
+                min_value=-self.value_range,
+                max_value=+self.value_range,
                 num_bins=self.num_bins,
                 clamp_to_range=True,
             )
@@ -203,6 +208,7 @@ class ActorCriticWithStateValue(nn.Module):
 
         # Compute value loss
         if self.num_bins > 1:
+            maybe_update_hl_gauss_range(self, curr_target_v.squeeze(1))
             value_loss = self.hl_gauss_loss(value, curr_target_v.squeeze(1))
         else:
             value_clipped = torch.clamp(
@@ -311,6 +317,8 @@ class ActorCriticWithStateValue(nn.Module):
         action_loss = -(a_logp * advantage.unsqueeze(1)).mean()
 
         # Value loss
+        if self.num_bins > 1:
+            maybe_update_hl_gauss_range(self, target_value)
         value_loss = (
             self.hl_gauss_loss(value, target_value)
             if self.num_bins > 1

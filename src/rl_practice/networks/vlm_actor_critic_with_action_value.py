@@ -10,7 +10,7 @@ from torch.nn import functional as F
 
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
-from .value_head import ActionValueHead
+from .value_head import ActionValueHead, maybe_update_hl_gauss_range
 from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
 
 
@@ -336,10 +336,11 @@ class VLMActorCriticWithActionValue(nn.Module):
             sparsity=args.sparsity,
         )
 
+        self.value_range = 1.0
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
-                min_value=-args.value_range,
-                max_value=+args.value_range,
+                min_value=-self.value_range,
+                max_value=+self.value_range,
                 num_bins=args.num_bins,
                 clamp_to_range=True,
             )
@@ -690,6 +691,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         curr_critic_output_dict = self.value_head(state, action_chunk)
 
         if self.num_bins > 1:
+            maybe_update_hl_gauss_range(self, target_value)
             curr_critic_value = self.hl_gauss_loss(curr_critic_output_dict["output"]).view(-1)
             critic_loss = self.hl_gauss_loss(curr_critic_output_dict["output"], target_value)
         else:
@@ -705,6 +707,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             "critic_loss": critic_loss.item(),
             "curr_critic_value": curr_critic_value.mean().item(),
             "target_value": target_value.mean().item(),
+            "value_range": self.value_range,
         }
 
         return critic_loss, activations_dict, info_dict
