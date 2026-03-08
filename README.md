@@ -59,16 +59,3 @@ vla_streaming_rl/
 │   └── train.py         # Main training script
 └── train_*.sh           # Training shell scripts
 ```
-
-## Available Environments
-
-- CarRacing-v3
-- MiniGrid-MemoryS7-v0
-- MiniGrid-MemoryS9-v0
-- MiniGrid-MemoryS11-v0
-- MiniGrid-MemoryS13-v0
-- MiniGrid-MemoryS13Random-v0
-- MiniGrid-MemoryS17Random-v0
-- CARLA-Leaderboard-v0
-- LetterTracing-v0
-- FourQuadrant-v0
