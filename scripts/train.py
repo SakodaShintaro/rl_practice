@@ -21,11 +21,11 @@ import torch
 torch.set_float32_matmul_precision("high")
 
 import wandb
-from rl_practice.agents.off_policy import OffPolicyAgent
-from rl_practice.agents.on_policy import OnPolicyAgent
-from rl_practice.agents.streaming import StreamingAgent
-from rl_practice.utils import concat_labeled_images, create_reward_image
-from rl_practice.wrappers import make_env
+from vla_streaming_rl.agents.off_policy import OffPolicyAgent
+from vla_streaming_rl.agents.on_policy import OnPolicyAgent
+from vla_streaming_rl.agents.streaming import StreamingAgent
+from vla_streaming_rl.utils import concat_labeled_images, create_reward_image
+from vla_streaming_rl.wrappers import make_env
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -205,7 +205,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     root_dir = Path(args.result_dir)
     root_dir.mkdir(parents=True, exist_ok=True)
     wandb.init(
-        project=f"rl_practice_{args.env_id}",
+        project=f"vla_streaming_rl_{args.env_id}",
         config=vars(args),
         name=exp_name,
         save_code=True,

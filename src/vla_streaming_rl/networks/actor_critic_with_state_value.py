@@ -6,12 +6,12 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
-from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from rl_practice.networks.image_processor import ImageProcessor
-from rl_practice.networks.policy_head import BetaPolicy, CategoricalPolicy
-from rl_practice.networks.prediction_head import StatePredictionHead
-from rl_practice.networks.reward_processor import RewardProcessor
-from rl_practice.networks.value_head import (
+from vla_streaming_rl.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from vla_streaming_rl.networks.image_processor import ImageProcessor
+from vla_streaming_rl.networks.policy_head import BetaPolicy, CategoricalPolicy
+from vla_streaming_rl.networks.prediction_head import StatePredictionHead
+from vla_streaming_rl.networks.reward_processor import RewardProcessor
+from vla_streaming_rl.networks.value_head import (
     SeparateCritic,
     StateValueHead,
     maybe_update_hl_gauss_range,

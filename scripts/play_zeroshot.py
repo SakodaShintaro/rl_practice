@@ -12,8 +12,8 @@ import imageio
 import numpy as np
 import torch
 
-from rl_practice.utils import concat_images, convert_to_uint8
-from rl_practice.wrappers import make_env
+from vla_streaming_rl.utils import concat_images, convert_to_uint8
+from vla_streaming_rl.wrappers import make_env
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

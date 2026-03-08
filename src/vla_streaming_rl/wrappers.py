@@ -7,10 +7,10 @@ import minigrid
 import numpy as np
 from gymnasium.envs.registration import EnvSpec
 
-from rl_practice.envs.color_panel_env import ColorPanelEnv
-from rl_practice.envs.four_quadrant_env import FourQuadrantEnv
-from rl_practice.envs.letter_tracing_env import LetterTracingEnv
-from rl_practice.envs.moving_circle_env import MovingCircleEnv
+from vla_streaming_rl.envs.color_panel_env import ColorPanelEnv
+from vla_streaming_rl.envs.four_quadrant_env import FourQuadrantEnv
+from vla_streaming_rl.envs.letter_tracing_env import LetterTracingEnv
+from vla_streaming_rl.envs.moving_circle_env import MovingCircleEnv
 
 REPEAT = 4
 
@@ -74,7 +74,7 @@ def make_env(env_id: str) -> gym.Env:
         return env
 
     elif env_id == "CARLA-Leaderboard-v0":
-        from rl_practice.envs.carla_leaderboard_env import CARLALeaderboardEnv
+        from vla_streaming_rl.envs.carla_leaderboard_env import CARLALeaderboardEnv
 
         env = CARLALeaderboardEnv()
         env = gym.wrappers.RecordEpisodeStatistics(env)

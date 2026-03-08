@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image
 from pynput import mouse
 
-from rl_practice.envs.generic_gui_env import (
+from vla_streaming_rl.envs.generic_gui_env import (
     GenericGUIEnv,
     activate_window,
     create_score_reward_detector,

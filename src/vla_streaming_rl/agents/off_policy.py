@@ -6,10 +6,10 @@ import numpy as np
 import torch
 from torch import optim
 
-from rl_practice.networks.actor_critic_with_action_value import ActorCriticWithActionValue
-from rl_practice.networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
-from rl_practice.replay_buffer import ReplayBuffer
-from rl_practice.reward_processor import RewardProcessor
+from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
+from vla_streaming_rl.networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
+from vla_streaming_rl.replay_buffer import ReplayBuffer
+from vla_streaming_rl.reward_processor import RewardProcessor
 
 
 class OffPolicyAgent:

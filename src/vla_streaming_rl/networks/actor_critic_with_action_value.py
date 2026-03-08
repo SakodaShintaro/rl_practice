@@ -6,13 +6,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 
-from rl_practice.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from rl_practice.networks.diffusion_utils import compute_actor_loss_with_dacer
-from rl_practice.networks.image_processor import ImageProcessor
-from rl_practice.networks.policy_head import BetaPolicy, CFGDiffusionPolicy, DiffusionPolicy
-from rl_practice.networks.prediction_head import StatePredictionHead
-from rl_practice.networks.reward_processor import RewardProcessor
-from rl_practice.networks.value_head import ActionValueHead, maybe_update_hl_gauss_range
+from vla_streaming_rl.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
+from vla_streaming_rl.networks.diffusion_utils import compute_actor_loss_with_dacer
+from vla_streaming_rl.networks.image_processor import ImageProcessor
+from vla_streaming_rl.networks.policy_head import BetaPolicy, CFGDiffusionPolicy, DiffusionPolicy
+from vla_streaming_rl.networks.prediction_head import StatePredictionHead
+from vla_streaming_rl.networks.reward_processor import RewardProcessor
+from vla_streaming_rl.networks.value_head import ActionValueHead, maybe_update_hl_gauss_range
 
 
 class ActorCriticWithActionValue(nn.Module):

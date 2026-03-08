@@ -11,7 +11,7 @@ import random
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from rl_practice.envs.base_gui_env import BaseGUIEnv
+from vla_streaming_rl.envs.base_gui_env import BaseGUIEnv
 
 STATE_PLAYING = "PLAYING"
 STATE_SHOW_SCORE = "SHOW_SCORE"

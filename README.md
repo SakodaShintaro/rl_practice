@@ -1,4 +1,4 @@
-# rl_practice
+# vla_streaming_rl
 
 Reinforcement learning experiments with visual observations.
 
@@ -48,8 +48,8 @@ uv run huggingface-cli login
 ## Project Structure
 
 ```bash
-rl_practice/
-├── src/rl_practice/     # Library code
+vla_streaming_rl/
+├── src/vla_streaming_rl/     # Library code
 │   ├── agents/          # RL agents (on-policy, off-policy)
 │   ├── envs/            # Custom environments
 │   ├── networks/        # Neural network architectures
