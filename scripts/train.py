@@ -5,6 +5,8 @@ import warnings
 
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+warnings.filterwarnings("ignore", message=".*local_dir_use_symlinks.*")
+warnings.filterwarnings("ignore", message=".*Attempting to run cuBLAS.*")
 
 import argparse
 import csv
@@ -21,7 +23,6 @@ import torch
 torch.set_float32_matmul_precision("high")
 
 import wandb
-
 from vla_streaming_rl.agents.off_policy import OffPolicyAgent
 from vla_streaming_rl.agents.on_policy import OnPolicyAgent
 from vla_streaming_rl.agents.streaming import StreamingAgent
