@@ -1783,80 +1783,6 @@ wheels = [
 ]
 
 [[package]]
-name = "rl-practice"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "accelerate" },
-    { name = "bitsandbytes" },
-    { name = "causal-conv1d" },
-    { name = "diffusers" },
-    { name = "flash-attn" },
-    { name = "flash-linear-attention" },
-    { name = "fschat" },
-    { name = "gymnasium", extra = ["box2d", "mujoco", "other"] },
-    { name = "hl-gauss-pytorch" },
-    { name = "imageio", extra = ["ffmpeg"] },
-    { name = "mamba-ssm" },
-    { name = "minigrid" },
-    { name = "num2words" },
-    { name = "opencv-python" },
-    { name = "packaging" },
-    { name = "peft" },
-    { name = "pyautogui" },
-    { name = "pynput" },
-    { name = "pytesseract" },
-    { name = "qwen-vl-utils" },
-    { name = "scipy" },
-    { name = "sentencepiece" },
-    { name = "stable-baselines3" },
-    { name = "timm" },
-    { name = "torch" },
-    { name = "torchvision", version = "0.22.1", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'" },
-    { name = "torchvision", version = "0.22.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' or platform_python_implementation != 'CPython' or sys_platform != 'linux'" },
-    { name = "transformers" },
-    { name = "tyro" },
-    { name = "wandb" },
-    { name = "wheel" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate" },
-    { name = "bitsandbytes" },
-    { name = "causal-conv1d", url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.0/causal_conv1d-1.6.0+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
-    { name = "diffusers" },
-    { name = "flash-attn", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
-    { name = "flash-linear-attention" },
-    { name = "fschat" },
-    { name = "gymnasium", extras = ["box2d"] },
-    { name = "gymnasium", extras = ["mujoco"] },
-    { name = "gymnasium", extras = ["other"] },
-    { name = "hl-gauss-pytorch" },
-    { name = "imageio", extras = ["ffmpeg"] },
-    { name = "mamba-ssm", url = "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
-    { name = "minigrid" },
-    { name = "num2words" },
-    { name = "opencv-python" },
-    { name = "packaging" },
-    { name = "peft" },
-    { name = "pyautogui" },
-    { name = "pynput" },
-    { name = "pytesseract" },
-    { name = "qwen-vl-utils" },
-    { name = "scipy", specifier = ">=1.17.0" },
-    { name = "sentencepiece" },
-    { name = "stable-baselines3" },
-    { name = "timm" },
-    { name = "torch", specifier = ">=2.7,<2.8", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "torchvision", specifier = ">=0.22,<0.23", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "transformers", specifier = ">=5.2.0" },
-    { name = "tyro" },
-    { name = "wandb" },
-    { name = "wheel" },
-]
-
-[[package]]
 name = "rubicon-objc"
 version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2350,6 +2276,80 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c3/d1/8f3c683c9561a4e6689dd3b1d345c815f10f86acd044ee1fb9a4dcd0b8c5/uvicorn-0.40.0.tar.gz", hash = "sha256:839676675e87e73694518b5574fd0f24c9d97b46bea16df7b8c05ea1a51071ea", size = 81761, upload-time = "2025-12-21T14:16:22.45Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3d/d8/2083a1daa7439a66f3a48589a57d576aa117726762618f6bb09fe3798796/uvicorn-0.40.0-py3-none-any.whl", hash = "sha256:c6c8f55bc8bf13eb6fa9ff87ad62308bbbc33d0b67f84293151efe87e0d5f2ee", size = 68502, upload-time = "2025-12-21T14:16:21.041Z" },
+]
+
+[[package]]
+name = "vla-streaming-rl"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "accelerate" },
+    { name = "bitsandbytes" },
+    { name = "causal-conv1d" },
+    { name = "diffusers" },
+    { name = "flash-attn" },
+    { name = "flash-linear-attention" },
+    { name = "fschat" },
+    { name = "gymnasium", extra = ["box2d", "mujoco", "other"] },
+    { name = "hl-gauss-pytorch" },
+    { name = "imageio", extra = ["ffmpeg"] },
+    { name = "mamba-ssm" },
+    { name = "minigrid" },
+    { name = "num2words" },
+    { name = "opencv-python" },
+    { name = "packaging" },
+    { name = "peft" },
+    { name = "pyautogui" },
+    { name = "pynput" },
+    { name = "pytesseract" },
+    { name = "qwen-vl-utils" },
+    { name = "scipy" },
+    { name = "sentencepiece" },
+    { name = "stable-baselines3" },
+    { name = "timm" },
+    { name = "torch" },
+    { name = "torchvision", version = "0.22.1", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'" },
+    { name = "torchvision", version = "0.22.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' or platform_python_implementation != 'CPython' or sys_platform != 'linux'" },
+    { name = "transformers" },
+    { name = "tyro" },
+    { name = "wandb" },
+    { name = "wheel" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate" },
+    { name = "bitsandbytes" },
+    { name = "causal-conv1d", url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.0/causal_conv1d-1.6.0+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
+    { name = "diffusers" },
+    { name = "flash-attn", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
+    { name = "flash-linear-attention" },
+    { name = "fschat" },
+    { name = "gymnasium", extras = ["box2d"] },
+    { name = "gymnasium", extras = ["mujoco"] },
+    { name = "gymnasium", extras = ["other"] },
+    { name = "hl-gauss-pytorch" },
+    { name = "imageio", extras = ["ffmpeg"] },
+    { name = "mamba-ssm", url = "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
+    { name = "minigrid" },
+    { name = "num2words" },
+    { name = "opencv-python" },
+    { name = "packaging" },
+    { name = "peft" },
+    { name = "pyautogui" },
+    { name = "pynput" },
+    { name = "pytesseract" },
+    { name = "qwen-vl-utils" },
+    { name = "scipy", specifier = ">=1.17.0" },
+    { name = "sentencepiece" },
+    { name = "stable-baselines3" },
+    { name = "timm" },
+    { name = "torch", specifier = ">=2.7,<2.8", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchvision", specifier = ">=0.22,<0.23", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "transformers", specifier = ">=5.2.0" },
+    { name = "tyro" },
+    { name = "wandb" },
+    { name = "wheel" },
 ]
 
 [[package]]
