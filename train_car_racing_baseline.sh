@@ -9,6 +9,5 @@ uv run python scripts/train.py baseline$suffix \
   --agent_type off_policy \
   --network_class actor_critic_with_action_value \
   --step_limit 40_000 \
-  --seq_len 8 \
   --batch_size 16 \
   --learning_rate 1e-4 \

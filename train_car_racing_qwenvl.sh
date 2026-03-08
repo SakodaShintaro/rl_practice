@@ -10,6 +10,5 @@ uv run python scripts/train.py qwenvl$suffix \
   --network_class vlm_actor_critic_with_action_value \
   --step_limit 400_000 \
   --disable_state_predictor 0 \
-  --seq_len 1 \
   --batch_size 16 \
   --learning_rate 1e-5 \

@@ -12,7 +12,6 @@ uv run python scripts/train.py baseline$suffix \
   --temporal_model_type identity \
   --step_limit 200_000 \
   --image_processor_type simple_cnn \
-  --seq_len 1 \
   --batch_size 16 \
   --learning_rate 1e-5 \
   --buffer_capacity 2048 \

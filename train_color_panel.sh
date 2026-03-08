@@ -8,7 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id ColorPanel-v0 \
   --agent_type off_policy \
   --step_limit 40_000 \
-  --seq_len 1 \
   --batch_size 64 \
   --learning_rate 1e-5 \
   --render 1 \
