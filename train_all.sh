@@ -2,6 +2,7 @@
 set -eux
 
 RESULT_DIR=${1:?"Usage: $0 <result_dir> [suffix]"}
+RESULT_DIR=$(readlink -f $RESULT_DIR)
 suffix=${2:-""}
 cd $(dirname $0)
 
