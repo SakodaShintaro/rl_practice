@@ -174,7 +174,6 @@ def parse_args() -> argparse.Namespace:
         default="Qwen/Qwen3.5-0.8B",
         choices=["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3-VL-2B-Instruct"],
     )
-    parser.add_argument("--encoder_task_prompt", type=str, default="")
     parser.add_argument("--expert_hidden_size", type=int, default=8)
     parser.add_argument(
         "--text_action_mode",
