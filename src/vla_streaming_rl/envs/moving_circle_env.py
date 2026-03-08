@@ -98,9 +98,7 @@ class MovingCircleEnv(BaseGUIEnv):
             circle["steps_remaining"] -= 1
             if circle["steps_remaining"] <= 0:
                 circle["direction"] = random.uniform(0, 2 * math.pi)
-                circle["steps_remaining"] = random.randint(
-                    circle["min_steps"], circle["max_steps"]
-                )
+                circle["steps_remaining"] = random.randint(circle["min_steps"], circle["max_steps"])
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)

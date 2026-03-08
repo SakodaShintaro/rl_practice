@@ -8,7 +8,9 @@ from torch import optim
 
 from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from vla_streaming_rl.networks.actor_critic_with_state_value import ActorCriticWithStateValue
-from vla_streaming_rl.networks.vlm_actor_critic_with_action_value import VLMActorCriticWithActionValue
+from vla_streaming_rl.networks.vlm_actor_critic_with_action_value import (
+    VLMActorCriticWithActionValue,
+)
 from vla_streaming_rl.optimizers.adam_et import AdamET
 from vla_streaming_rl.replay_buffer import ReplayBuffer
 from vla_streaming_rl.reward_processor import RewardProcessor

@@ -112,7 +112,9 @@ class DiffusionPolicy(nn.Module):
             x_flat = x_t.view(bs, -1)
             return self.forward(x_flat, t, x)["output"].view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
+        action = euler_denoise(
+            noise, self.denoising_time, self.denoising_steps, predict_velocity_fn
+        )
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
@@ -214,7 +216,9 @@ class CFGDiffusionPolicy(nn.Module):
             v = (1 - self.cfgrl_beta) * v_unc + self.cfgrl_beta * v_pos
             return v.view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
+        action = euler_denoise(
+            noise, self.denoising_time, self.denoising_steps, predict_velocity_fn
+        )
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p

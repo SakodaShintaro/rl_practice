@@ -9,7 +9,9 @@ import torch
 
 
 class AdamET(torch.optim.Optimizer):
-    def __init__(self, params, lr=1e-3, gamma=0.99, et_lambda=0.8, beta1=0.9, beta2=0.999, eps=1e-8):
+    def __init__(
+        self, params, lr=1e-3, gamma=0.99, et_lambda=0.8, beta1=0.9, beta2=0.999, eps=1e-8
+    ):
         defaults = dict(lr=lr, gamma=gamma, et_lambda=et_lambda, beta1=beta1, beta2=beta2, eps=eps)
         super().__init__(params, defaults)
 
@@ -48,8 +50,8 @@ class AdamET(torch.optim.Optimizer):
                 v.mul_(beta2).addcmul_(update, update, value=1.0 - beta2)
 
                 # bias correction
-                m_hat = m / (1.0 - beta1 ** t)
-                v_hat = v / (1.0 - beta2 ** t)
+                m_hat = m / (1.0 - beta1**t)
+                v_hat = v / (1.0 - beta2**t)
 
                 # parameter update: θ ← θ - lr * m̂ / (√v̂ + ε)
                 p.data.addcdiv_(m_hat, (v_hat.sqrt() + eps), value=-group["lr"])
