@@ -66,6 +66,7 @@ torchvision = { index = "pytorch-cu128" }
 
 [tool.ruff]
 line-length = 100
+src = ["src"]
 
 [tool.ruff.lint]
 select = ["I"]

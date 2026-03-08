@@ -19,16 +19,15 @@ import cv2
 import imageio
 import numpy as np
 import torch
-
-torch.set_float32_matmul_precision("high")
-
 import wandb
+
 from vla_streaming_rl.agents.off_policy import OffPolicyAgent
 from vla_streaming_rl.agents.on_policy import OnPolicyAgent
 from vla_streaming_rl.agents.streaming import StreamingAgent
 from vla_streaming_rl.utils import concat_labeled_images, create_reward_image
 from vla_streaming_rl.wrappers import make_env
 
+torch.set_float32_matmul_precision("high")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
