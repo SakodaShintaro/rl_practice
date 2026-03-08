@@ -8,7 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id ColorPanel-v0 \
   --agent_type off_policy \
   --encoder spatial_temporal \
-  --num_bins 1 \
   --value_range 200.0 \
   --step_limit 40_000 \
   --image_processor_type ae \

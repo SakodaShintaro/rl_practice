@@ -9,7 +9,6 @@ uv run python scripts/train.py qwenvl$suffix \
   --agent_type off_policy \
   --vlm_model_id "Qwen/Qwen3.5-0.8B" \
   --network_class vlm_actor_critic_with_action_value \
-  --num_bins 1 \
   --value_range 200.0 \
   --step_limit 400_000 \
   --image_processor_type ae \

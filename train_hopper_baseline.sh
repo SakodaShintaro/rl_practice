@@ -9,7 +9,6 @@ uv run python scripts/train.py baseline$suffix \
   --agent_type off_policy \
   --network_class actor_critic_with_action_value \
   --encoder spatial_temporal \
-  --num_bins 1 \
   --value_range 100.0 \
   --step_limit 500_000 \
   --image_processor_type ae \
