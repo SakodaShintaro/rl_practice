@@ -109,6 +109,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--off_wandb", action="store_true")
+    parser.add_argument("--wandb_group", type=str, default="default_group")
     parser.add_argument(
         "--encoder",
         type=str,
@@ -206,6 +207,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         project=f"vla_streaming_rl_{args.env_id}",
         config=vars(args),
         name=exp_name,
+        group=args.wandb_group,
         save_code=True,
         settings=wandb.Settings(quiet=True),
         dir=str(root_dir),
