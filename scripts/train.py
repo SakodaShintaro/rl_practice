@@ -70,6 +70,7 @@ def save_episode_data(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
+    parser.add_argument("--result_dir", type=str, default="results")
     parser.add_argument("--trial_num", type=int, default=1)
     parser.add_argument(
         "--env_id",
@@ -201,12 +202,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
+    root_dir = Path(args.result_dir)
+    root_dir.mkdir(parents=True, exist_ok=True)
     wandb.init(
         project=f"rl_practice_{args.env_id}",
         config=vars(args),
         name=exp_name,
         save_code=True,
         settings=wandb.Settings(quiet=True),
+        dir=str(root_dir),
     )
 
     # seeding
@@ -220,9 +224,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     # Create result directories and save files only if not in debug mode
     if not args.debug:
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = (
-            Path(__file__).resolve().parent.parent / "results" / f"{datetime_str}_{exp_name}"
-        )
+        result_dir = root_dir / f"{datetime_str}_{exp_name}"
         result_dir.mkdir(parents=True, exist_ok=True)
 
         # save seed to file
