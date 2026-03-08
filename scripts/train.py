@@ -371,12 +371,14 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             agent.reward_processor.update(score)
 
         elapsed_time_sec = time.time() - start_time
+        elapsed_time_hour = elapsed_time_sec / 3600
         data_dict = {
             "global_step": global_step,
             "episodic_return": env_info["episode"]["r"],
             "episodic_length": env_info["episode"]["l"],
             "recent_average_score": recent_average_score,
             "SPS": global_step / elapsed_time_sec,
+            "elapsed_time_hour": elapsed_time_hour,
         }
         wandb.log(data_dict)
 
@@ -395,7 +397,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
         if episode_id % 5 == 0 or is_solved:
             print(
-                f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}"
+                f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}\tElapsed time: {elapsed_time_hour:.2f}h"
             )
 
         feedback_text = input("Feedback: ") if args.use_feedback else ""
