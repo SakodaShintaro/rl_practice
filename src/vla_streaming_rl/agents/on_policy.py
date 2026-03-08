@@ -72,7 +72,6 @@ class OnPolicyAgent:
         self.network_class = args.network_class
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
-        self.use_weight_projection = args.use_weight_projection
 
         # Action chunking state
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
