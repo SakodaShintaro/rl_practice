@@ -70,7 +70,6 @@ class OnPolicyAgent:
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
         self.network_class = args.network_class
-        self.action_norm_penalty = args.action_norm_penalty
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
         self.use_weight_projection = args.use_weight_projection
@@ -139,7 +138,7 @@ class OnPolicyAgent:
         # calculate train reward
         action_norm = np.linalg.norm(self.prev_action)
         parse_fail_penalty = 0.0 if self.prev_parse_success else self.parse_fail_penalty
-        reward_with_penalty = reward - self.action_norm_penalty * action_norm - parse_fail_penalty
+        reward_with_penalty = reward - parse_fail_penalty
         if not self.normalizing_by_return:
             self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm

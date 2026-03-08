@@ -254,7 +254,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
     target_score = env.spec.reward_threshold
     eval_range = env.unwrapped.eval_range
-    args.action_norm_penalty = env.unwrapped.action_norm_penalty
+
     args.get_action_prompt = getattr(env.unwrapped, "get_action_prompt", None)
     args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
 

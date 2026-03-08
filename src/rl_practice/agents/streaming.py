@@ -32,7 +32,6 @@ class StreamingAgent:
         self.action_high = action_space.high
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
-        self.action_norm_penalty = args.action_norm_penalty
         self.reward_processor = RewardProcessor("scaling", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
 
@@ -114,7 +113,7 @@ class StreamingAgent:
             self._episode_reset = True
 
         action_norm = np.linalg.norm(self.prev_action)
-        reward_with_penalty = reward - self.action_norm_penalty * action_norm
+        reward_with_penalty = reward
         if not self.normalizing_by_return:
             self.reward_processor.update(reward_with_penalty)
         info_dict["action_norm"] = action_norm
