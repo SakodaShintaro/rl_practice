@@ -4,14 +4,14 @@ from dataclasses import dataclass
 import torch
 
 """ Note
-リプレイバッファのインデックスtにどのタイミングのデータが入っているかは混乱しやすいので記録
-（というのも、環境から時刻tとして受け取った後の選択した行動なのか、その前に選択した行動なのか、どちらとペアを取るかは任意性がある）
-このコードでは、インデックスtでは、エージェントが時刻tで行動を選択する直前で見える情報を格納するという考えを採る
-つまり
-- obs, reward, doneはそれぞれ時刻tに環境から得て入力になるもの
-- rnn_stateは時刻tでのRNNの隠れ状態
-- action、log_prob, valueは時刻t-1で選択した行動およびその対数確率, 価値
-を格納する
+Recording the convention for what data is stored at replay buffer index t,
+since it can be confusing (the action selected after receiving timestep t
+from the environment vs. the action selected before — the pairing is arbitrary).
+In this code, index t stores information visible to the agent just before
+selecting an action at timestep t. Specifically:
+- obs, reward, done are obtained from the environment at timestep t as inputs
+- rnn_state is the RNN hidden state at timestep t
+- action, log_prob, value are the action selected at timestep t-1 and its log probability and value
 """
 
 

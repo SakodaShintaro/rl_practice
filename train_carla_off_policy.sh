@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# CARLA Leaderboard環境でのオフポリシー学習
-# 実行前にCARLAサーバーを起動してください:
+# Off-policy training in the CARLA Leaderboard environment
+# Start the CARLA server before running:
 #   cd ~/CARLA_0.9.16
 #   ./CarlaUE4.sh
 

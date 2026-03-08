@@ -56,11 +56,11 @@ class VehiclePhysics:
 
 class CARLALeaderboardEnv(gym.Env):
     """
-    CARLA Leaderboard準拠のGymnasium環境
+    CARLA Leaderboard-compliant Gymnasium environment
 
-    - ルート生成とルート追跡
-    - Leaderboard準拠の報酬（Route Completion + Infractions）
-    - マップ+ルート+車両位置の可視化
+    - Route generation and route tracking
+    - Leaderboard-compliant reward (Route Completion + Infractions)
+    - Visualization of map + route + vehicle position
     """
 
     def __init__(self):
