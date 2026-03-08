@@ -168,7 +168,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
     parser.add_argument("--denoising_time", type=float, default=1.0)
     parser.add_argument("--denoising_steps", type=int, default=1)
-    parser.add_argument("--vlm_model_id", type=str, default="Qwen/Qwen3-VL-2B-Instruct")
+    parser.add_argument(
+        "--vlm_model_id",
+        type=str,
+        default="Qwen/Qwen3.5-0.8B",
+        choices=["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3-VL-2B-Instruct"],
+    )
     parser.add_argument("--encoder_task_prompt", type=str, default="")
     parser.add_argument("--expert_hidden_size", type=int, default=8)
     parser.add_argument(
