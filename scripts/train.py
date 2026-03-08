@@ -148,7 +148,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step_limit", type=int, default=1_000_000)
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--horizon", type=int, default=1)
-    parser.add_argument("--action_norm_penalty", type=float, default=0.0)
     parser.add_argument("--buffer_device", type=str, default="cuda")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--critic_loss_weight", type=float, default=1.0)
@@ -251,6 +250,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
     target_score = env.spec.reward_threshold
     eval_range = env.unwrapped.eval_range
+    args.action_norm_penalty = env.unwrapped.action_norm_penalty
     args.get_action_prompt = getattr(env.unwrapped, "get_action_prompt", None)
     args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
 

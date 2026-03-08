@@ -8,7 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id Hopper-v5 \
   --agent_type off_policy \
   --network_class actor_critic_with_action_value \
-  --action_norm_penalty 0.1 \
   --encoder spatial_temporal \
   --num_bins 1 \
   --value_range 100.0 \

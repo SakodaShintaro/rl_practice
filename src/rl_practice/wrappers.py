@@ -53,6 +53,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec.reward_threshold = 0.95
         env.unwrapped.eval_range = 100
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     elif env_id == "CarRacing-v3":
@@ -68,6 +69,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec.reward_threshold = 800.0
         env.unwrapped.eval_range = 20
+        env.unwrapped.action_norm_penalty = 1.0
         env.unwrapped.get_action_prompt = _car_racing_action_prompt
         env.unwrapped.parse_action_text = _car_racing_parse_action
         return env
@@ -80,6 +82,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=100.0)
         env.unwrapped.eval_range = 100
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     elif env_id == "LetterTracing-v0":
@@ -89,6 +92,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     elif env_id == "FourQuadrant-v0":
@@ -98,6 +102,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     elif env_id == "ColorPanel-v0":
@@ -107,6 +112,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     elif env_id == "MovingCircle-v0":
@@ -116,6 +122,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     elif env_id == "Hopper-v5":
@@ -126,6 +133,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec.reward_threshold = 3800.0
         env.unwrapped.eval_range = 20
+        env.unwrapped.action_norm_penalty = 0.0
         return env
 
     else:
