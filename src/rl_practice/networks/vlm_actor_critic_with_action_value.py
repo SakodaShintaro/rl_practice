@@ -10,6 +10,8 @@ from torch.nn import functional as F
 
 from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
 from .image_processor import ImageProcessor
+from .prediction_head import StatePredictionHead
+from .reward_processor import RewardProcessor
 from .value_head import ActionValueHead, maybe_update_hl_gauss_range
 from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
 
@@ -257,10 +259,16 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.text_q_margin = args.text_q_margin
         self.text_action_mode = args.text_action_mode
 
+        self.predictor_step_num = args.predictor_step_num
+        self.disable_state_predictor = args.disable_state_predictor
+        self.detach_predictor = args.detach_predictor
+
         # Image processor (for replay buffer obs_z encoding)
         self.image_processor = ImageProcessor(
             observation_space_shape, processor_type=args.image_processor_type
         )
+        hidden_image_dim = self.image_processor.output_shape[0]
+        self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
         # Load VLM (frozen)
         device = "cuda"
@@ -336,6 +344,16 @@ class VLMActorCriticWithActionValue(nn.Module):
             sparsity=args.sparsity,
         )
 
+        self.prediction_head = StatePredictionHead(
+            image_processor=self.image_processor,
+            reward_processor=self.reward_processor,
+            action_dim=self.action_dim,
+            predictor_hidden_dim=args.predictor_hidden_dim,
+            predictor_block_num=args.predictor_block_num,
+        )
+        # Project VLM state to match FluxDiT context_in_dim
+        self.state_to_predictor_proj = nn.Linear(state_out_dim, hidden_image_dim)
+
         self.value_range = 1.0
         if self.num_bins > 1:
             self.hl_gauss_loss = HLGaussLoss(
@@ -361,15 +379,22 @@ class VLMActorCriticWithActionValue(nn.Module):
     ) -> dict:
         state, action, q_value = self._infer(s_seq, r_seq)
 
-        c, h, w = self.observation_space_shape
+        next_image, next_reward = self.prediction_head.predict_next_state(
+            self._state_for_predictor(state),
+            action[:, 0],
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )
+
         return {
             "action": action,
             "a_logp": torch.zeros(s_seq.shape[0], 1, device=self.device),
             "value": q_value.item(),
             "x": state,
             "rnn_state": rnn_state,
-            "next_image": np.zeros((h, w, c), dtype=np.float32),
-            "next_reward": 0.0,
+            "next_image": next_image,
+            "next_reward": next_reward,
             "action_token_ids": [],
             "parse_success": True,
         }
@@ -395,14 +420,18 @@ class VLMActorCriticWithActionValue(nn.Module):
         # Actor loss (advantage + DACER)
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
 
-        total_loss = self.critic_loss_weight * critic_loss + actor_loss
+        # Sequence (state prediction) loss
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state)
+
+        total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
         activations_dict = {
             "state": state,
             **critic_activations,
             **actor_activations,
+            **seq_activations,
         }
-        info_dict = {**critic_info, **actor_info}
+        info_dict = {**critic_info, **actor_info, **seq_info}
 
         return total_loss, activations_dict, info_dict
 
@@ -427,10 +456,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         # Actor loss (advantage + DACER)
         actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
 
-        total_loss = self.critic_loss_weight * critic_loss + actor_loss
+        # Sequence (state prediction) loss
+        seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state)
+
+        total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
 
         # Actor-only loss (no critic component)
-        actor_entropy_loss = actor_loss
+        actor_entropy_loss = actor_loss + seq_loss
 
         # -Q(s,a) for eligibility trace backward (detached from encoder)
         et_critic_dict = self.value_head(state.detach(), action_chunk.detach())
@@ -439,21 +471,29 @@ class VLMActorCriticWithActionValue(nn.Module):
         else:
             neg_value_detached = -et_critic_dict["output"].mean()
 
-        c, h, w = self.observation_space_shape
+        next_image, next_reward = self.prediction_head.predict_next_state(
+            self._state_for_predictor(state),
+            next_action[:, 0],
+            self.observation_space_shape,
+            self.predictor_step_num,
+            self.disable_state_predictor,
+        )
+
         infer_dict = {
             "action": next_action,
             "value": next_q.item(),
             "rnn_state": self._dummy_state.clone(),
-            "next_image": np.zeros((h, w, c), dtype=np.float32),
-            "next_reward": 0.0,
+            "next_image": next_image,
+            "next_reward": next_reward,
         }
 
         activations_dict = {
             "state": state,
             **critic_activations,
             **actor_activations,
+            **seq_activations,
         }
-        info_dict = {**critic_info, **actor_info}
+        info_dict = {**critic_info, **actor_info, **seq_info}
 
         et_info = {
             "actor_entropy_loss": actor_entropy_loss,
@@ -738,3 +778,57 @@ class VLMActorCriticWithActionValue(nn.Module):
         activations_dict = {"critic": advantage_dict["activation"]}
 
         return total_actor_loss, activations_dict, info_dict
+
+    def _state_for_predictor(self, state: torch.Tensor) -> torch.Tensor:
+        """Reshape and project state for StatePredictionHead context.
+
+        state: (B, target_seq_len * state_out_dim) -> (B, target_seq_len, hidden_image_dim)
+        """
+        B = state.shape[0]
+        x = state.view(B, self._target_seq_len, -1)  # (B, target_seq_len, state_out_dim)
+        return self.state_to_predictor_proj(x)  # (B, target_seq_len, hidden_image_dim)
+
+    def _compute_sequence_loss(self, data, curr_state):
+        if self.disable_state_predictor:
+            dummy_loss = torch.tensor(0.0, device=curr_state.device, requires_grad=True)
+            activations_dict = {"state_predictor": curr_state}
+            info_dict = {"seq_loss": 0.0}
+            return dummy_loss, activations_dict, info_dict
+
+        predictor_state = self._state_for_predictor(curr_state)
+        if self.detach_predictor:
+            predictor_state = predictor_state.detach()
+
+        curr_action = data.actions[:, -1]  # (B, action_dim)
+
+        with torch.no_grad():
+            last_obs = data.observations[:, -1]  # (B, C, H, W)
+            target_state_next = self.image_processor.encode(last_obs)  # (B, C', H', W')
+            B, C, H, W = target_state_next.shape
+            target_state_next = target_state_next.flatten(2).permute(0, 2, 1)  # (B, H'*W', C')
+
+        reward_next = data.rewards[:, -1]  # (B, 1)
+        target_reward_next = self.reward_processor.encode(reward_next)  # (B, 1, C')
+        target_reward_next = target_reward_next.squeeze(1)  # (B, C')
+        x1 = torch.cat(
+            [target_state_next, target_reward_next.unsqueeze(1)], dim=1
+        )  # (B, H'*W'+1, C')
+
+        x0 = torch.randn_like(x1)
+        shape_t = (x0.shape[0],) + (1,) * (len(x0.shape) - 1)
+        t = torch.rand(shape_t, device=x1.device)
+
+        xt = (1.0 - t) * x0 + t * x1
+
+        pred_dict = self.prediction_head.state_predictor.forward(
+            xt, t, predictor_state, curr_action
+        )
+        pred_vt = pred_dict["output"]
+
+        vt = x1 - x0
+        pred_loss = F.mse_loss(pred_vt, vt)
+
+        activations_dict = {"state_predictor": pred_dict["activation"]}
+        info_dict = {"seq_loss": pred_loss.item()}
+
+        return pred_loss, activations_dict, info_dict
