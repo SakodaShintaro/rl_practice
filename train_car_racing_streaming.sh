@@ -12,4 +12,3 @@ uv run python scripts/train.py baseline$suffix \
   --seq_len 8 \
   --batch_size 1 \
   --learning_rate 1e-5 \
-  --policy_type diffusion \
