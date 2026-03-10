@@ -10,4 +10,4 @@ uv run python scripts/train.py baseline$suffix \
   --network_class actor_critic_with_action_value \
   --step_limit 40_000 \
   --batch_size 16 \
-  --learning_rate 1e-4 \
+  --learning_rate 1e-5 \
