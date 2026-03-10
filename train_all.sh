@@ -30,7 +30,7 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
     --network_class $network_class \
     --step_limit $STEP_LIMIT \
     --batch_size 16 \
-    --learning_rate 1e-4 \
+    --learning_rate 1e-5 \
     --result_dir $RESULT_DIR \
     --wandb_group $WANDB_GROUP \
 
