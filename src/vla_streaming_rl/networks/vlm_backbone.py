@@ -49,6 +49,7 @@ def load_model(
             lora_alpha=8,
             lora_dropout=0.1,
             target_modules=[
+                # Language model
                 "down_proj",
                 "o_proj",
                 "k_proj",
@@ -56,6 +57,11 @@ def load_model(
                 "gate_proj",
                 "up_proj",
                 "v_proj",
+                # Vision encoder (attn.proj only, not patch_embed.proj)
+                "qkv",
+                r"attn\.proj",
+                "linear_fc1",
+                "linear_fc2",
             ],
             use_dora=True,
             init_lora_weights="gaussian",
