@@ -8,7 +8,7 @@ uv run python scripts/train.py qwenvl$suffix \
   --env_id CarRacing-v3 \
   --agent_type off_policy \
   --network_class vlm_actor_critic_with_action_value \
-  --step_limit 400_000 \
+  --step_limit 100_000 \
   --disable_state_predictor 0 \
   --batch_size 16 \
   --learning_rate 1e-5 \

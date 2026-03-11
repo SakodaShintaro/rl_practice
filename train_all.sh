@@ -19,7 +19,7 @@ fi
 git show -s > $RESULT_DIR/git_show.txt
 git diff > $RESULT_DIR/git_diff.txt
 
-STEP_LIMIT=40_000
+STEP_LIMIT=100_000
 
 for network_class in actor_critic_with_action_value vlm_actor_critic_with_action_value; do
 

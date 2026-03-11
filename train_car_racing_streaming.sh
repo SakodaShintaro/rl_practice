@@ -8,6 +8,6 @@ uv run python scripts/train.py baseline$suffix \
   --env_id CarRacing-v3 \
   --agent_type streaming \
   --network_class actor_critic_with_action_value \
-  --step_limit 80_000 \
+  --step_limit 100_000 \
   --batch_size 1 \
   --learning_rate 1e-5 \
