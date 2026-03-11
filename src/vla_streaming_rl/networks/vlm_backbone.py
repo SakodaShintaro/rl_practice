@@ -63,9 +63,6 @@ def load_model(
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
 
-    # Enable gradient checkpointing to reduce memory usage
-    model.gradient_checkpointing_enable()
-
     processor = AutoProcessor.from_pretrained(model_id, cache_dir="./cache", device_map=device)
 
     return model, processor
