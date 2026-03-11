@@ -270,15 +270,14 @@ class VLMActorCriticWithActionValue(nn.Module):
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
-        # Load VLM (frozen)
+        # Load VLM
         device = "cuda"
+        self.use_lora = bool(args.use_lora)
         self.vlm_model, self.processor = load_model(
             args.vlm_model_id,
-            use_lora=False,
+            use_lora=self.use_lora,
             device=device,
         )
-        self.vlm_model.requires_grad_(False)
-        self.vlm_model.gradient_checkpointing_enable()
         self.device = device
 
         # VLM config
@@ -314,7 +313,11 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # Action Expert
         expert_hidden = args.expert_hidden_size
-        rotary_emb = self.vlm_model.model.language_model.rotary_emb
+        # PEFT wraps the model with an extra .model level
+        if self.use_lora:
+            rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
+        else:
+            rotary_emb = self.vlm_model.model.language_model.rotary_emb
         self.action_expert = ActionExpert(
             num_layers=num_expert_layers,
             expert_hidden_size=expert_hidden,
@@ -523,25 +526,26 @@ class VLMActorCriticWithActionValue(nn.Module):
         state_dim = target_seq_len * self.state_out_proj.out_features
         return target_seq_len, state_dim
 
-    @torch.no_grad()
     def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
         """Run VLM forward and extract state + past_key_values (with RoPE)."""
         inputs = prepare_vlm_inputs(
             self.processor, images, rewards, self.task_prompt, self.is_qwen35
         )
 
-        # eval mode: bypass gradient checkpointing forcing use_cache=False
-        self.vlm_model.eval()
-        outputs = self.vlm_model.forward(
+        forward_kwargs = dict(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
-            pixel_values=inputs.get("pixel_values"),
-            image_grid_thw=inputs.get("image_grid_thw"),
+            pixel_values=inputs["pixel_values"],
+            image_grid_thw=inputs["image_grid_thw"],
             output_hidden_states=True,
             use_cache=True,
             return_dict=True,
         )
-        self.vlm_model.train()
+        if self.use_lora:
+            outputs = self.vlm_model.forward(**forward_kwargs)
+        else:
+            with torch.no_grad():
+                outputs = self.vlm_model.forward(**forward_kwargs)
 
         all_hidden_states = outputs.hidden_states
 

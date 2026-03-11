@@ -49,6 +49,7 @@ def load_model(
             lora_alpha=8,
             lora_dropout=0.1,
             target_modules=[
+                # Language model
                 "down_proj",
                 "o_proj",
                 "k_proj",
@@ -56,15 +57,17 @@ def load_model(
                 "gate_proj",
                 "up_proj",
                 "v_proj",
+                # Vision encoder (attn.proj only, not patch_embed.proj)
+                "qkv",
+                r"attn\.proj",
+                "linear_fc1",
+                "linear_fc2",
             ],
             use_dora=True,
             init_lora_weights="gaussian",
         )
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
-
-    # Enable gradient checkpointing to reduce memory usage
-    model.gradient_checkpointing_enable()
 
     processor = AutoProcessor.from_pretrained(model_id, cache_dir="./cache", device_map=device)
 
