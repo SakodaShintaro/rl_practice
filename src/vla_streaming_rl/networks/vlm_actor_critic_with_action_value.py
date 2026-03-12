@@ -309,6 +309,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         # State projection
         state_out_dim = 4
         self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
+        self.video_encoder = VideoEncoder()
         self._target_seq_len, state_dim = self._compute_state_dim()
         torch.cuda.empty_cache()
 
@@ -366,8 +367,6 @@ class VLMActorCriticWithActionValue(nn.Module):
                 num_bins=args.num_bins,
                 clamp_to_range=True,
             )
-
-        self.video_encoder = VideoEncoder()
 
         self._dummy_state = torch.zeros(1, 1, 1)
 
