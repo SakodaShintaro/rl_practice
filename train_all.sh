@@ -6,7 +6,7 @@ RESULT_DIR=$(readlink -f $RESULT_DIR)
 suffix=${2:-""}
 cd $(dirname $0)
 
-WANDB_GROUP="train_all_$(date +%Y%m%d_%H%M%S)"
+WANDB_GROUP="train_all_$(date +%Y%m%d_%H%M%S)$suffix"
 
 mkdir -p $RESULT_DIR
 
@@ -20,12 +20,13 @@ git show -s > $RESULT_DIR/git_show.txt
 git diff > $RESULT_DIR/git_diff.txt
 
 STEP_LIMIT=100_000
+ENV_ID=CarRacing-v3
 
 for network_class in actor_critic_with_action_value vlm_actor_critic_with_action_value; do
 
-  # Off-policy, batch size 16, learning rate 1e-4
+  # Off-policy, batch size 16, learning rate 1e-5
   uv run python scripts/train.py ${network_class}_off_policy_bs16$suffix \
-    --env_id CarRacing-v3 \
+    --env_id $ENV_ID \
     --agent_type off_policy \
     --network_class $network_class \
     --step_limit $STEP_LIMIT \
@@ -36,7 +37,7 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
 
   # Off-policy, batch size 1, learning rate 5e-6
   uv run python scripts/train.py ${network_class}_off_policy_bs1$suffix \
-    --env_id CarRacing-v3 \
+    --env_id $ENV_ID \
     --agent_type off_policy \
     --network_class $network_class \
     --step_limit $STEP_LIMIT \
@@ -47,7 +48,7 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
 
   # Streaming, without eligibility trace, learning rate 5e-6
   uv run python scripts/train.py ${network_class}_streaming$suffix \
-    --env_id CarRacing-v3 \
+    --env_id $ENV_ID \
     --agent_type streaming \
     --network_class $network_class \
     --step_limit $STEP_LIMIT \
@@ -58,7 +59,7 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
 
   # Streaming, with eligibility trace, learning rate 5e-6
   uv run python scripts/train.py ${network_class}_streaming_et$suffix \
-    --env_id CarRacing-v3 \
+    --env_id $ENV_ID \
     --agent_type streaming \
     --network_class $network_class \
     --step_limit $STEP_LIMIT \

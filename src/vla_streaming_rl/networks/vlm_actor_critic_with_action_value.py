@@ -13,6 +13,7 @@ from .image_processor import ImageProcessor
 from .prediction_head import StatePredictionHead
 from .reward_processor import RewardProcessor
 from .value_head import ActionValueHead, maybe_update_hl_gauss_range
+from .video_encoder import VideoEncoder
 from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
 
 
@@ -737,6 +738,92 @@ class VLMActorCriticWithActionValue(nn.Module):
     # Internal methods #
     ####################
 
+    @torch.no_grad()
+    def _compute_state_dim(self) -> tuple[int, int]:
+        """Compute target sequence length and state dimension via dummy forward pass."""
+        dummy_images = torch.zeros(
+            1, self.seq_len, *self.observation_space_shape, device=self.device
+        )
+        dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
+        inputs = prepare_vlm_inputs(
+            self.processor, dummy_images, dummy_rewards, self.task_prompt, self.is_qwen35
+        )
+        inputs_embeds = self._build_inputs_embeds(inputs)
+        output = self._vlm_language_forward(inputs, inputs_embeds)
+        hidden = output["hidden_states"][self.target_layer_idx]
+        target_seq_len = hidden.shape[1]
+        state_dim = target_seq_len * self.state_out_proj.out_features
+        return target_seq_len, state_dim
+
+    def _get_visual(self) -> nn.Module:
+        """Get the visual encoder from the VLM model (handles PEFT wrapping)."""
+        if self.use_lora:
+            return self.vlm_model.model.model.visual
+        return self.vlm_model.model.visual
+
+    def _get_vlm_model_inner(self) -> nn.Module:
+        """Get the inner Qwen3_5Model (handles PEFT wrapping)."""
+        if self.use_lora:
+            return self.vlm_model.model.model
+        return self.vlm_model.model
+
+    def _build_inputs_embeds(self, inputs: dict) -> torch.Tensor:
+        """Build inputs_embeds by running video encoder on all frames and injecting last-frame embeddings.
+
+        1. Embed input_ids to get inputs_embeds (with <image_pad> as placeholder)
+        2. Run all frames through ViT → extract last frame embeddings
+        3. masked_scatter last-frame embeddings into <image_pad> positions
+        """
+        vlm_inner = self._get_vlm_model_inner()
+        inputs_embeds = vlm_inner.get_input_embeddings()(inputs["input_ids"])
+
+        batch_size = inputs["input_ids"].shape[0]
+        seq_len = inputs["seq_len"]
+
+        # Run video encoder: all frames through ViT, keep last frame
+        last_frame_embeds = self.video_encoder(
+            self._get_visual(),
+            inputs["all_pixel_values"],
+            inputs["all_image_grid_thw"],
+            batch_size,
+            seq_len,
+        )
+        last_frame_embeds = last_frame_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+
+        # masked_scatter into <image_pad> positions
+        image_token_id = vlm_inner.config.image_token_id
+        image_mask = (inputs["input_ids"] == image_token_id).unsqueeze(-1).expand_as(inputs_embeds)
+        inputs_embeds = inputs_embeds.masked_scatter(image_mask, last_frame_embeds)
+
+        return inputs_embeds
+
+    def _vlm_language_forward(self, inputs: dict, inputs_embeds: torch.Tensor):
+        """Run the VLM language model with pre-built inputs_embeds (no pixel_values)."""
+        vlm_inner = self._get_vlm_model_inner()
+
+        # Compute 3D position_ids (needed for image token positions)
+        position_ids = vlm_inner.compute_3d_position_ids(
+            input_ids=inputs["input_ids"],
+            image_grid_thw=inputs["image_grid_thw"],
+            video_grid_thw=None,
+            inputs_embeds=inputs_embeds,
+            attention_mask=inputs["attention_mask"],
+            past_key_values=None,
+        )
+
+        forward_kwargs = dict(
+            input_ids=None,
+            inputs_embeds=inputs_embeds,
+            position_ids=position_ids,
+            attention_mask=inputs["attention_mask"],
+            output_hidden_states=True,
+            use_cache=True,
+            return_dict=True,
+        )
+
+        # language_model forward via the outer model (handles lm_head, cache wrapping)
+        return self.vlm_model.forward(**forward_kwargs)
+
     def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
         """Run VLM forward and extract activation cache + past_key_values.
 
@@ -749,20 +836,13 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.processor, images, rewards, self.task_prompt, self.is_qwen35
         )
 
-        forward_kwargs = dict(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            pixel_values=inputs["pixel_values"],
-            image_grid_thw=inputs["image_grid_thw"],
-            output_hidden_states=True,
-            use_cache=True,
-            return_dict=True,
-        )
+        inputs_embeds = self._build_inputs_embeds(inputs)
+
         if self.use_lora:
-            outputs = self.vlm_model.forward(**forward_kwargs)
+            outputs = self._vlm_language_forward(inputs, inputs_embeds)
         else:
             with torch.no_grad():
-                outputs = self.vlm_model.forward(**forward_kwargs)
+                outputs = self._vlm_language_forward(inputs, inputs_embeds)
 
         all_hidden_states = outputs.hidden_states
 
