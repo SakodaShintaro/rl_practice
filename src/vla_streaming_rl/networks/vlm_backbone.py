@@ -74,6 +74,15 @@ def load_model(
     return model, processor
 
 
+def _images_to_pil(images: torch.Tensor) -> list[Image.Image]:
+    """Convert (N, C, H, W) float tensor in [0,1] to list of PIL Images."""
+    result = []
+    for i in range(images.shape[0]):
+        img_np = (images[i].to(torch.float32).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        result.append(Image.fromarray(img_np))
+    return result
+
+
 def prepare_vlm_inputs(
     processor: AutoProcessor,
     images: torch.Tensor,
@@ -83,6 +92,10 @@ def prepare_vlm_inputs(
 ) -> dict[str, torch.Tensor]:
     """Build VLM messages and prepare model inputs.
 
+    Only the last frame is placed as <image> in the prompt (64 LLM tokens).
+    All frames' pixel_values are returned under "all_pixel_values" / "all_image_grid_thw"
+    so a video encoder can process them externally and inject only the last-frame embedding.
+
     Args:
         processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
@@ -91,45 +104,64 @@ def prepare_vlm_inputs(
         is_qwen35: Whether the model is Qwen3.5
 
     Returns:
-        Dictionary of model inputs
+        Dictionary of model inputs. Extra keys:
+            all_pixel_values: pixel_values for all B*T frames
+            all_image_grid_thw: grid_thw for all B*T frames
+            seq_len: number of frames T
     """
     device = images.device
     batch_size, seq_len = images.shape[:2]
+
+    # --- Build prompt with only the LAST frame as <image> ---
     messages = []
     for b in range(batch_size):
         content: list[dict] = []
         if task_prompt:
             content.append({"type": "text", "text": task_prompt})
-        for t in range(seq_len):
-            img_tensor = images[b, t].to(torch.float32)
-            img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
-            img_np = (img_np * 255).astype(np.uint8)
-            content.append({"type": "image", "image": Image.fromarray(img_np)})
-            reward_text = f"reward {float(rewards[b, t, 0]):.2f}"
-            content.append({"type": "text", "text": reward_text})
+        # Past rewards as text only (no image)
+        for t in range(seq_len - 1):
+            content.append({"type": "text", "text": f"reward {float(rewards[b, t, 0]):.2f}"})
+        # Last frame: image + reward
+        last_img = images[b, seq_len - 1].to(torch.float32)
+        last_img_np = (last_img.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        content.append({"type": "image", "image": Image.fromarray(last_img_np)})
+        content.append({"type": "text", "text": f"reward {float(rewards[b, seq_len - 1, 0]):.2f}"})
         messages.append([{"role": "user", "content": content}])
 
-    text = processor.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     if is_qwen35:
-        proc_images, _ = process_vision_info(messages)
+        last_proc_images, _ = process_vision_info(messages)
     else:
-        proc_images, _ = process_vision_info(messages, image_patch_size=16)
+        last_proc_images, _ = process_vision_info(messages, image_patch_size=16)
 
-    inputs = processor(
-        text=text,
-        images=proc_images,
-        return_tensors="pt",
-        padding=True,
+    inputs = processor(text=text, images=last_proc_images, return_tensors="pt", padding=True)
+    inputs.pop("token_type_ids", None)
+
+    # --- Process ALL frames to get pixel_values for video encoder ---
+    all_pil = _images_to_pil(images.reshape(-1, *images.shape[2:]))  # B*T images
+    all_messages = [
+        [{"role": "user", "content": [{"type": "image", "image": img}]}] for img in all_pil
+    ]
+    if is_qwen35:
+        all_proc_images, _ = process_vision_info(all_messages)
+    else:
+        all_proc_images, _ = process_vision_info(all_messages, image_patch_size=16)
+
+    all_inputs = processor(
+        text=["x"] * len(all_pil), images=all_proc_images, return_tensors="pt", padding=True
     )
 
-    inputs.pop("token_type_ids", None)
+    inputs["all_pixel_values"] = all_inputs["pixel_values"]
+    inputs["all_image_grid_thw"] = all_inputs["image_grid_thw"]
+    inputs["seq_len"] = seq_len
+
     inputs = {
-        k: v.to(device).to(torch.bfloat16) if v.dtype.is_floating_point else v.to(device)
+        k: v.to(device).to(torch.bfloat16)
+        if isinstance(v, torch.Tensor) and v.dtype.is_floating_point
+        else v.to(device)
+        if isinstance(v, torch.Tensor)
+        else v
         for k, v in inputs.items()
     }
     return inputs
