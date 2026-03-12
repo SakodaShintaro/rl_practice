@@ -24,7 +24,7 @@ ENV_ID=CarRacing-v3
 
 for network_class in actor_critic_with_action_value vlm_actor_critic_with_action_value; do
 
-  # Off-policy, batch size 16, learning rate 1e-4
+  # Off-policy, batch size 16, learning rate 1e-5
   uv run python scripts/train.py ${network_class}_off_policy_bs16$suffix \
     --env_id $ENV_ID \
     --agent_type off_policy \
