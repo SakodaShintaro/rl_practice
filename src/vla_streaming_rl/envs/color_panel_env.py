@@ -7,6 +7,7 @@ Click the correct color -> reward +1, wrong -> reward -0.01
 """
 
 import random
+import re
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -91,8 +92,12 @@ class ColorPanelEnv(BaseGUIEnv):
                         reward = -0.01
 
                 self.current_score = reward
-                self.state = STATE_SHOW_SCORE
-                self.state_timer = 0
+                if self.render_mode == "human":
+                    self.state = STATE_SHOW_SCORE
+                    self.state_timer = 0
+                else:
+                    random.shuffle(self.color_assignment)
+                    self.correct_color_idx = random.randint(0, 3)
 
         observation = self._get_observation()
         truncated = self.step_count >= 200
@@ -101,6 +106,39 @@ class ColorPanelEnv(BaseGUIEnv):
             self._render_human(observation)
 
         return observation, reward, False, truncated, {}
+
+    def get_task_prompt(self) -> str:
+        """Return current color instruction as a text prompt for VLM."""
+        target_name = COLOR_NAMES[self.correct_color_idx]
+        return f"Click the {target_name} quadrant."
+
+    @staticmethod
+    def get_action_prompt(horizon: int) -> str:
+        base = (
+            "You see a 2x2 grid of colored quadrants (RED, GREEN, YELLOW, BLUE). "
+            "Move the cursor to the instructed color and click it. "
+            "Action space: dx [-1, +1] horizontal cursor movement; dy [-1, +1] vertical cursor movement; click [0, 1] where 1 triggers a click. "
+        )
+        example_actions = "; ".join(
+            [f"t{i}: dx=0.00, dy=0.00, click=0" for i in range(horizon)]
+        )
+        return (
+            base
+            + f"Respond with {horizon} sequential actions in format: 'Actions: {example_actions}'"
+        )
+
+    @staticmethod
+    def parse_action_text(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
+        action_array = np.zeros((horizon, 3), dtype=np.float32)
+        pattern = r"(?:t\d+:\s*)?dx=([+-]?\d*\.?\d+),\s*dy=([+-]?\d*\.?\d+),\s*click=([+-]?\d*\.?\d+)"
+        matches = re.findall(pattern, action_text)
+        parsed_count = min(len(matches), horizon)
+        success = parsed_count == horizon
+        for i in range(parsed_count):
+            action_array[i, 0] = np.clip(float(matches[i][0]), -1.0, 1.0)
+            action_array[i, 1] = np.clip(float(matches[i][1]), -1.0, 1.0)
+            action_array[i, 2] = np.clip(float(matches[i][2]), 0.0, 1.0)
+        return action_array, success
 
     def _get_observation(self):
         return self._render_frame()

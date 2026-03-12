@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from torch import optim
 
+from typing import Callable
+
 from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from vla_streaming_rl.networks.vlm_actor_critic_with_action_value import (
     VLMActorCriticWithActionValue,
@@ -81,6 +83,7 @@ class OffPolicyAgent:
 
         # Initialize gradient norm targets
 
+        self.get_task_prompt: Callable[[], str] | None = args.get_task_prompt
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
     @torch.inference_mode()
@@ -106,6 +109,9 @@ class OffPolicyAgent:
         obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
         normalized_action = (self.prev_action - self.action_bias) / self.action_scale
+        task_prompt = ""
+        if self.get_task_prompt is not None:
+            task_prompt = self.get_task_prompt()
         self.rb.add(
             obs_tensor,
             obs_z,
@@ -116,6 +122,7 @@ class OffPolicyAgent:
             0.0,
             0.0,
             [],
+            task_prompt,
         )
 
         # Use cached action from chunk if available (except during random exploration)

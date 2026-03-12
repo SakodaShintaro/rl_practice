@@ -29,6 +29,7 @@ class ReplayBufferData:
     log_probs: torch.Tensor  # (B, T)
     values: torch.Tensor  # (B, T)
     action_token_ids: torch.Tensor  # (B, T, max_new_tokens)
+    task_prompts: list[list[str]]  # (B, T) - task prompt strings per timestep
 
 
 class ReplayBuffer:
@@ -76,6 +77,7 @@ class ReplayBuffer:
             dtype=torch.long,
             device=self.storage_device,
         )
+        self.task_prompts: list[str] = [""] * size
 
         self.idx = 0
         self.full = False
@@ -100,6 +102,7 @@ class ReplayBuffer:
             self.log_probs[:curr_size].to(self.output_device, non_blocking=True),
             self.values[:curr_size].to(self.output_device, non_blocking=True),
             self.action_token_ids[:curr_size].to(self.output_device, non_blocking=True),
+            [self.task_prompts[i : i + 1] for i in range(curr_size)],
         )
 
     def add(
@@ -113,6 +116,7 @@ class ReplayBuffer:
         log_prob: float,
         value: float,
         action_token_ids: list[int],
+        task_prompt: str,
     ) -> None:
         # Copy tensors to buffer storage
         self.observations[self.idx].copy_(obs.reshape(self.observations[self.idx].shape))
@@ -129,6 +133,7 @@ class ReplayBuffer:
         self.action_token_ids[self.idx, :token_len] = torch.tensor(
             action_token_ids[:token_len], dtype=torch.long, device=self.storage_device
         )
+        self.task_prompts[self.idx] = task_prompt
 
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
@@ -148,6 +153,11 @@ class ReplayBuffer:
         )
 
         # Vectorized slicing - much faster than loop + append
+        # task_prompts: list[list[str]] of shape (batch_size, seq_len)
+        task_prompts_batch = [
+            [self.task_prompts[seq_indices[b, t].item()] for t in range(self.seq_len)]
+            for b in range(batch_size)
+        ]
         return ReplayBufferData(
             self.observations[seq_indices].to(self.output_device, non_blocking=True),
             self.obs_z[seq_indices].to(self.output_device, non_blocking=True),
@@ -158,6 +168,7 @@ class ReplayBuffer:
             self.log_probs[seq_indices].to(self.output_device, non_blocking=True),
             self.values[seq_indices].to(self.output_device, non_blocking=True),
             self.action_token_ids[seq_indices].to(self.output_device, non_blocking=True),
+            task_prompts_batch,
         )
 
     def get_latest(self, seq_len: int) -> ReplayBufferData:
@@ -167,6 +178,7 @@ class ReplayBuffer:
         ) % self.size
 
         # Vectorized slicing
+        task_prompts_seq = [self.task_prompts[indices[t].item()] for t in range(seq_len)]
         return ReplayBufferData(
             self.observations[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
             self.obs_z[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
@@ -177,4 +189,5 @@ class ReplayBuffer:
             self.log_probs[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
             self.values[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
             self.action_token_ids[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            [task_prompts_seq],
         )

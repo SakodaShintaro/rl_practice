@@ -290,6 +290,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
+        self.get_task_prompt = args.get_task_prompt
         self.task_prompt = ""
         self.parse_action_text = args.parse_action_text
         self.text_action_prompt = args.get_action_prompt(args.horizon)
@@ -405,8 +406,14 @@ class VLMActorCriticWithActionValue(nn.Module):
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
+        # Extract task_prompts for the next-Q and current observations
+        next_prompts = [tp[-1] for tp in data.task_prompts]
+        curr_prompts = [tp[-self.horizon - 1] for tp in data.task_prompts]
+
         _, _, next_q = self._infer(
-            data.observations[:, self.horizon :], data.rewards[:, self.horizon :]
+            data.observations[:, self.horizon :],
+            data.rewards[:, self.horizon :],
+            task_prompt=next_prompts,
         )
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
@@ -414,7 +421,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         curr_obs = data.observations[:, : -self.horizon]
         curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards)
+        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards, task_prompt=curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -441,8 +448,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
+        next_prompts = [tp[-1] for tp in data.task_prompts]
+        curr_prompts = [tp[-self.horizon - 1] for tp in data.task_prompts]
+
         _, next_action, next_q = self._infer(
-            data.observations[:, self.horizon :], data.rewards[:, self.horizon :]
+            data.observations[:, self.horizon :],
+            data.rewards[:, self.horizon :],
+            task_prompt=next_prompts,
         )
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
@@ -450,7 +462,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         curr_obs = data.observations[:, : -self.horizon]
         curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards)
+        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards, task_prompt=curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -519,8 +531,11 @@ class VLMActorCriticWithActionValue(nn.Module):
             1, self.seq_len, *self.observation_space_shape, device=self.device
         )
         dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
+        task_prompt = self.task_prompt
+        if self.get_task_prompt is not None:
+            task_prompt = self.get_task_prompt()
         inputs = prepare_vlm_inputs(
-            self.processor, dummy_images, dummy_rewards, self.task_prompt, self.is_qwen35
+            self.processor, dummy_images, dummy_rewards, task_prompt, self.is_qwen35
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
         output = self._vlm_language_forward(inputs, inputs_embeds)
@@ -598,10 +613,20 @@ class VLMActorCriticWithActionValue(nn.Module):
         # language_model forward via the outer model (handles lm_head, cache wrapping)
         return self.vlm_model.forward(**forward_kwargs)
 
-    def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
+    def _vlm_forward(
+        self,
+        images: torch.Tensor,
+        rewards: torch.Tensor,
+        task_prompt: str | list[str] | None = None,
+    ):
         """Run VLM forward and extract state + past_key_values (with RoPE)."""
+        if task_prompt is None:
+            if self.get_task_prompt is not None:
+                task_prompt = self.get_task_prompt()
+            else:
+                task_prompt = self.task_prompt
         inputs = prepare_vlm_inputs(
-            self.processor, images, rewards, self.task_prompt, self.is_qwen35
+            self.processor, images, rewards, task_prompt, self.is_qwen35
         )
 
         inputs_embeds = self._build_inputs_embeds(inputs)
@@ -728,9 +753,12 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     @torch.inference_mode()
     def _infer(
-        self, obs: torch.Tensor, rewards: torch.Tensor
+        self,
+        obs: torch.Tensor,
+        rewards: torch.Tensor,
+        task_prompt: str | list[str] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        state, vlm_past_kv = self._vlm_forward(obs, rewards)
+        state, vlm_past_kv = self._vlm_forward(obs, rewards, task_prompt=task_prompt)
         B = obs.shape[0]
         mode = self.text_action_mode
 

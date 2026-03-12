@@ -135,6 +135,7 @@ class StreamingAgent:
             0.0,
             0.0,
             self.prev_action_token_ids,
+            "",
         )
 
     def _use_action_chunk(self, info_dict: dict) -> np.ndarray:

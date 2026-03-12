@@ -153,6 +153,7 @@ class OnPolicyAgent:
             self.prev_logp,
             self.prev_value,
             self.prev_action_token_ids,
+            "",
         )
 
         # Use cached action from chunk if available

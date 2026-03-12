@@ -258,6 +258,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
     args.get_action_prompt = getattr(env.unwrapped, "get_action_prompt", None)
     args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
+    args.get_task_prompt = getattr(env.unwrapped, "get_task_prompt", None)
 
     start_time = time.time()
 

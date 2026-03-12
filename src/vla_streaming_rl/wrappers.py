@@ -108,6 +108,8 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.get_action_prompt = ColorPanelEnv.get_action_prompt
+        env.unwrapped.parse_action_text = ColorPanelEnv.parse_action_text
         return env
 
     elif env_id == "MovingCircle-v0":

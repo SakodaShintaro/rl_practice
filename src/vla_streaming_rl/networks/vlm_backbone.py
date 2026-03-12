@@ -87,7 +87,7 @@ def prepare_vlm_inputs(
     processor: AutoProcessor,
     images: torch.Tensor,
     rewards: torch.Tensor,
-    task_prompt: str,
+    task_prompt: str | list[str],
     is_qwen35: bool,
 ) -> dict[str, torch.Tensor]:
     """Build VLM messages and prepare model inputs.
@@ -100,7 +100,7 @@ def prepare_vlm_inputs(
         processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
         rewards: (B, T, 1) tensor
-        task_prompt: Task prompt string (can be empty)
+        task_prompt: Task prompt string or list of strings per batch element (can be empty)
         is_qwen35: Whether the model is Qwen3.5
 
     Returns:
@@ -112,12 +112,18 @@ def prepare_vlm_inputs(
     device = images.device
     batch_size, seq_len = images.shape[:2]
 
+    # Normalize task_prompt to list[str]
+    if isinstance(task_prompt, str):
+        task_prompt_list = [task_prompt] * batch_size
+    else:
+        task_prompt_list = task_prompt
+
     # --- Build prompt with only the LAST frame as <image> ---
     messages = []
     for b in range(batch_size):
         content: list[dict] = []
-        if task_prompt:
-            content.append({"type": "text", "text": task_prompt})
+        if task_prompt_list[b]:
+            content.append({"type": "text", "text": task_prompt_list[b]})
         # Past rewards as text only (no image)
         for t in range(seq_len - 1):
             content.append({"type": "text", "text": f"reward {float(rewards[b, t, 0]):.2f}"})
