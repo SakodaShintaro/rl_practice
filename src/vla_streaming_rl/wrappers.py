@@ -18,7 +18,7 @@ REPEAT = 4
 def _color_panel_action_prompt(horizon: int) -> str:
     return (
         "Color Panel game. "
-        "State the target color, cursor quadrant, and action "
+        "State the target color and its quadrant, cursor quadrant, and action "
         "(e.g. move left, move right, move up, move down, click). Be brief."
     )
 
