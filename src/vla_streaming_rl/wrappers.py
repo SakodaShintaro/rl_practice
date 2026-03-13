@@ -15,6 +15,30 @@ from vla_streaming_rl.envs.moving_circle_env import MovingCircleEnv
 REPEAT = 4
 
 
+def _color_panel_action_prompt(horizon: int) -> str:
+    base = (
+        "You see a 2x2 grid of colored quadrants (RED, GREEN, YELLOW, BLUE) with a text instruction 'Click <COLOR>'. "
+        "Move the crosshair cursor to the correct color and click it. "
+        "Action space: dx [-1, +1] horizontal movement, dy [-1, +1] vertical movement, button [-1, +1] where >0.5 is click."
+    )
+    return base
+
+
+def _color_panel_parse_action(
+    action_text: str, horizon: int
+) -> tuple[np.ndarray, bool]:
+    action_array = np.zeros((horizon, 3), dtype=np.float32)
+    pattern = r"(?:t\d+:\s*)?dx=([+-]?\d*\.?\d+),\s*dy=([+-]?\d*\.?\d+),\s*button=([+-]?\d*\.?\d+)"
+    matches = re.findall(pattern, action_text)
+    parsed_count = min(len(matches), horizon)
+    success = parsed_count == horizon
+    for i in range(parsed_count):
+        action_array[i, 0] = np.clip(float(matches[i][0]), -1.0, 1.0)
+        action_array[i, 1] = np.clip(float(matches[i][1]), -1.0, 1.0)
+        action_array[i, 2] = np.clip(float(matches[i][2]), -1.0, 1.0)
+    return action_array, success
+
+
 def _car_racing_action_prompt(horizon: int) -> str:
     base = (
         "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
@@ -108,6 +132,8 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.get_action_prompt = _color_panel_action_prompt
+        env.unwrapped.parse_action_text = _color_panel_parse_action
         return env
 
     elif env_id == "MovingCircle-v0":
