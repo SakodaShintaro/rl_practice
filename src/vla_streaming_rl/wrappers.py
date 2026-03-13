@@ -16,12 +16,11 @@ REPEAT = 4
 
 
 def _color_panel_action_prompt(horizon: int) -> str:
-    base = (
-        "You see a 2x2 grid of colored quadrants (RED, GREEN, YELLOW, BLUE) with a text instruction 'Click <COLOR>'. "
-        "Move the crosshair cursor to the correct color and click it. "
-        "Action space: dx [-1, +1] horizontal movement, dy [-1, +1] vertical movement, button [-1, +1] where >0.5 is click."
+    return (
+        "Color Panel game. "
+        "State the target color, cursor quadrant, and action "
+        "(e.g. move left, move right, move up, move down, click). Be brief."
     )
-    return base
 
 
 def _color_panel_parse_action(
