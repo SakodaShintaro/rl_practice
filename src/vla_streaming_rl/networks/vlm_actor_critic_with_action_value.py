@@ -290,10 +290,11 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        self.task_prompt = ""
+        action_prompt = args.get_action_prompt(args.horizon) if args.get_action_prompt else ""
+        self.task_prompt = action_prompt if args.text_action_mode != "none" else ""
         self.parse_action_text = args.parse_action_text
-        self.text_action_prompt = args.get_action_prompt(args.horizon)
-        self.high_level_prompt = args.get_action_prompt(args.horizon)
+        self.text_action_prompt = action_prompt
+        self.high_level_prompt = action_prompt
         self.max_new_tokens = args.max_new_tokens
 
         # Determine which VLM layers have KV cache for cross-attention
@@ -382,7 +383,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         r_seq: torch.Tensor,
         rnn_state: torch.Tensor,
     ) -> dict:
-        state, action, q_value = self._infer(s_seq, r_seq)
+        state, action, q_value = self._infer(s_seq)
 
         next_image, next_reward = self.prediction_head.predict_next_state(
             self._state_for_predictor(state),
@@ -405,16 +406,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
-        _, _, next_q = self._infer(
-            data.observations[:, self.horizon :], data.rewards[:, self.horizon :]
-        )
+        _, _, next_q = self._infer(data.observations[:, self.horizon :])
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards)
+        state, vlm_past_kv = self._vlm_forward(curr_obs)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -441,16 +439,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        _, next_action, next_q = self._infer(
-            data.observations[:, self.horizon :], data.rewards[:, self.horizon :]
-        )
+        _, next_action, next_q = self._infer(data.observations[:, self.horizon :])
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        curr_rewards = data.rewards[:, : -self.horizon]
-        state, vlm_past_kv = self._vlm_forward(curr_obs, curr_rewards)
+        state, vlm_past_kv = self._vlm_forward(curr_obs)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -518,9 +513,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         dummy_images = torch.zeros(
             1, self.seq_len, *self.observation_space_shape, device=self.device
         )
-        dummy_rewards = torch.zeros(1, self.seq_len, 1, device=self.device)
         inputs = prepare_vlm_inputs(
-            self.processor, dummy_images, dummy_rewards, self.task_prompt, self.is_qwen35
+            self.processor, dummy_images, self.task_prompt, self.is_qwen35,
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
         output = self._vlm_language_forward(inputs, inputs_embeds)
@@ -598,10 +592,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         # language_model forward via the outer model (handles lm_head, cache wrapping)
         return self.vlm_model.forward(**forward_kwargs)
 
-    def _vlm_forward(self, images: torch.Tensor, rewards: torch.Tensor):
+    def _vlm_forward(self, images: torch.Tensor):
         """Run VLM forward and extract state + past_key_values (with RoPE)."""
         inputs = prepare_vlm_inputs(
-            self.processor, images, rewards, self.task_prompt, self.is_qwen35
+            self.processor, images, self.task_prompt, self.is_qwen35,
         )
 
         inputs_embeds = self._build_inputs_embeds(inputs)
@@ -626,6 +620,9 @@ class VLMActorCriticWithActionValue(nn.Module):
             )
             state = torch.cat([pad, state], dim=1)
         state = state.flatten(start_dim=1)  # (B, state_dim)
+
+        # Store last input_id for text generation seeding
+        self._last_input_ids = inputs["input_ids"]
 
         return state, outputs.past_key_values
 
@@ -679,10 +676,26 @@ class VLMActorCriticWithActionValue(nn.Module):
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
-        """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache)."""
+        """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache).
+
+        When prompt is empty, generation continues directly from the KV cache
+        (which already includes the generation prompt from apply_chat_template).
+        """
         tokenizer = self.processor.tokenizer
-        prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
         _, kv_len = self._extract_kv(vlm_past_kv)
+
+        if prompt:
+            prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+        else:
+            # KV cache already contains everything including generation prompt.
+            # generate() needs at least 1 token as seed — use the last token
+            # from the original input (already cached, position kv_len-1).
+            # We set cache_position to kv_len-1 so the KV entry is overwritten
+            # with the same value (effectively a no-op).
+            last_token = self._last_input_ids[:, -1:].to(self.device)
+            prompt_ids = last_token
+            kv_len = kv_len - 1  # adjust so cache_position = [kv_len-1]
+
         attn_mask = torch.ones(1, kv_len + prompt_ids.shape[1], device=self.device)
         cache_position = torch.arange(
             kv_len, kv_len + prompt_ids.shape[1], device=self.device
@@ -706,9 +719,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         self.vlm_model.train()
 
+        # Skip the seed token(s) to get only newly generated tokens
         generated_ids = outputs.sequences[0, prompt_ids.shape[1] :].tolist()
         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        self.vlm_model.train()
 
         return generated_text, outputs.past_key_values
 
@@ -720,9 +733,9 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     @torch.inference_mode()
     def _infer(
-        self, obs: torch.Tensor, rewards: torch.Tensor
+        self, obs: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        state, vlm_past_kv = self._vlm_forward(obs, rewards)
+        state, vlm_past_kv = self._vlm_forward(obs)
         B = obs.shape[0]
         mode = self.text_action_mode
 
@@ -730,12 +743,12 @@ class VLMActorCriticWithActionValue(nn.Module):
             action_kv = vlm_past_kv
         elif mode == "high_level":
             generated_text, action_kv = self._generate_text_and_extend_kv(
-                self.high_level_prompt, vlm_past_kv, max_new_tokens=35
+                "", vlm_past_kv, max_new_tokens=30
             )
             print(f"[HighLevel] {generated_text}")
         elif mode == "text_action":
             generated_text, action_kv = self._generate_text_and_extend_kv(
-                self.text_action_prompt, vlm_past_kv, max_new_tokens=self.max_new_tokens
+                "", vlm_past_kv, max_new_tokens=self.max_new_tokens
             )
             print(f"[TextAction] {generated_text}")
         elif mode == "pi_fast":

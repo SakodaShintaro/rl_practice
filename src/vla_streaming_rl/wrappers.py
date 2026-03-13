@@ -17,9 +17,8 @@ REPEAT = 4
 
 def _color_panel_action_prompt(horizon: int) -> str:
     return (
-        "Color Panel game. "
-        "State the target color and its quadrant, cursor quadrant, and action "
-        "(e.g. move left, move right, move up, move down, click). Be brief."
+        "Read the text instruction in the image and name the 4 quadrant colors. "
+        "Format: instruction=text TL=color TR=color BL=color BR=color"
     )
 
 

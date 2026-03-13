@@ -86,7 +86,6 @@ def _images_to_pil(images: torch.Tensor) -> list[Image.Image]:
 def prepare_vlm_inputs(
     processor: AutoProcessor,
     images: torch.Tensor,
-    rewards: torch.Tensor,
     task_prompt: str,
     is_qwen35: bool,
 ) -> dict[str, torch.Tensor]:
@@ -99,7 +98,6 @@ def prepare_vlm_inputs(
     Args:
         processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
-        rewards: (B, T, 1) tensor
         task_prompt: Task prompt string (can be empty)
         is_qwen35: Whether the model is Qwen3.5
 
@@ -118,14 +116,10 @@ def prepare_vlm_inputs(
         content: list[dict] = []
         if task_prompt:
             content.append({"type": "text", "text": task_prompt})
-        # Past rewards as text only (no image)
-        for t in range(seq_len - 1):
-            content.append({"type": "text", "text": f"reward {float(rewards[b, t, 0]):.2f}"})
-        # Last frame: image + reward
+        # Last frame as image
         last_img = images[b, seq_len - 1].to(torch.float32)
         last_img_np = (last_img.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
         content.append({"type": "image", "image": Image.fromarray(last_img_np)})
-        content.append({"type": "text", "text": f"reward {float(rewards[b, seq_len - 1, 0]):.2f}"})
         messages.append([{"role": "user", "content": content}])
 
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
