@@ -293,7 +293,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.task_prompt = ""
         self.parse_action_text = args.parse_action_text
         self.text_action_prompt = args.get_action_prompt(args.horizon)
-        self.high_level_prompt = "Choose one action: Turn left, Go straight, Turn right. Answer:"
+        self.high_level_prompt = args.get_action_prompt(args.horizon)
         self.max_new_tokens = args.max_new_tokens
 
         # Determine which VLM layers have KV cache for cross-attention
@@ -684,6 +684,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
         _, kv_len = self._extract_kv(vlm_past_kv)
         attn_mask = torch.ones(1, kv_len + prompt_ids.shape[1], device=self.device)
+        cache_position = torch.arange(
+            kv_len, kv_len + prompt_ids.shape[1], device=self.device
+        )
 
         pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
         eos_token_id = tokenizer.eos_token_id
@@ -693,6 +696,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             input_ids=prompt_ids,
             attention_mask=attn_mask,
             past_key_values=vlm_past_kv,
+            cache_position=cache_position,
             max_new_tokens=max_new_tokens,
             num_beams=1,
             do_sample=False,
@@ -704,21 +708,9 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         generated_ids = outputs.sequences[0, prompt_ids.shape[1] :].tolist()
         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-        # Re-run forward to get past_key_values covering the full sequence (prompt + generated)
-        full_ids = outputs.sequences
-        full_attn_mask = torch.ones(1, kv_len + full_ids.shape[1], device=self.device)
-        self.vlm_model.eval()
-        full_outputs = self.vlm_model.forward(
-            input_ids=full_ids,
-            attention_mask=full_attn_mask,
-            past_key_values=vlm_past_kv,
-            use_cache=True,
-            return_dict=True,
-        )
         self.vlm_model.train()
 
-        return generated_text, full_outputs.past_key_values
+        return generated_text, outputs.past_key_values
 
     def _compute_q(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Compute scalar Q-value for a (state, action) pair."""
@@ -738,7 +730,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             action_kv = vlm_past_kv
         elif mode == "high_level":
             generated_text, action_kv = self._generate_text_and_extend_kv(
-                self.high_level_prompt, vlm_past_kv, max_new_tokens=8
+                self.high_level_prompt, vlm_past_kv, max_new_tokens=35
             )
             print(f"[HighLevel] {generated_text}")
         elif mode == "text_action":
