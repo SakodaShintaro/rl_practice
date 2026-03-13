@@ -45,7 +45,7 @@ class ColorPanelEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        self.score_duration = 3
+        self.score_duration = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -91,8 +91,12 @@ class ColorPanelEnv(BaseGUIEnv):
                         reward = -0.01
 
                 self.current_score = reward
-                self.state = STATE_SHOW_SCORE
-                self.state_timer = 0
+                if self.render_mode == "human":
+                    self.state = STATE_SHOW_SCORE
+                    self.state_timer = 0
+                else:
+                    random.shuffle(self.color_assignment)
+                    self.correct_color_idx = random.randint(0, 3)
 
         observation = self._get_observation()
         truncated = self.step_count >= 200
