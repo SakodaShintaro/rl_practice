@@ -13,3 +13,4 @@ uv run python scripts/train.py baseline$suffix \
   --learning_rate 1e-5 \
   --use_done 0 \
   --disable_state_predictor 1 \
+  --text_action_mode high_level \
