@@ -676,54 +676,82 @@ class VLMActorCriticWithActionValue(nn.Module):
         return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
 
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
-        """Generate text continuing from vlm_past_kv and return (generated_text, extended_kv_cache).
+        """Generate text via manual forward loop (supports batched KV cache).
 
-        When prompt is empty, generation continues directly from the KV cache
-        (which already includes the generation prompt from apply_chat_template).
+        Uses greedy decoding (argmax) with manual model.forward() calls
+        instead of generate() to avoid rope_deltas batch mismatch issues.
+        Returns (first_item_text, extended_kv_cache).
         """
         tokenizer = self.processor.tokenizer
         _, kv_len = self._extract_kv(vlm_past_kv)
+        eos_token_id = tokenizer.eos_token_id
 
         if prompt:
             prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+            if self.is_qwen35:
+                B = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[0]
+            else:
+                B = vlm_past_kv.layers[0].keys.shape[0]
+            next_ids = prompt_ids.expand(B, -1)  # (B, prompt_len)
+            cur_pos = kv_len
         else:
-            # KV cache already contains everything including generation prompt.
-            # generate() needs at least 1 token as seed — use the last token
-            # from the original input (already cached, position kv_len-1).
-            # We set cache_position to kv_len-1 so the KV entry is overwritten
-            # with the same value (effectively a no-op).
-            last_token = self._last_input_ids[:, -1:].to(self.device)
-            prompt_ids = last_token
-            kv_len = kv_len - 1  # adjust so cache_position = [kv_len-1]
+            next_ids = self._last_input_ids[:, -1:].to(self.device)  # (B, 1)
+            B = next_ids.shape[0]
+            cur_pos = kv_len - 1  # re-feed last cached token
 
-        attn_mask = torch.ones(1, kv_len + prompt_ids.shape[1], device=self.device)
-        cache_position = torch.arange(
-            kv_len, kv_len + prompt_ids.shape[1], device=self.device
-        )
-
-        pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
-        eos_token_id = tokenizer.eos_token_id
+        # rope_deltas from the initial VLM forward (accounts for image token positions)
+        rope_deltas = self.vlm_model.model.rope_deltas  # (B, 1)
 
         self.vlm_model.eval()
-        outputs = self.vlm_model.generate(
-            input_ids=prompt_ids,
-            attention_mask=attn_mask,
-            past_key_values=vlm_past_kv,
-            cache_position=cache_position,
-            max_new_tokens=max_new_tokens,
-            num_beams=1,
-            do_sample=False,
-            eos_token_id=eos_token_id,
-            pad_token_id=pad_token_id,
-            return_dict_in_generate=True,
-        )
+
+        generated_tokens = [[] for _ in range(B)]
+        finished = [False] * B
+
+        for step in range(max_new_tokens + 1):  # +1 for initial seed step
+            seq_len = next_ids.shape[1]
+            cache_position = torch.arange(cur_pos, cur_pos + seq_len, device=self.device)
+
+            # Build 3D position_ids: (3, B, seq_len) for mrope
+            text_pos = cache_position.view(1, 1, -1).expand(1, B, -1)  # (1, B, seq_len)
+            if rope_deltas is not None:
+                text_pos = text_pos + rope_deltas.unsqueeze(0)  # broadcast (1, B, 1)
+            position_ids = text_pos.expand(3, -1, -1)  # (3, B, seq_len)
+
+            outputs = self.vlm_model(
+                input_ids=next_ids,
+                attention_mask=torch.ones(B, cur_pos + seq_len, device=self.device),
+                past_key_values=vlm_past_kv,
+                cache_position=cache_position,
+                position_ids=position_ids,
+            )
+
+            vlm_past_kv = outputs.past_key_values
+            cur_pos = cur_pos + seq_len
+
+            # Skip collecting tokens on seed step (step 0 when no prompt)
+            if step == 0 and not prompt:
+                next_ids = outputs.logits[:, -1:, :].argmax(dim=-1)
+                continue
+
+            next_token = outputs.logits[:, -1:, :].argmax(dim=-1)  # (B, 1)
+
+            for b in range(B):
+                if not finished[b]:
+                    tid = next_token[b, 0].item()
+                    if tid == eos_token_id:
+                        finished[b] = True
+                    else:
+                        generated_tokens[b].append(tid)
+
+            if all(finished):
+                break
+
+            next_ids = next_token
+
         self.vlm_model.train()
 
-        # Skip the seed token(s) to get only newly generated tokens
-        generated_ids = outputs.sequences[0, prompt_ids.shape[1] :].tolist()
-        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-        return generated_text, outputs.past_key_values
+        first_text = tokenizer.decode(generated_tokens[0], skip_special_tokens=True).strip()
+        return first_text, vlm_past_kv
 
     def _compute_q(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Compute scalar Q-value for a (state, action) pair."""
