@@ -131,7 +131,6 @@ def prepare_vlm_inputs(
         last_img = images[b, seq_len - 1].to(torch.float32)
         last_img_np = (last_img.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
         content.append({"type": "image", "image": Image.fromarray(last_img_np)})
-        content.append({"type": "text", "text": f"reward {float(rewards[b, seq_len - 1, 0]):.2f}"})
         messages.append([{"role": "user", "content": content}])
 
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)

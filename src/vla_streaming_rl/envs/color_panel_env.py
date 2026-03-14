@@ -46,7 +46,7 @@ class ColorPanelEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        self.score_duration = 3
+        self.score_duration = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -65,7 +65,7 @@ class ColorPanelEnv(BaseGUIEnv):
         dx, dy, button = action
         self._update_cursor(dx, dy)
         x, y = self._cursor_pixel()
-        current_button_state = button > 0.5
+        current_button_state = button > 0.0
 
         reward = 0.0
 
