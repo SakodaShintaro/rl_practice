@@ -85,6 +85,7 @@ def parse_args() -> argparse.Namespace:
             "CARLA-Leaderboard-v0",
             "LetterTracing-v0",
             "FourQuadrant-v0",
+            "RandomSquare-v0",
             "ColorPanel-v0",
             "MovingCircle-v0",
             "Hopper-v5",
@@ -256,7 +257,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     target_score = env.spec.reward_threshold
     eval_range = env.unwrapped.eval_range
 
-    args.get_action_prompt = getattr(env.unwrapped, "get_action_prompt", None)
     args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
 
     start_time = time.time()
@@ -265,7 +265,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     global_step = 0
     score_list = []
     best_score = -float("inf")
-    obs, _ = env.reset(seed=seed)
+    obs, reset_info = env.reset(seed=seed)
+    args.prompt = reset_info["prompt"]
     step_limit = args.step_limit
 
     if args.agent_type == "off_policy":

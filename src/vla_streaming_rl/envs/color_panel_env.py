@@ -29,6 +29,10 @@ class ColorPanelEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
         self._window_title = "Color Panel Game"
+        self.prompt = (
+            "Read the text instruction in the image and name the 4 quadrant colors. "
+            "Format: instruction=text TL=color TR=color BL=color BR=color"
+        )
 
         half_w = self.width // 2
         half_h = self.height // 2
@@ -45,7 +49,7 @@ class ColorPanelEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        self.score_duration = 3
+        self.score_duration = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -57,14 +61,14 @@ class ColorPanelEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {}
+        return self._get_observation(), {"prompt": self.prompt}
 
     def step(self, action):
         self.step_count += 1
         dx, dy, button = action
         self._update_cursor(dx, dy)
         x, y = self._cursor_pixel()
-        current_button_state = button > 0.5
+        current_button_state = button > 0.0
 
         reward = 0.0
 
@@ -91,8 +95,12 @@ class ColorPanelEnv(BaseGUIEnv):
                         reward = -0.01
 
                 self.current_score = reward
-                self.state = STATE_SHOW_SCORE
-                self.state_timer = 0
+                if self.render_mode == "human":
+                    self.state = STATE_SHOW_SCORE
+                    self.state_timer = 0
+                else:
+                    random.shuffle(self.color_assignment)
+                    self.correct_color_idx = random.randint(0, 3)
 
         observation = self._get_observation()
         truncated = self.step_count >= 200
@@ -100,7 +108,7 @@ class ColorPanelEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {}
+        return observation, reward, False, truncated, {"prompt": self.prompt}
 
     def _get_observation(self):
         return self._render_frame()

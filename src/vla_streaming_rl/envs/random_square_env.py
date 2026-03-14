@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """
-Four Quadrant Game - Gymnasium Environment
+Random Square Game - Gymnasium Environment
 
-Screen divided into 4 quadrants, 1 is red, others are white with black borders.
+A red square is placed at a random position on a white background.
 Red click -> reward +1, White click -> reward -0.01
 """
 
@@ -17,13 +17,12 @@ STATE_PLAYING = "PLAYING"
 STATE_SHOW_SCORE = "SHOW_SCORE"
 
 
-class FourQuadrantEnv(BaseGUIEnv):
+class RandomSquareEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
-        self._window_title = "Four Quadrant Game"
+        self._window_title = "Random Square Game"
         self.prompt = (
-            "The screen is divided into 4 quadrants, one is red and others are white. "
-            "Move the cursor to the red quadrant and click."
+            "A red square appears at a random position. Move the cursor to the square and click it."
         )
 
         # Colors (RGB)
@@ -35,7 +34,6 @@ class FourQuadrantEnv(BaseGUIEnv):
 
         self.rect_x = 0
         self.rect_y = 0
-        self.correct_quadrant = 0
         self.prev_button_state = False
 
         self.state = STATE_PLAYING
@@ -46,9 +44,8 @@ class FourQuadrantEnv(BaseGUIEnv):
     def _place_rect(self):
         half_w = self.width // 2
         half_h = self.height // 2
-        self.correct_quadrant = random.randint(0, 3)
-        origins = [(0, 0), (half_w, 0), (0, half_h), (half_w, half_h)]
-        self.rect_x, self.rect_y = origins[self.correct_quadrant]
+        self.rect_x = random.randint(0, half_w)
+        self.rect_y = random.randint(0, half_h)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -113,15 +110,6 @@ class FourQuadrantEnv(BaseGUIEnv):
             rx, ry = self.rect_x, self.rect_y
             rw, rh = self.width // 2, self.height // 2
             image[ry : ry + rh, rx : rx + rw] = self.RED
-            half_w = self.width // 2
-            half_h = self.height // 2
-            origins = [(0, 0), (half_w, 0), (0, half_h), (half_w, half_h)]
-            for i, (ox, oy) in enumerate(origins):
-                if i != self.correct_quadrant:
-                    image[oy, ox : ox + half_w] = self.BLACK
-                    image[oy + half_h - 1, ox : ox + half_w] = self.BLACK
-                    image[oy : oy + half_h, ox] = self.BLACK
-                    image[oy : oy + half_h, ox + half_w - 1] = self.BLACK
 
         self._draw_cursor(image)
         return image
@@ -154,4 +142,4 @@ class FourQuadrantEnv(BaseGUIEnv):
 
 
 if __name__ == "__main__":
-    FourQuadrantEnv(render_mode="human").run()
+    RandomSquareEnv(render_mode="human").run()

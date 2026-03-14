@@ -11,34 +11,44 @@ from vla_streaming_rl.envs.color_panel_env import ColorPanelEnv
 from vla_streaming_rl.envs.four_quadrant_env import FourQuadrantEnv
 from vla_streaming_rl.envs.letter_tracing_env import LetterTracingEnv
 from vla_streaming_rl.envs.moving_circle_env import MovingCircleEnv
+from vla_streaming_rl.envs.random_square_env import RandomSquareEnv
 
 REPEAT = 4
 
 
-def _car_racing_action_prompt(horizon: int) -> str:
-    base = (
-        "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
-        "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
-        "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
-    )
-    example_actions = "; ".join([f"t{i}: steer=0.00, accel=0.10" for i in range(horizon)])
-    return (
-        base + f"Respond with {horizon} sequential actions in format: 'Actions: {example_actions}'"
-    )
+CAR_RACING_PROMPT = (
+    "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
+    "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
+    "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
+)
+
+MINIGRID_PROMPT = (
+    "Navigate the MiniGrid memory corridor. Remember the object seen at the start and choose the matching one at the end. "
+    "Actions: turn left, turn right, move forward."
+)
+
+HOPPER_PROMPT = "Control a 2D one-legged hopper. Keep it balanced and hopping forward as fast as possible without falling."
 
 
-def _car_racing_parse_action(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
-    action_array = np.zeros((horizon, 2), dtype=np.float32)
+def _color_panel_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
+    pattern = r"(?:t\d+:\s*)?dx=([+-]?\d*\.?\d+),\s*dy=([+-]?\d*\.?\d+),\s*button=([+-]?\d*\.?\d+)"
+    matches = re.findall(pattern, action_text)
+    action_array = np.zeros((len(matches), 3), dtype=np.float32)
+    for i in range(len(matches)):
+        action_array[i, 0] = np.clip(float(matches[i][0]), -1.0, 1.0)
+        action_array[i, 1] = np.clip(float(matches[i][1]), -1.0, 1.0)
+        action_array[i, 2] = np.clip(float(matches[i][2]), -1.0, 1.0)
+    return action_array, len(matches) > 0
+
+
+def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
     pattern = r"(?:t\d+:\s*)?steer=([+-]?\d*\.?\d+),\s*accel=([+-]?\d*\.?\d+)"
     matches = re.findall(pattern, action_text)
-    parsed_count = min(len(matches), horizon)
-    success = parsed_count == horizon
-    for i in range(parsed_count):
-        steer = float(matches[i][0])
-        accel = float(matches[i][1])
-        action_array[i, 0] = np.clip(steer, -1.0, 1.0)
-        action_array[i, 1] = np.clip(accel, -1.0, 1.0)
-    return action_array, success
+    action_array = np.zeros((len(matches), 2), dtype=np.float32)
+    for i in range(len(matches)):
+        action_array[i, 0] = np.clip(float(matches[i][0]), -1.0, 1.0)
+        action_array[i, 1] = np.clip(float(matches[i][1]), -1.0, 1.0)
+    return action_array, len(matches) > 0
 
 
 def make_env(env_id: str) -> gym.Env:
@@ -51,9 +61,9 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env = PromptWrapper(env, MINIGRID_PROMPT)
         env.unwrapped.spec.reward_threshold = 0.95
         env.unwrapped.eval_range = 100
-
         return env
 
     elif env_id == "CarRacing-v3":
@@ -67,9 +77,9 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env = PromptWrapper(env, CAR_RACING_PROMPT)
         env.unwrapped.spec.reward_threshold = 2000.0
         env.unwrapped.eval_range = 20
-        env.unwrapped.get_action_prompt = _car_racing_action_prompt
         env.unwrapped.parse_action_text = _car_racing_parse_action
         return env
 
@@ -101,6 +111,15 @@ def make_env(env_id: str) -> gym.Env:
         env.unwrapped.eval_range = 20
         return env
 
+    elif env_id == "RandomSquare-v0":
+        env = RandomSquareEnv(render_mode="rgb_array")
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
+        return env
+
     elif env_id == "ColorPanel-v0":
         env = ColorPanelEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -108,6 +127,7 @@ def make_env(env_id: str) -> gym.Env:
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
+        env.unwrapped.parse_action_text = _color_panel_parse_action
         return env
 
     elif env_id == "MovingCircle-v0":
@@ -125,6 +145,7 @@ def make_env(env_id: str) -> gym.Env:
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
+        env = PromptWrapper(env, HOPPER_PROMPT)
         env.unwrapped.spec.reward_threshold = 3800.0
         env.unwrapped.eval_range = 20
         return env
@@ -326,4 +347,22 @@ class ZeroObsOnDoneWrapper(gym.ObservationWrapper):
         if terminated or truncated:
             obs = np.zeros_like(obs)
 
+        return obs, reward, terminated, truncated, info
+
+
+class PromptWrapper(gym.Wrapper):
+    """Inject a prompt string into info dict for gym environments that don't natively provide one."""
+
+    def __init__(self, env: gym.Env, prompt: str) -> None:
+        super().__init__(env)
+        self.prompt = prompt
+
+    def reset(self, **kwargs) -> tuple:
+        obs, info = self.env.reset(**kwargs)
+        info["prompt"] = self.prompt
+        return obs, info
+
+    def step(self, action: np.ndarray) -> tuple:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info["prompt"] = self.prompt
         return obs, reward, terminated, truncated, info

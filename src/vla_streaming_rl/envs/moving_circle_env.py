@@ -51,6 +51,7 @@ class MovingCircleEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
         self._window_title = "Moving Circle Game"
+        self.prompt = "Colored circles move on the screen. Move the cursor to the green circle and click it. Avoid red circles."
 
         self.num_circles = {"green": 1, "yellow": 1, "red": 1}
 
@@ -115,14 +116,14 @@ class MovingCircleEnv(BaseGUIEnv):
         self.current_score = 0.0
         self.total_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {}
+        return self._get_observation(), {"prompt": self.prompt}
 
     def step(self, action):
         self.step_count += 1
         dx, dy, button = action
         self._update_cursor(dx, dy)
         x, y = self._cursor_pixel()
-        current_button_state = button > 0.5
+        current_button_state = button > 0.0
 
         self._move_circles()
 
@@ -157,7 +158,7 @@ class MovingCircleEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {}
+        return observation, reward, False, truncated, {"prompt": self.prompt}
 
     def _get_observation(self):
         return self._render_frame()
