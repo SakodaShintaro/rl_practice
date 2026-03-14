@@ -308,6 +308,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # Shared rotary embedding from VLM
         expert_hidden = args.expert_hidden_size
+        state_expert_hidden = args.state_expert_hidden_size
         # PEFT wraps the model with an extra .model level
         if self.use_lora:
             rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
@@ -322,9 +323,19 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         if self.state_mode == "expert":
             self.state_query_tokens = nn.Parameter(
-                torch.randn(1, args.num_state_queries, expert_hidden) * 0.02
+                torch.randn(1, args.num_state_queries, state_expert_hidden) * 0.02
             )
-            state_dim = args.num_state_queries * expert_hidden
+            state_dim = args.num_state_queries * state_expert_hidden
+            # State Expert: separate instance for state extraction
+            self.state_expert = ActionExpert(
+                num_layers=num_expert_layers,
+                expert_hidden_size=state_expert_hidden,
+                num_attention_heads=vlm_cfg.num_attention_heads,
+                num_kv_heads=vlm_cfg.num_key_value_heads,
+                head_dim=vlm_cfg.head_dim,
+                rms_norm_eps=vlm_cfg.rms_norm_eps,
+                rotary_emb=rotary_emb,
+            )
         elif self.state_mode == "projection":
             state_out_dim = 4
             self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
@@ -369,7 +380,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             predictor_block_num=args.predictor_block_num,
         )
         # Project state output to match FluxDiT context_in_dim
-        predictor_in_dim = expert_hidden if self.state_mode == "expert" else 4
+        predictor_in_dim = state_expert_hidden if self.state_mode == "expert" else 4
         self.state_to_predictor_proj = nn.Linear(predictor_in_dim, hidden_image_dim)
 
         self.value_range = 1.0
@@ -647,12 +658,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         return outputs.past_key_values
 
     def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
-        """Run state query tokens through ActionExpert with zero adaRMS conditioning."""
+        """Run state query tokens through StateExpert with zero adaRMS conditioning."""
         vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
         B = vlm_kv_list[0][0].shape[0]
         query = self.state_query_tokens.expand(B, -1, -1)
-        adarms_cond = torch.zeros(B, self.action_in_proj.out_features, device=self.device)
-        state_seq = self.action_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
+        state_expert_hidden = self.state_query_tokens.shape[-1]
+        adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
+        state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
         return state_seq.flatten(start_dim=1)
 
     def _forward_state(self, obs: torch.Tensor) -> tuple[torch.Tensor, object]:
