@@ -29,6 +29,10 @@ class ColorPanelEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
         self._window_title = "Color Panel Game"
+        self.prompt = (
+            "Read the text instruction in the image and name the 4 quadrant colors. "
+            "Format: instruction=text TL=color TR=color BL=color BR=color"
+        )
 
         half_w = self.width // 2
         half_h = self.height // 2
@@ -57,7 +61,7 @@ class ColorPanelEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {}
+        return self._get_observation(), {"prompt": self.prompt}
 
     def step(self, action):
         self.step_count += 1
@@ -104,7 +108,7 @@ class ColorPanelEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {}
+        return observation, reward, False, truncated, {"prompt": self.prompt}
 
     def _get_observation(self):
         return self._render_frame()

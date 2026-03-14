@@ -23,6 +23,7 @@ class LetterTracingEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
         self._window_title = "Letter Tracing Game"
+        self.prompt = "A letter is displayed on screen. Trace the letter shape by moving the cursor along its outline."
 
         self.font_size = 150
         self.sequential = False
@@ -109,7 +110,7 @@ class LetterTracingEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {}
+        return self._get_observation(), {"prompt": self.prompt}
 
     def step(self, action):
         self.step_count += 1
@@ -145,7 +146,7 @@ class LetterTracingEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {}
+        return observation, reward, False, truncated, {"prompt": self.prompt}
 
     def _get_observation(self):
         return self._render_frame()

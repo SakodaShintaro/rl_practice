@@ -21,6 +21,9 @@ class RandomSquareEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
         self._window_title = "Random Square Game"
+        self.prompt = (
+            "A red square appears at a random position. Move the cursor to the square and click it."
+        )
 
         # Colors (RGB)
         self.WHITE = np.array([255, 255, 255], dtype=np.uint8)
@@ -54,7 +57,7 @@ class RandomSquareEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {}
+        return self._get_observation(), {"prompt": self.prompt}
 
     def step(self, action):
         self.step_count += 1
@@ -93,7 +96,7 @@ class RandomSquareEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {}
+        return observation, reward, False, truncated, {"prompt": self.prompt}
 
     def _get_observation(self):
         return self._render_frame()
