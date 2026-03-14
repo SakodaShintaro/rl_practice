@@ -11,6 +11,7 @@ from vla_streaming_rl.envs.color_panel_env import ColorPanelEnv
 from vla_streaming_rl.envs.four_quadrant_env import FourQuadrantEnv
 from vla_streaming_rl.envs.letter_tracing_env import LetterTracingEnv
 from vla_streaming_rl.envs.moving_circle_env import MovingCircleEnv
+from vla_streaming_rl.envs.random_square_env import RandomSquareEnv
 
 REPEAT = 4
 
@@ -114,6 +115,15 @@ def make_env(env_id: str) -> gym.Env:
 
     elif env_id == "FourQuadrant-v0":
         env = FourQuadrantEnv(render_mode="rgb_array")
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
+        return env
+
+    elif env_id == "RandomSquare-v0":
+        env = RandomSquareEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
