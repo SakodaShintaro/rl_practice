@@ -4,7 +4,7 @@ Letter Tracing Game - Gymnasium Environment
 
 Displays a-z letters in light gray, agent traces the shape by dragging.
 Score is calculated using IoU (Intersection over Union).
-button > 0.5 = pen down (drawing)
+button > 0.0 = pen down (drawing)
 """
 
 import random
@@ -116,7 +116,7 @@ class LetterTracingEnv(BaseGUIEnv):
         dx, dy, button = action
         self._update_cursor(dx, dy)
         px, py = self._cursor_pixel()
-        current_button_state = button > 0.5
+        current_button_state = button > 0.0
 
         reward = 0.0
 

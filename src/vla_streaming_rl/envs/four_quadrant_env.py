@@ -68,7 +68,7 @@ class FourQuadrantEnv(BaseGUIEnv):
         dx, dy, button = action
         self._update_cursor(dx, dy)
         x, y = self._cursor_pixel()
-        current_button_state = button > 0.5
+        current_button_state = button > 0.0
 
         reward = 0.0
 
