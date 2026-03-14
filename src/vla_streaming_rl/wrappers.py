@@ -16,50 +16,40 @@ from vla_streaming_rl.envs.random_square_env import RandomSquareEnv
 REPEAT = 4
 
 
-def _color_panel_action_prompt(horizon: int) -> str:
+def _color_panel_action_prompt() -> str:
     return (
         "Read the text instruction in the image and name the 4 quadrant colors. "
         "Format: instruction=text TL=color TR=color BL=color BR=color"
     )
 
 
-def _color_panel_parse_action(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
-    action_array = np.zeros((horizon, 3), dtype=np.float32)
+def _color_panel_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
     pattern = r"(?:t\d+:\s*)?dx=([+-]?\d*\.?\d+),\s*dy=([+-]?\d*\.?\d+),\s*button=([+-]?\d*\.?\d+)"
     matches = re.findall(pattern, action_text)
-    parsed_count = min(len(matches), horizon)
-    success = parsed_count == horizon
-    for i in range(parsed_count):
+    action_array = np.zeros((len(matches), 3), dtype=np.float32)
+    for i in range(len(matches)):
         action_array[i, 0] = np.clip(float(matches[i][0]), -1.0, 1.0)
         action_array[i, 1] = np.clip(float(matches[i][1]), -1.0, 1.0)
         action_array[i, 2] = np.clip(float(matches[i][2]), -1.0, 1.0)
-    return action_array, success
+    return action_array, len(matches) > 0
 
 
-def _car_racing_action_prompt(horizon: int) -> str:
-    base = (
+def _car_racing_action_prompt() -> str:
+    return (
         "You control the red car in CarRacing-v3 (top-down). Stay on the gray road and avoid going onto the green grass; hug the road center when possible. "
         "Action space: steer [-1, +1] where -1 is full left and +1 is full right; accel [-1, +1] where positive is gas and negative is brake. "
         "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
     )
-    example_actions = "; ".join([f"t{i}: steer=0.00, accel=0.10" for i in range(horizon)])
-    return (
-        base + f"Respond with {horizon} sequential actions in format: 'Actions: {example_actions}'"
-    )
 
 
-def _car_racing_parse_action(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
-    action_array = np.zeros((horizon, 2), dtype=np.float32)
+def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
     pattern = r"(?:t\d+:\s*)?steer=([+-]?\d*\.?\d+),\s*accel=([+-]?\d*\.?\d+)"
     matches = re.findall(pattern, action_text)
-    parsed_count = min(len(matches), horizon)
-    success = parsed_count == horizon
-    for i in range(parsed_count):
-        steer = float(matches[i][0])
-        accel = float(matches[i][1])
-        action_array[i, 0] = np.clip(steer, -1.0, 1.0)
-        action_array[i, 1] = np.clip(accel, -1.0, 1.0)
-    return action_array, success
+    action_array = np.zeros((len(matches), 2), dtype=np.float32)
+    for i in range(len(matches)):
+        action_array[i, 0] = np.clip(float(matches[i][0]), -1.0, 1.0)
+        action_array[i, 1] = np.clip(float(matches[i][1]), -1.0, 1.0)
+    return action_array, len(matches) > 0
 
 
 def make_env(env_id: str) -> gym.Env:

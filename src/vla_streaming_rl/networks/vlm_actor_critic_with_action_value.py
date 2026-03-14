@@ -290,7 +290,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        action_prompt = args.get_action_prompt(args.horizon) if args.get_action_prompt else ""
+        action_prompt = args.get_action_prompt() if args.get_action_prompt else ""
         self.task_prompt = action_prompt if args.text_action_mode != "none" else ""
         self.parse_action_text = args.parse_action_text
         self.text_action_prompt = action_prompt
@@ -514,7 +514,10 @@ class VLMActorCriticWithActionValue(nn.Module):
             1, self.seq_len, *self.observation_space_shape, device=self.device
         )
         inputs = prepare_vlm_inputs(
-            self.processor, dummy_images, self.task_prompt, self.is_qwen35,
+            self.processor,
+            dummy_images,
+            self.task_prompt,
+            self.is_qwen35,
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
         output = self._vlm_language_forward(inputs, inputs_embeds)
@@ -595,7 +598,10 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _vlm_forward(self, images: torch.Tensor):
         """Run VLM forward and extract state + past_key_values (with RoPE)."""
         inputs = prepare_vlm_inputs(
-            self.processor, images, self.task_prompt, self.is_qwen35,
+            self.processor,
+            images,
+            self.task_prompt,
+            self.is_qwen35,
         )
 
         inputs_embeds = self._build_inputs_embeds(inputs)
@@ -760,9 +766,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
 
     @torch.inference_mode()
-    def _infer(
-        self, obs: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _infer(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         state, vlm_past_kv = self._vlm_forward(obs)
         B = obs.shape[0]
         mode = self.text_action_mode
@@ -790,7 +794,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # For text_action mode, parse generated text and compare Q values
         if mode == "text_action":
-            action_array, parse_success = self.parse_action_text(generated_text, self.horizon)
+            action_array, parse_success = self.parse_action_text(generated_text)
             text_action = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
             text_q = self._compute_q(state, text_action)
             use_text = text_q > diff_q + self.text_q_margin
