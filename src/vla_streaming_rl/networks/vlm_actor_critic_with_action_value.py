@@ -77,40 +77,72 @@ class AdaptiveRMSNorm(nn.Module):
         return normed.to(dtype), gate.to(dtype)
 
 
-class RecurrentStateProjector(nn.Module):
-    """Project linear attention recurrent state to a single K/V token for cross-attention.
+class LinearAttentionExpertLayer(nn.Module):
+    """Expert layer for linear attention: queries the recurrent state directly.
 
-    Recurrent state shape: (B, num_linear_heads, key_head_dim, value_head_dim)
-    Mean-pools along key/value dims first to reduce dimensionality, then projects.
-    Output: K and V each of shape (B, num_kv_heads, 1, head_dim)
+    Creates queries from the activation, reads from recurrent state via S^T @ q
+    (the same operation as linear attention), then applies MLP.
     """
 
     def __init__(
         self,
+        hidden_size: int,
         num_linear_heads: int,
         key_head_dim: int,
         value_head_dim: int,
-        num_kv_heads: int,
-        head_dim: int,
+        rms_norm_eps: float,
     ) -> None:
         super().__init__()
-        kv_dim = num_kv_heads * head_dim
-        # K: mean-pool along value_dim -> (B, num_linear_heads * key_head_dim)
-        self.k_proj = nn.Linear(num_linear_heads * key_head_dim, kv_dim, bias=False)
-        # V: mean-pool along key_dim -> (B, num_linear_heads * value_head_dim)
-        self.v_proj = nn.Linear(num_linear_heads * value_head_dim, kv_dim, bias=False)
-        self.num_kv_heads = num_kv_heads
-        self.head_dim = head_dim
+        self.num_linear_heads = num_linear_heads
+        self.key_head_dim = key_head_dim
+        intermediate_size = hidden_size * 4
 
-    def forward(self, recurrent_state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Returns K, V each of shape (B, num_kv_heads, 1, head_dim)."""
-        B = recurrent_state.shape[0]
-        # recurrent_state: (B, num_linear_heads, key_dim, value_dim)
-        k_pooled = recurrent_state.mean(dim=3).reshape(B, -1)  # (B, num_linear_heads * key_dim)
-        v_pooled = recurrent_state.mean(dim=2).reshape(B, -1)  # (B, num_linear_heads * value_dim)
-        k = self.k_proj(k_pooled).view(B, self.num_kv_heads, 1, self.head_dim)
-        v = self.v_proj(v_pooled).view(B, self.num_kv_heads, 1, self.head_dim)
-        return k, v
+        # Pre-attention norm (adaptive)
+        self.input_layernorm = AdaptiveRMSNorm(hidden_size, rms_norm_eps, hidden_size)
+
+        # Query projection: activation -> queries for each linear head
+        self.q_proj = nn.Linear(hidden_size, num_linear_heads * key_head_dim, bias=False)
+        # Output projection: readout -> hidden_size
+        self.o_proj = nn.Linear(num_linear_heads * value_head_dim, hidden_size, bias=False)
+
+        # Post-attention norm (adaptive)
+        self.post_attn_layernorm = AdaptiveRMSNorm(hidden_size, rms_norm_eps, hidden_size)
+
+        # MLP (SwiGLU)
+        self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,  # (B, action_len, hidden_size)
+        recurrent_state: torch.Tensor,  # (B, num_linear_heads, key_dim, value_dim)
+        adarms_cond: torch.Tensor,  # (B, cond_dim)
+    ) -> torch.Tensor:
+        residual = hidden_states
+        normed, gate1 = self.input_layernorm(hidden_states, adarms_cond)
+
+        B, action_len, _ = normed.shape
+
+        # Create queries from activation
+        q = self.q_proj(normed).view(B, action_len, self.num_linear_heads, self.key_head_dim)
+
+        # Read from recurrent state: S[h]^T @ q[h] for each token
+        # q: (B, L, H, K), S: (B, H, K, V) -> output: (B, L, H, V)
+        readout = torch.einsum("blhk,bhkv->blhv", q, recurrent_state)
+        readout = readout.reshape(B, action_len, -1)  # (B, L, num_linear_heads * value_dim)
+
+        # Output projection + gated residual
+        hidden_states = residual + gate1 * self.o_proj(readout)
+
+        # MLP
+        residual2 = hidden_states
+        normed2, gate2 = self.post_attn_layernorm(hidden_states, adarms_cond)
+        hidden_states = residual2 + gate2 * self.down_proj(
+            F.silu(self.gate_proj(normed2)) * self.up_proj(normed2)
+        )
+
+        return hidden_states
 
 
 class ActionExpertLayer(nn.Module):
@@ -164,8 +196,8 @@ class ActionExpertLayer(nn.Module):
         hidden_states: torch.Tensor,  # (B, action_len, hidden_size)
         vlm_k: torch.Tensor,  # (B, num_kv_heads, vlm_len, head_dim) with RoPE
         vlm_v: torch.Tensor,  # (B, num_kv_heads, vlm_len, head_dim)
-        cos: torch.Tensor | None,  # (B, action_len, head_dim) or None for linear layers
-        sin: torch.Tensor | None,  # (B, action_len, head_dim) or None for linear layers
+        cos: torch.Tensor,  # (B, action_len, head_dim)
+        sin: torch.Tensor,  # (B, action_len, head_dim)
         adarms_cond: torch.Tensor,  # (B, cond_dim)
     ) -> torch.Tensor:
         residual = hidden_states
@@ -186,9 +218,8 @@ class ActionExpertLayer(nn.Module):
         k_self = k_self.transpose(1, 2)  # (B, num_kv_heads, action_len, head_dim)
         v_self = v_self.transpose(1, 2)  # (B, num_kv_heads, action_len, head_dim)
 
-        # RoPE on Q and self K (skip for linear attention layers)
-        if cos is not None and sin is not None:
-            q, k_self = apply_rotary_pos_emb(q, k_self, cos, sin)
+        # RoPE on Q and self K
+        q, k_self = apply_rotary_pos_emb(q, k_self, cos, sin)
 
         # Concat VLM K/V with self K/V: [vlm_tokens, action_tokens]
         k = torch.cat([vlm_k, k_self], dim=2)  # (B, num_kv_heads, vlm_len+action_len, head_dim)
@@ -241,36 +272,36 @@ class ActionExpert(nn.Module):
         self.num_layers = num_layers
         self.rotary_emb = rotary_emb
         self.layer_types = layer_types
-        self.layers = nn.ModuleList(
-            [
-                ActionExpertLayer(
-                    expert_hidden_size,
-                    num_attention_heads,
-                    num_kv_heads,
-                    head_dim,
-                    rms_norm_eps,
-                )
-                for _ in range(num_layers)
-            ]
-        )
-        self.norm = nn.RMSNorm(expert_hidden_size, eps=rms_norm_eps)
 
-        # Recurrent state projectors for linear attention layers
-        self.recurrent_projectors = nn.ModuleDict()
-        for i, lt in enumerate(self.layer_types):
-            if lt == "linear_attention":
-                self.recurrent_projectors[str(i)] = RecurrentStateProjector(
-                    num_linear_heads=linear_num_heads,
-                    key_head_dim=linear_key_head_dim,
-                    value_head_dim=linear_value_head_dim,
-                    num_kv_heads=num_kv_heads,
-                    head_dim=head_dim,
+        layers: list[nn.Module] = []
+        for lt in layer_types:
+            if lt == "full_attention":
+                layers.append(
+                    ActionExpertLayer(
+                        expert_hidden_size,
+                        num_attention_heads,
+                        num_kv_heads,
+                        head_dim,
+                        rms_norm_eps,
+                    )
                 )
+            else:
+                layers.append(
+                    LinearAttentionExpertLayer(
+                        expert_hidden_size,
+                        linear_num_heads,
+                        linear_key_head_dim,
+                        linear_value_head_dim,
+                        rms_norm_eps,
+                    )
+                )
+        self.layers = nn.ModuleList(layers)
+        self.norm = nn.RMSNorm(expert_hidden_size, eps=rms_norm_eps)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        vlm_kv_list: list[tuple[torch.Tensor, torch.Tensor]],
+        vlm_cache_list: list,
         vlm_seq_len: int,
         adarms_cond: torch.Tensor,
     ) -> torch.Tensor:
@@ -284,13 +315,12 @@ class ActionExpert(nn.Module):
         cos, sin = self.rotary_emb(hidden_states, position_ids=action_pos_ids)
 
         for j in range(self.num_layers):
-            k, v = vlm_kv_list[j]
-            if self.layer_types[j] == "linear_attention":
-                # Linear attention: project recurrent state, no RoPE
-                hidden_states = self.layers[j](hidden_states, k, v, None, None, adarms_cond)
-            else:
-                # Full attention: use KV cache with RoPE
+            if self.layer_types[j] == "full_attention":
+                k, v = vlm_cache_list[j]
                 hidden_states = self.layers[j](hidden_states, k, v, cos, sin, adarms_cond)
+            else:
+                recurrent_state = vlm_cache_list[j]
+                hidden_states = self.layers[j](hidden_states, recurrent_state, adarms_cond)
         return self.norm(hidden_states)
 
 
@@ -739,12 +769,14 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
         """Run state query tokens through StateExpert with zero adaRMS conditioning."""
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv, self.state_expert)
-        B = vlm_kv_list[0][0].shape[0]
+        cache_list, vlm_seq_len = self._extract_cache(vlm_past_kv)
+        # Get batch size from a full attention layer's KV cache
+        first_attn_cache = cache_list[self.attn_layer_indices[0]]
+        B = first_attn_cache[0].shape[0]
         query = self.state_query_tokens.expand(B, -1, -1)
         state_expert_hidden = self.state_query_tokens.shape[-1]
         adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
-        state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
+        state_seq = self.state_expert(query, cache_list, vlm_seq_len, adarms_cond)
         return state_seq.flatten(start_dim=1)
 
     def _forward_state(self, obs: torch.Tensor) -> tuple[torch.Tensor, object]:
@@ -756,38 +788,33 @@ class VLMActorCriticWithActionValue(nn.Module):
         state, vlm_past_kv = self._vlm_forward(obs)
         return state, vlm_past_kv
 
-    def _extract_kv(
-        self, vlm_past_kv, expert: ActionExpert
-    ) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
-        """Extract (K, V) pairs for all VLM layers used by ActionExpert.
+    def _extract_cache(self, vlm_past_kv) -> tuple[list, int]:
+        """Extract per-layer cache from VLM past_key_values.
 
-        For full attention layers: returns KV cache directly.
-        For linear attention layers: projects recurrent state into a single KV token.
+        For full attention layers: returns (K, V) tuple.
+        For linear attention layers: returns raw recurrent state tensor.
 
         Returns:
-            vlm_kv_list: list of (K, V) tuples, one per expert layer (= num_layers)
+            cache_list: list of (K, V) or recurrent_state, one per VLM layer
             vlm_seq_len: sequence length of the VLM KV cache (from full attention layers)
         """
-        kv_list = []
+        cache_list = []
         if self.is_qwen35:
             layer_types = self.vlm_model.config.text_config.layer_types
             seq_len = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[2]
             for i in range(self.num_layers):
                 if layer_types[i] == "full_attention":
-                    kv_list.append(
+                    cache_list.append(
                         (vlm_past_kv.key_cache[i], vlm_past_kv.value_cache[i])
                     )
                 else:
-                    recurrent_state = vlm_past_kv.recurrent_states[i].detach()
-                    projector = expert.recurrent_projectors[str(i)]
-                    k, v = projector(recurrent_state)
-                    kv_list.append((k, v))
+                    cache_list.append(vlm_past_kv.recurrent_states[i].detach())
         else:
             for j in range(self.num_layers):
                 layer = vlm_past_kv.layers[j]
-                kv_list.append((layer.keys, layer.values))
+                cache_list.append((layer.keys, layer.values))
             seq_len = vlm_past_kv.layers[0].keys.shape[2]
-        return kv_list, seq_len
+        return cache_list, seq_len
 
     def _denoise(
         self,
@@ -802,8 +829,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
         action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv, self.action_expert)
-        expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
+        cache_list, vlm_seq_len = self._extract_cache(vlm_past_kv)
+        expert_out = self.action_expert(action_embs, cache_list, vlm_seq_len, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
 
     def _generate_action(
@@ -827,7 +854,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         Returns (first_item_text, extended_kv_cache).
         """
         tokenizer = self.processor.tokenizer
-        _, kv_len = self._extract_kv(vlm_past_kv, self.action_expert)
+        _, kv_len = self._extract_cache(vlm_past_kv)
         eos_token_id = tokenizer.eos_token_id
 
         if prompt:
