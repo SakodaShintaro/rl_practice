@@ -22,9 +22,7 @@ def _color_panel_action_prompt(horizon: int) -> str:
     )
 
 
-def _color_panel_parse_action(
-    action_text: str, horizon: int
-) -> tuple[np.ndarray, bool]:
+def _color_panel_parse_action(action_text: str, horizon: int) -> tuple[np.ndarray, bool]:
     action_array = np.zeros((horizon, 3), dtype=np.float32)
     pattern = r"(?:t\d+:\s*)?dx=([+-]?\d*\.?\d+),\s*dy=([+-]?\d*\.?\d+),\s*button=([+-]?\d*\.?\d+)"
     matches = re.findall(pattern, action_text)

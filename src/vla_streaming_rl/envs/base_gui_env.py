@@ -32,6 +32,7 @@ class BaseGUIEnv(gym.Env):
             low=0, high=255, shape=(self.height, self.width, 3), dtype=np.uint8
         )
 
+        self.absolute_mouse = True
         self.cursor_x = 0.5
         self.cursor_y = 0.5
         self.step_count = 0
@@ -39,10 +40,18 @@ class BaseGUIEnv(gym.Env):
         self._pygame_screen = None
         self._window_title = "GUI Game"
 
-    def _update_cursor(self, dx, dy):
-        """Update cursor position from delta action."""
-        self.cursor_x = np.clip(self.cursor_x + dx * 0.25, 0.0, 1.0)
-        self.cursor_y = np.clip(self.cursor_y + dy * 0.25, 0.0, 1.0)
+    def _update_cursor(self, ax, ay):
+        """Update cursor position from action values.
+
+        When absolute_mouse is False (default), ax/ay are deltas.
+        When absolute_mouse is True, ax/ay are absolute positions in [-1, 1] mapped to [0, 1].
+        """
+        if self.absolute_mouse:
+            self.cursor_x = np.clip((ax + 1.0) * 0.5, 0.0, 1.0)
+            self.cursor_y = np.clip((ay + 1.0) * 0.5, 0.0, 1.0)
+        else:
+            self.cursor_x = np.clip(self.cursor_x + ax * 0.25, 0.0, 1.0)
+            self.cursor_y = np.clip(self.cursor_y + ay * 0.25, 0.0, 1.0)
 
     def _cursor_pixel(self):
         """Get cursor position in pixel coordinates."""
