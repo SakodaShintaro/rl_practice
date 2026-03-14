@@ -77,6 +77,42 @@ class AdaptiveRMSNorm(nn.Module):
         return normed.to(dtype), gate.to(dtype)
 
 
+class RecurrentStateProjector(nn.Module):
+    """Project linear attention recurrent state to a single K/V token for cross-attention.
+
+    Recurrent state shape: (B, num_linear_heads, key_head_dim, value_head_dim)
+    Mean-pools along key/value dims first to reduce dimensionality, then projects.
+    Output: K and V each of shape (B, num_kv_heads, 1, head_dim)
+    """
+
+    def __init__(
+        self,
+        num_linear_heads: int,
+        key_head_dim: int,
+        value_head_dim: int,
+        num_kv_heads: int,
+        head_dim: int,
+    ) -> None:
+        super().__init__()
+        kv_dim = num_kv_heads * head_dim
+        # K: mean-pool along value_dim -> (B, num_linear_heads * key_head_dim)
+        self.k_proj = nn.Linear(num_linear_heads * key_head_dim, kv_dim, bias=False)
+        # V: mean-pool along key_dim -> (B, num_linear_heads * value_head_dim)
+        self.v_proj = nn.Linear(num_linear_heads * value_head_dim, kv_dim, bias=False)
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = head_dim
+
+    def forward(self, recurrent_state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns K, V each of shape (B, num_kv_heads, 1, head_dim)."""
+        B = recurrent_state.shape[0]
+        # recurrent_state: (B, num_linear_heads, key_dim, value_dim)
+        k_pooled = recurrent_state.mean(dim=3).reshape(B, -1)  # (B, num_linear_heads * key_dim)
+        v_pooled = recurrent_state.mean(dim=2).reshape(B, -1)  # (B, num_linear_heads * value_dim)
+        k = self.k_proj(k_pooled).view(B, self.num_kv_heads, 1, self.head_dim)
+        v = self.v_proj(v_pooled).view(B, self.num_kv_heads, 1, self.head_dim)
+        return k, v
+
+
 class ActionExpertLayer(nn.Module):
     """Single transformer layer: combined self+cross attention to VLM, then MLP.
 
@@ -128,8 +164,8 @@ class ActionExpertLayer(nn.Module):
         hidden_states: torch.Tensor,  # (B, action_len, hidden_size)
         vlm_k: torch.Tensor,  # (B, num_kv_heads, vlm_len, head_dim) with RoPE
         vlm_v: torch.Tensor,  # (B, num_kv_heads, vlm_len, head_dim)
-        cos: torch.Tensor,  # (B, action_len, head_dim)
-        sin: torch.Tensor,  # (B, action_len, head_dim)
+        cos: torch.Tensor | None,  # (B, action_len, head_dim) or None for linear layers
+        sin: torch.Tensor | None,  # (B, action_len, head_dim) or None for linear layers
         adarms_cond: torch.Tensor,  # (B, cond_dim)
     ) -> torch.Tensor:
         residual = hidden_states
@@ -150,8 +186,9 @@ class ActionExpertLayer(nn.Module):
         k_self = k_self.transpose(1, 2)  # (B, num_kv_heads, action_len, head_dim)
         v_self = v_self.transpose(1, 2)  # (B, num_kv_heads, action_len, head_dim)
 
-        # RoPE on Q and self K to match VLM K
-        q, k_self = apply_rotary_pos_emb(q, k_self, cos, sin)
+        # RoPE on Q and self K (skip for linear attention layers)
+        if cos is not None and sin is not None:
+            q, k_self = apply_rotary_pos_emb(q, k_self, cos, sin)
 
         # Concat VLM K/V with self K/V: [vlm_tokens, action_tokens]
         k = torch.cat([vlm_k, k_self], dim=2)  # (B, num_kv_heads, vlm_len+action_len, head_dim)
@@ -179,7 +216,12 @@ class ActionExpertLayer(nn.Module):
 
 
 class ActionExpert(nn.Module):
-    """Stack of ActionExpertLayers that cross-attend to VLM hidden states."""
+    """Stack of ActionExpertLayers that cross-attend to VLM hidden states.
+
+    For Qwen3.5, layers correspond 1:1 with VLM layers (24 total).
+    Full attention layers cross-attend to K/V cache with RoPE.
+    Linear attention layers cross-attend to a single projected recurrent state token without RoPE.
+    """
 
     def __init__(
         self,
@@ -190,10 +232,15 @@ class ActionExpert(nn.Module):
         head_dim: int,
         rms_norm_eps: float,
         rotary_emb: nn.Module,
+        layer_types: list[str],
+        linear_num_heads: int,
+        linear_key_head_dim: int,
+        linear_value_head_dim: int,
     ) -> None:
         super().__init__()
         self.num_layers = num_layers
         self.rotary_emb = rotary_emb
+        self.layer_types = layer_types
         self.layers = nn.ModuleList(
             [
                 ActionExpertLayer(
@@ -207,6 +254,18 @@ class ActionExpert(nn.Module):
             ]
         )
         self.norm = nn.RMSNorm(expert_hidden_size, eps=rms_norm_eps)
+
+        # Recurrent state projectors for linear attention layers
+        self.recurrent_projectors = nn.ModuleDict()
+        for i, lt in enumerate(self.layer_types):
+            if lt == "linear_attention":
+                self.recurrent_projectors[str(i)] = RecurrentStateProjector(
+                    num_linear_heads=linear_num_heads,
+                    key_head_dim=linear_key_head_dim,
+                    value_head_dim=linear_value_head_dim,
+                    num_kv_heads=num_kv_heads,
+                    head_dim=head_dim,
+                )
 
     def forward(
         self,
@@ -226,7 +285,12 @@ class ActionExpert(nn.Module):
 
         for j in range(self.num_layers):
             k, v = vlm_kv_list[j]
-            hidden_states = self.layers[j](hidden_states, k, v, cos, sin, adarms_cond)
+            if self.layer_types[j] == "linear_attention":
+                # Linear attention: project recurrent state, no RoPE
+                hidden_states = self.layers[j](hidden_states, k, v, None, None, adarms_cond)
+            else:
+                # Full attention: use KV cache with RoPE
+                hidden_states = self.layers[j](hidden_states, k, v, cos, sin, adarms_cond)
         return self.norm(hidden_states)
 
 
@@ -298,13 +362,19 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # Determine which VLM layers have KV cache for cross-attention
         if self.is_qwen35:
-            layer_types = vlm_cfg.layer_types
+            vlm_layer_types = vlm_cfg.layer_types
             self.attn_layer_indices = [
-                i for i, lt in enumerate(layer_types) if lt == "full_attention"
+                i for i, lt in enumerate(vlm_layer_types) if lt == "full_attention"
             ]
+            linear_num_heads = getattr(vlm_cfg, "linear_num_key_heads", 0)
+            linear_key_head_dim = getattr(vlm_cfg, "linear_key_head_dim", 0)
+            linear_value_head_dim = getattr(vlm_cfg, "linear_value_head_dim", 0)
         else:
+            vlm_layer_types = ["full_attention"] * num_layers
             self.attn_layer_indices = list(range(num_layers))
-        num_expert_layers = len(self.attn_layer_indices)
+            linear_num_heads = 0
+            linear_key_head_dim = 0
+            linear_value_head_dim = 0
 
         # Shared rotary embedding from VLM
         expert_hidden = args.expert_hidden_size
@@ -314,6 +384,14 @@ class VLMActorCriticWithActionValue(nn.Module):
             rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
         else:
             rotary_emb = self.vlm_model.model.language_model.rotary_emb
+
+        # Common kwargs for ActionExpert (layer_types and linear attention config)
+        expert_layer_kwargs = dict(
+            layer_types=vlm_layer_types,
+            linear_num_heads=linear_num_heads,
+            linear_key_head_dim=linear_key_head_dim,
+            linear_value_head_dim=linear_value_head_dim,
+        )
 
         # State computation mode
         self.state_mode = args.state_mode
@@ -328,13 +406,14 @@ class VLMActorCriticWithActionValue(nn.Module):
             state_dim = args.num_state_queries * state_expert_hidden
             # State Expert: separate instance for state extraction
             self.state_expert = ActionExpert(
-                num_layers=num_expert_layers,
+                num_layers=num_layers,
                 expert_hidden_size=state_expert_hidden,
                 num_attention_heads=vlm_cfg.num_attention_heads,
                 num_kv_heads=vlm_cfg.num_key_value_heads,
                 head_dim=vlm_cfg.head_dim,
                 rms_norm_eps=vlm_cfg.rms_norm_eps,
                 rotary_emb=rotary_emb,
+                **expert_layer_kwargs,
             )
         elif self.state_mode == "projection":
             state_out_dim = 4
@@ -342,15 +421,16 @@ class VLMActorCriticWithActionValue(nn.Module):
             self._target_seq_len, state_dim = self._compute_state_dim()
             torch.cuda.empty_cache()
 
-        # Action Expert: cross-attends to VLM KV cache
+        # Action Expert: cross-attends to VLM KV cache (all layers)
         self.action_expert = ActionExpert(
-            num_layers=num_expert_layers,
+            num_layers=num_layers,
             expert_hidden_size=expert_hidden,
             num_attention_heads=vlm_cfg.num_attention_heads,
             num_kv_heads=vlm_cfg.num_key_value_heads,
             head_dim=vlm_cfg.head_dim,
             rms_norm_eps=vlm_cfg.rms_norm_eps,
             rotary_emb=rotary_emb,
+            **expert_layer_kwargs,
         )
 
         # Action in/out projections
@@ -659,7 +739,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
         """Run state query tokens through StateExpert with zero adaRMS conditioning."""
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
+        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv, self.state_expert)
         B = vlm_kv_list[0][0].shape[0]
         query = self.state_query_tokens.expand(B, -1, -1)
         state_expert_hidden = self.state_query_tokens.shape[-1]
@@ -676,18 +756,32 @@ class VLMActorCriticWithActionValue(nn.Module):
         state, vlm_past_kv = self._vlm_forward(obs)
         return state, vlm_past_kv
 
-    def _extract_kv(self, vlm_past_kv) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
-        """Extract (K, V) pairs for the attention layers used by ActionExpert.
+    def _extract_kv(
+        self, vlm_past_kv, expert: ActionExpert
+    ) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
+        """Extract (K, V) pairs for all VLM layers used by ActionExpert.
+
+        For full attention layers: returns KV cache directly.
+        For linear attention layers: projects recurrent state into a single KV token.
 
         Returns:
-            vlm_kv_list: list of (K, V) tuples, one per expert layer
-            vlm_seq_len: sequence length of the VLM KV cache
+            vlm_kv_list: list of (K, V) tuples, one per expert layer (= num_layers)
+            vlm_seq_len: sequence length of the VLM KV cache (from full attention layers)
         """
         kv_list = []
         if self.is_qwen35:
-            for idx in self.attn_layer_indices:
-                kv_list.append((vlm_past_kv.key_cache[idx], vlm_past_kv.value_cache[idx]))
+            layer_types = self.vlm_model.config.text_config.layer_types
             seq_len = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[2]
+            for i in range(self.num_layers):
+                if layer_types[i] == "full_attention":
+                    kv_list.append(
+                        (vlm_past_kv.key_cache[i], vlm_past_kv.value_cache[i])
+                    )
+                else:
+                    recurrent_state = vlm_past_kv.recurrent_states[i].detach()
+                    projector = expert.recurrent_projectors[str(i)]
+                    k, v = projector(recurrent_state)
+                    kv_list.append((k, v))
         else:
             for j in range(self.num_layers):
                 layer = vlm_past_kv.layers[j]
@@ -708,7 +802,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
         action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
+        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv, self.action_expert)
         expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
 
@@ -733,7 +827,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         Returns (first_item_text, extended_kv_cache).
         """
         tokenizer = self.processor.tokenizer
-        _, kv_len = self._extract_kv(vlm_past_kv)
+        _, kv_len = self._extract_kv(vlm_past_kv, self.action_expert)
         eos_token_id = tokenizer.eos_token_id
 
         if prompt:
