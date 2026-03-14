@@ -134,6 +134,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--encoder_block_num", type=int, default=1)
     parser.add_argument("--use_lora", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--target_layer_idx", type=int, default=2)
     parser.add_argument("--actor_hidden_dim", type=int, default=512)
     parser.add_argument("--actor_block_num", type=int, default=1)
     parser.add_argument("--critic_hidden_dim", type=int, default=1024)
@@ -177,6 +178,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--expert_hidden_size", type=int, default=8)
     parser.add_argument("--num_state_queries", type=int, default=16)
+    parser.add_argument(
+        "--state_mode",
+        type=str,
+        default="projection",
+        choices=["projection", "expert"],
+    )
     parser.add_argument(
         "--text_action_mode",
         type=str,
