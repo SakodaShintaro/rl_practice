@@ -177,8 +177,8 @@ def parse_args() -> argparse.Namespace:
         choices=["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3-VL-2B-Instruct"],
     )
     parser.add_argument("--expert_hidden_size", type=int, default=8)
-    parser.add_argument("--state_expert_hidden_size", type=int, default=64)
-    parser.add_argument("--num_state_queries", type=int, default=8)
+    parser.add_argument("--state_expert_hidden_size", type=int, default=576)
+    parser.add_argument("--num_state_queries", type=int, default=1)
     parser.add_argument(
         "--state_mode",
         type=str,
