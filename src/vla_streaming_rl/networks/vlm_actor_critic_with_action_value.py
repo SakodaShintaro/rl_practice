@@ -290,7 +290,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        self.task_prompt = ""
+        self.task_prompt = args.prompt if args.text_action_mode != "none" else ""
         self.parse_action_text = args.parse_action_text
         self.text_action_prompt = args.prompt
         self.high_level_prompt = args.prompt
