@@ -97,6 +97,7 @@ class StreamingAgent:
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
             max_new_tokens=args.max_new_tokens,
+            max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=args.pad_token_id,
         )
 
@@ -106,7 +107,13 @@ class StreamingAgent:
         self._episode_reset = False
 
     def _prepare_step(
-        self, obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info_dict: dict
+        self,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        info_dict: dict,
+        task_prompt: str = "",
     ) -> None:
         if terminated or truncated:
             self.action_chunk = None
@@ -125,6 +132,7 @@ class StreamingAgent:
             obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
             obs_z = obs_z.squeeze(0)
         normalized_action = (self.prev_action - self.action_bias) / self.action_scale
+        task_prompt_token_ids = self.network.tokenize_task_prompt(task_prompt)
         self.rb.add(
             obs_tensor,
             obs_z,
@@ -135,6 +143,7 @@ class StreamingAgent:
             0.0,
             0.0,
             self.prev_action_token_ids,
+            task_prompt_token_ids,
         )
 
     def _use_action_chunk(self, info_dict: dict) -> np.ndarray:
@@ -166,10 +175,16 @@ class StreamingAgent:
 
     @torch.inference_mode()
     def select_action(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+        self,
+        global_step: int,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        task_prompt: str = "",
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
-        self._prepare_step(obs, reward, terminated, truncated, info_dict)
+        self._prepare_step(obs, reward, terminated, truncated, info_dict, task_prompt)
 
         if self.action_chunk is not None and self.chunk_step < self.horizon:
             return self._use_action_chunk(info_dict), info_dict
@@ -181,14 +196,21 @@ class StreamingAgent:
             latest_data.actions,
             latest_data.rewards,
             self.rnn_state,
+            task_prompts=[task_prompt],
         )
         return self._start_new_chunk(infer_dict, info_dict), info_dict
 
     def step(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+        self,
+        global_step: int,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        task_prompt: str = "",
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
-        self._prepare_step(obs, reward, terminated, truncated, info_dict)
+        self._prepare_step(obs, reward, terminated, truncated, info_dict, task_prompt)
 
         # cached action: no inference, no training
         if self.action_chunk is not None and self.chunk_step < self.horizon:

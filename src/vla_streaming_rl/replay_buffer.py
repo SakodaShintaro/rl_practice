@@ -29,6 +29,7 @@ class ReplayBufferData:
     log_probs: torch.Tensor  # (B, T)
     values: torch.Tensor  # (B, T)
     action_token_ids: torch.Tensor  # (B, T, max_new_tokens)
+    task_prompt_token_ids: torch.Tensor  # (B, T, max_prompt_tokens)
 
 
 class ReplayBuffer:
@@ -43,6 +44,7 @@ class ReplayBuffer:
         output_device: torch.device,
         storage_device: torch.device,
         max_new_tokens: int,
+        max_prompt_tokens: int,
         pad_token_id: int,
     ) -> None:
         self.size = size
@@ -51,6 +53,7 @@ class ReplayBuffer:
         self.output_device = output_device
         self.storage_device = storage_device
         self.max_new_tokens = max_new_tokens
+        self.max_prompt_tokens = max_prompt_tokens
         self.pad_token_id = pad_token_id
 
         assert self.seq_len <= self.size, "Replay buffer size must be >= sequence length."
@@ -72,6 +75,12 @@ class ReplayBuffer:
         self.values = init_tensor((size, 1))
         self.action_token_ids = torch.full(
             (size, max_new_tokens),
+            pad_token_id,
+            dtype=torch.long,
+            device=self.storage_device,
+        )
+        self.task_prompt_token_ids = torch.full(
+            (size, max_prompt_tokens),
             pad_token_id,
             dtype=torch.long,
             device=self.storage_device,
@@ -100,6 +109,7 @@ class ReplayBuffer:
             self.log_probs[:curr_size].to(self.output_device, non_blocking=True),
             self.values[:curr_size].to(self.output_device, non_blocking=True),
             self.action_token_ids[:curr_size].to(self.output_device, non_blocking=True),
+            self.task_prompt_token_ids[:curr_size].to(self.output_device, non_blocking=True),
         )
 
     def add(
@@ -113,6 +123,7 @@ class ReplayBuffer:
         log_prob: float,
         value: float,
         action_token_ids: list[int],
+        task_prompt_token_ids: list[int],
     ) -> None:
         # Copy tensors to buffer storage
         self.observations[self.idx].copy_(obs.reshape(self.observations[self.idx].shape))
@@ -128,6 +139,12 @@ class ReplayBuffer:
         token_len = min(len(action_token_ids), self.max_new_tokens)
         self.action_token_ids[self.idx, :token_len] = torch.tensor(
             action_token_ids[:token_len], dtype=torch.long, device=self.storage_device
+        )
+
+        self.task_prompt_token_ids[self.idx].fill_(self.pad_token_id)
+        prompt_len = min(len(task_prompt_token_ids), self.max_prompt_tokens)
+        self.task_prompt_token_ids[self.idx, :prompt_len] = torch.tensor(
+            task_prompt_token_ids[:prompt_len], dtype=torch.long, device=self.storage_device
         )
 
         self.idx = (self.idx + 1) % self.size
@@ -158,6 +175,7 @@ class ReplayBuffer:
             self.log_probs[seq_indices].to(self.output_device, non_blocking=True),
             self.values[seq_indices].to(self.output_device, non_blocking=True),
             self.action_token_ids[seq_indices].to(self.output_device, non_blocking=True),
+            self.task_prompt_token_ids[seq_indices].to(self.output_device, non_blocking=True),
         )
 
     def get_latest(self, seq_len: int) -> ReplayBufferData:
@@ -177,4 +195,5 @@ class ReplayBuffer:
             self.log_probs[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
             self.values[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
             self.action_token_ids[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
+            self.task_prompt_token_ids[indices].unsqueeze(0).to(self.output_device, non_blocking=True),
         )

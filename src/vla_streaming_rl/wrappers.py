@@ -359,10 +359,10 @@ class PromptWrapper(gym.Wrapper):
 
     def reset(self, **kwargs) -> tuple:
         obs, info = self.env.reset(**kwargs)
-        info["prompt"] = self.prompt
+        info["task_prompt"] = self.prompt
         return obs, info
 
     def step(self, action: np.ndarray) -> tuple:
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info["prompt"] = self.prompt
+        info["task_prompt"] = self.prompt
         return obs, reward, terminated, truncated, info

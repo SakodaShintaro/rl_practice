@@ -29,10 +29,7 @@ class ColorPanelEnv(BaseGUIEnv):
     def __init__(self, render_mode):
         super().__init__(render_mode)
         self._window_title = "Color Panel Game"
-        self.prompt = (
-            "Read the text instruction in the image and name the 4 quadrant colors. "
-            "Format: instruction=text TL=color TR=color BL=color BR=color"
-        )
+        self.task_prompt = ""
 
         half_w = self.width // 2
         half_h = self.height // 2
@@ -55,13 +52,14 @@ class ColorPanelEnv(BaseGUIEnv):
         super().reset(seed=seed)
         random.shuffle(self.color_assignment)
         self.correct_color_idx = random.randint(0, 3)
+        self._update_task_prompt()
         self.step_count = 0
         self.cursor_x = 0.5
         self.cursor_y = 0.5
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {"prompt": self.prompt}
+        return self._get_observation(), {"task_prompt": self.task_prompt}
 
     def step(self, action):
         self.step_count += 1
@@ -78,6 +76,7 @@ class ColorPanelEnv(BaseGUIEnv):
                 self.state = STATE_PLAYING
                 random.shuffle(self.color_assignment)
                 self.correct_color_idx = random.randint(0, 3)
+                self._update_task_prompt()
                 self.state_timer = 0
         else:
             if current_button_state:
@@ -101,6 +100,7 @@ class ColorPanelEnv(BaseGUIEnv):
                 else:
                     random.shuffle(self.color_assignment)
                     self.correct_color_idx = random.randint(0, 3)
+                    self._update_task_prompt()
 
         observation = self._get_observation()
         truncated = self.step_count >= 200
@@ -108,7 +108,7 @@ class ColorPanelEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {"prompt": self.prompt}
+        return observation, reward, False, truncated, {"task_prompt": self.task_prompt}
 
     def _get_observation(self):
         return self._render_frame()
@@ -130,34 +130,12 @@ class ColorPanelEnv(BaseGUIEnv):
                 image[qy : qy + qh, qx] = (0, 0, 0)
                 image[qy : qy + qh, qx + qw - 1] = (0, 0, 0)
 
-            self._draw_instruction(image)
-
         self._draw_cursor(image)
         return image
 
-    def _draw_instruction(self, image):
+    def _update_task_prompt(self):
         target_name = COLOR_NAMES[self.correct_color_idx]
-        text = f"Click {target_name}"
-
-        pil_image = Image.fromarray(image)
-        draw = ImageDraw.Draw(pil_image)
-        font = ImageFont.load_default()
-
-        text_bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = text_bbox[2] - text_bbox[0]
-        text_h = text_bbox[3] - text_bbox[1]
-
-        text_x = self.width // 2 - text_w // 2
-        text_y = 16 - text_h // 2
-
-        pad_x, pad_y = 6, 3
-        draw.rectangle(
-            [text_x - pad_x, text_y - pad_y, text_x + text_w + pad_x, text_y + text_h + pad_y],
-            fill=(0, 0, 0),
-        )
-        draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
-
-        image[:] = np.array(pil_image)
+        self.task_prompt = f"Click {target_name}"
 
     def _draw_score(self, image):
         pil_image = Image.fromarray(image)

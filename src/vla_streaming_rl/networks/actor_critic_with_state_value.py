@@ -133,6 +133,12 @@ class ActorCriticWithStateValue(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
+    def tokenize_task_prompt(self, task_prompt: str) -> list[int]:
+        return []
+
+    def decode_task_prompt_ids(self, token_ids: torch.Tensor) -> list[str]:
+        return [""] * token_ids.shape[0]
+
     @torch.inference_mode()
     def infer(
         self,
@@ -141,6 +147,7 @@ class ActorCriticWithStateValue(nn.Module):
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,  # SpatialTemporal: (B, space_len, state_size, n_layer); TemporalOnly: (B, state_size, n_layer)
+        task_prompts: list[str] | None = None,
     ) -> dict:
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 

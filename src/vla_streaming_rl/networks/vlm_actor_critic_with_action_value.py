@@ -290,11 +290,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        self.task_prompt = args.prompt if args.text_action_mode != "none" else ""
+        self.default_task_prompt = args.prompt if args.text_action_mode != "none" else ""
         self.parse_action_text = args.parse_action_text
         self.text_action_prompt = args.prompt
         self.high_level_prompt = args.prompt
         self.max_new_tokens = args.max_new_tokens
+        self.max_prompt_tokens = args.max_prompt_tokens
+        self.pad_token_id = args.pad_token_id
 
         # Determine which VLM layers have KV cache for cross-attention
         if self.is_qwen35:
@@ -397,6 +399,28 @@ class VLMActorCriticWithActionValue(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
 
+    def tokenize_task_prompt(self, task_prompt: str) -> list[int]:
+        """Tokenize a task prompt string into token IDs."""
+        return self.processor.tokenizer.encode(task_prompt, add_special_tokens=False)
+
+    def decode_task_prompt_ids(self, token_ids: torch.Tensor) -> list[str]:
+        """Decode task prompt token IDs back to strings.
+
+        Args:
+            token_ids: (B, max_prompt_tokens) tensor of token IDs
+        Returns:
+            List of decoded strings, one per batch element
+        """
+        results = []
+        for i in range(token_ids.shape[0]):
+            ids = token_ids[i]
+            # Remove padding tokens
+            mask = ids != self.pad_token_id
+            valid_ids = ids[mask].tolist()
+            text = self.processor.tokenizer.decode(valid_ids, skip_special_tokens=True)
+            results.append(text)
+        return results
+
     @torch.inference_mode()
     def infer(
         self,
@@ -405,8 +429,11 @@ class VLMActorCriticWithActionValue(nn.Module):
         a_seq: torch.Tensor,
         r_seq: torch.Tensor,
         rnn_state: torch.Tensor,
+        task_prompts: list[str] | None = None,
     ) -> dict:
-        state, action, q_value = self._infer(s_seq)
+        if task_prompts is None:
+            task_prompts = [self.default_task_prompt] * s_seq.shape[0]
+        state, action, q_value = self._infer(s_seq, task_prompts)
 
         next_image, next_reward = self.prediction_head.predict_next_state(
             self._state_for_predictor(state),
@@ -429,13 +456,18 @@ class VLMActorCriticWithActionValue(nn.Module):
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
-        _, _, next_q = self._infer(data.observations[:, self.horizon :])
+        # Decode task prompts from buffer: use last timestep's prompt for next-state
+        next_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -1])
+        # Use prompt at the boundary between seq and horizon for current state
+        curr_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -self.horizon - 1])
+
+        _, _, next_q = self._infer(data.observations[:, self.horizon :], next_prompts)
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._forward_state(curr_obs)
+        state, vlm_past_kv = self._forward_state(curr_obs, curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -462,13 +494,16 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_loss, activations_dict, info_dict
 
     def infer_and_compute_loss(self, data) -> tuple[dict, torch.Tensor, dict, dict]:
-        _, next_action, next_q = self._infer(data.observations[:, self.horizon :])
+        next_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -1])
+        curr_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -self.horizon - 1])
+
+        _, next_action, next_q = self._infer(data.observations[:, self.horizon :], next_prompts)
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._forward_state(curr_obs)
+        state, vlm_past_kv = self._forward_state(curr_obs, curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -539,7 +574,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         inputs = prepare_vlm_inputs(
             self.processor,
             dummy_images,
-            self.task_prompt,
+            [self.default_task_prompt],
             self.is_qwen35,
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
@@ -618,12 +653,14 @@ class VLMActorCriticWithActionValue(nn.Module):
         # language_model forward via the outer model (handles lm_head, cache wrapping)
         return self.vlm_model.forward(**forward_kwargs)
 
-    def _vlm_forward(self, images: torch.Tensor):
+    def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str] | None = None):
         """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
+        if task_prompts is None:
+            task_prompts = [self.default_task_prompt] * images.shape[0]
         inputs = prepare_vlm_inputs(
             self.processor,
             images,
-            self.task_prompt,
+            task_prompts,
             self.is_qwen35,
         )
 
@@ -667,13 +704,15 @@ class VLMActorCriticWithActionValue(nn.Module):
         state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
         return state_seq.flatten(start_dim=1)
 
-    def _forward_state(self, obs: torch.Tensor) -> tuple[torch.Tensor, object]:
+    def _forward_state(
+        self, obs: torch.Tensor, task_prompts: list[str] | None = None
+    ) -> tuple[torch.Tensor, object]:
         """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
         if self.state_mode == "expert":
-            vlm_past_kv = self._vlm_forward(obs)
+            vlm_past_kv = self._vlm_forward(obs, task_prompts)
             state = self._compute_state_from_kv(vlm_past_kv)
             return state, vlm_past_kv
-        state, vlm_past_kv = self._vlm_forward(obs)
+        state, vlm_past_kv = self._vlm_forward(obs, task_prompts)
         return state, vlm_past_kv
 
     def _extract_kv(self, vlm_past_kv) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
@@ -810,8 +849,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
 
     @torch.inference_mode()
-    def _infer(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        state, vlm_past_kv = self._forward_state(obs)
+    def _infer(
+        self, obs: torch.Tensor, task_prompts: list[str] | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        state, vlm_past_kv = self._forward_state(obs, task_prompts)
         B = obs.shape[0]
         mode = self.text_action_mode
 
