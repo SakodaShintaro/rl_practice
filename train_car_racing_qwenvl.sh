@@ -12,4 +12,3 @@ uv run python scripts/train.py qwenvl$suffix \
   --disable_state_predictor 0 \
   --batch_size 16 \
   --learning_rate 1e-5 \
-  --state_mode expert \
