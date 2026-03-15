@@ -306,20 +306,43 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.attn_layer_indices = list(range(num_layers))
         num_expert_layers = len(self.attn_layer_indices)
 
-        # State projection
-        state_out_dim = 4
-        self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
-        self.video_encoder = VideoEncoder()
-        self._target_seq_len, state_dim = self._compute_state_dim()
-        torch.cuda.empty_cache()
-
-        # Action Expert
+        # Shared rotary embedding from VLM
         expert_hidden = args.expert_hidden_size
+        state_expert_hidden = args.state_expert_hidden_size
         # PEFT wraps the model with an extra .model level
         if self.use_lora:
             rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
         else:
             rotary_emb = self.vlm_model.model.language_model.rotary_emb
+
+        # State computation mode
+        self.state_mode = args.state_mode
+        self.num_state_queries = args.num_state_queries
+
+        self.video_encoder = VideoEncoder()
+
+        if self.state_mode == "expert":
+            self.state_query_tokens = nn.Parameter(
+                torch.randn(1, args.num_state_queries, state_expert_hidden) * 0.02
+            )
+            state_dim = args.num_state_queries * state_expert_hidden
+            # State Expert: separate instance for state extraction
+            self.state_expert = ActionExpert(
+                num_layers=num_expert_layers,
+                expert_hidden_size=state_expert_hidden,
+                num_attention_heads=vlm_cfg.num_attention_heads,
+                num_kv_heads=vlm_cfg.num_key_value_heads,
+                head_dim=vlm_cfg.head_dim,
+                rms_norm_eps=vlm_cfg.rms_norm_eps,
+                rotary_emb=rotary_emb,
+            )
+        elif self.state_mode == "projection":
+            state_out_dim = 4
+            self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
+            self._target_seq_len, state_dim = self._compute_state_dim()
+            torch.cuda.empty_cache()
+
+        # Action Expert: cross-attends to VLM KV cache
         self.action_expert = ActionExpert(
             num_layers=num_expert_layers,
             expert_hidden_size=expert_hidden,
@@ -338,7 +361,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.time_mlp_in = nn.Linear(expert_hidden, expert_hidden)
         self.time_mlp_out = nn.Linear(expert_hidden, expert_hidden)
 
-        # Critic (state from VLM layer output, projected and flattened)
+        # Critic (state from StateExpert, flattened)
         self.value_head = ActionValueHead(
             in_channels=state_dim,
             action_dim=self.action_dim,
@@ -356,8 +379,9 @@ class VLMActorCriticWithActionValue(nn.Module):
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
         )
-        # Project VLM state to match FluxDiT context_in_dim
-        self.state_to_predictor_proj = nn.Linear(state_out_dim, hidden_image_dim)
+        # Project state output to match FluxDiT context_in_dim
+        predictor_in_dim = state_expert_hidden if self.state_mode == "expert" else 4
+        self.state_to_predictor_proj = nn.Linear(predictor_in_dim, hidden_image_dim)
 
         self.value_range = 1.0
         if self.num_bins > 1:
@@ -411,7 +435,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._vlm_forward(curr_obs)
+        state, vlm_past_kv = self._forward_state(curr_obs)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -444,7 +468,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._vlm_forward(curr_obs)
+        state, vlm_past_kv = self._forward_state(curr_obs)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -595,7 +619,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.forward(**forward_kwargs)
 
     def _vlm_forward(self, images: torch.Tensor):
-        """Run VLM forward and extract state + past_key_values (with RoPE)."""
+        """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
         inputs = prepare_vlm_inputs(
             self.processor,
             images,
@@ -611,25 +635,46 @@ class VLMActorCriticWithActionValue(nn.Module):
             with torch.no_grad():
                 outputs = self._vlm_language_forward(inputs, inputs_embeds)
 
-        all_hidden_states = outputs.hidden_states
-
-        # State: target_layer_idx → out_proj → pad/truncate → flatten
-        hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
-        state = self.state_out_proj(hidden)  # (B, vlm_seq_len, state_out_dim)
-        seq_len = state.shape[1]
-        if seq_len > self._target_seq_len:
-            state = state[:, seq_len - self._target_seq_len :, :]
-        elif seq_len < self._target_seq_len:
-            pad = torch.zeros(
-                state.shape[0], self._target_seq_len - seq_len, state.shape[2], device=state.device
-            )
-            state = torch.cat([pad, state], dim=1)
-        state = state.flatten(start_dim=1)  # (B, state_dim)
-
         # Store last input_id for text generation seeding
         self._last_input_ids = inputs["input_ids"]
 
-        return state, outputs.past_key_values
+        if self.state_mode == "projection":
+            all_hidden_states = outputs.hidden_states
+            hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
+            state = self.state_out_proj(hidden)
+            seq_len = state.shape[1]
+            if seq_len > self._target_seq_len:
+                state = state[:, seq_len - self._target_seq_len :, :]
+            elif seq_len < self._target_seq_len:
+                pad = torch.zeros(
+                    state.shape[0],
+                    self._target_seq_len - seq_len,
+                    state.shape[2],
+                    device=state.device,
+                )
+                state = torch.cat([pad, state], dim=1)
+            return state.flatten(start_dim=1), outputs.past_key_values
+
+        return outputs.past_key_values
+
+    def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
+        """Run state query tokens through StateExpert with zero adaRMS conditioning."""
+        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
+        B = vlm_kv_list[0][0].shape[0]
+        query = self.state_query_tokens.expand(B, -1, -1)
+        state_expert_hidden = self.state_query_tokens.shape[-1]
+        adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
+        state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
+        return state_seq.flatten(start_dim=1)
+
+    def _forward_state(self, obs: torch.Tensor) -> tuple[torch.Tensor, object]:
+        """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
+        if self.state_mode == "expert":
+            vlm_past_kv = self._vlm_forward(obs)
+            state = self._compute_state_from_kv(vlm_past_kv)
+            return state, vlm_past_kv
+        state, vlm_past_kv = self._vlm_forward(obs)
+        return state, vlm_past_kv
 
     def _extract_kv(self, vlm_past_kv) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
         """Extract (K, V) pairs for the attention layers used by ActionExpert.
@@ -766,7 +811,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     @torch.inference_mode()
     def _infer(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        state, vlm_past_kv = self._vlm_forward(obs)
+        state, vlm_past_kv = self._forward_state(obs)
         B = obs.shape[0]
         mode = self.text_action_mode
 
@@ -885,13 +930,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         return total_actor_loss, activations_dict, info_dict
 
     def _state_for_predictor(self, state: torch.Tensor) -> torch.Tensor:
-        """Reshape and project state for StatePredictionHead context.
-
-        state: (B, target_seq_len * state_out_dim) -> (B, target_seq_len, hidden_image_dim)
-        """
+        """Reshape and project state for StatePredictionHead context."""
         B = state.shape[0]
-        x = state.view(B, self._target_seq_len, -1)  # (B, target_seq_len, state_out_dim)
-        return self.state_to_predictor_proj(x)  # (B, target_seq_len, hidden_image_dim)
+        if self.state_mode == "expert":
+            x = state.view(B, self.num_state_queries, -1)
+        else:
+            x = state.view(B, self._target_seq_len, -1)
+        return self.state_to_predictor_proj(x)
 
     def _compute_sequence_loss(self, data, curr_state):
         if self.disable_state_predictor:
