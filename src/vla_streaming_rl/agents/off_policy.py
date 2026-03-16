@@ -92,7 +92,7 @@ class OffPolicyAgent:
         reward: float,
         terminated: bool,
         truncated: bool,
-        task_prompt: str = "",
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
@@ -183,7 +183,7 @@ class OffPolicyAgent:
         reward: float,
         terminated: bool,
         truncated: bool,
-        task_prompt: str = "",
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 

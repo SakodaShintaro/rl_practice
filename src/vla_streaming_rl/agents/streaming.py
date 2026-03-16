@@ -113,7 +113,7 @@ class StreamingAgent:
         terminated: bool,
         truncated: bool,
         info_dict: dict,
-        task_prompt: str = "",
+        task_prompt: str,
     ) -> None:
         if terminated or truncated:
             self.action_chunk = None
@@ -181,7 +181,7 @@ class StreamingAgent:
         reward: float,
         terminated: bool,
         truncated: bool,
-        task_prompt: str = "",
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
         self._prepare_step(obs, reward, terminated, truncated, info_dict, task_prompt)
@@ -207,7 +207,7 @@ class StreamingAgent:
         reward: float,
         terminated: bool,
         truncated: bool,
-        task_prompt: str = "",
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
         self._prepare_step(obs, reward, terminated, truncated, info_dict, task_prompt)
