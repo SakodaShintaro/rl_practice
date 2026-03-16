@@ -202,7 +202,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clip_param_policy", type=float, default=0.2)
     parser.add_argument("--clip_param_value", type=float, default=0.2)
     parser.add_argument("--max_new_tokens", type=int, default=64)
-    parser.add_argument("--max_prompt_tokens", type=int, default=32)
+    parser.add_argument("--max_prompt_tokens", type=int, default=256)
     parser.add_argument("--pad_token_id", type=int, default=0)
     parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
     parser.add_argument("--text_q_margin", type=float, default=1.0)
