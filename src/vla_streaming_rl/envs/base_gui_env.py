@@ -10,7 +10,7 @@ class BaseGUIEnv(gym.Env):
     """Base environment for GUI games with delta mouse movement.
 
     Provides:
-    - Common action/observation spaces (192x192 RGB, delta mouse)
+    - Common action/observation spaces (RGB, delta mouse)
     - Cursor position tracking
     - Cursor rendering (crosshair)
     - Pygame human-mode display
@@ -22,8 +22,8 @@ class BaseGUIEnv(gym.Env):
     def __init__(self, render_mode):
         super().__init__()
         self.render_mode = render_mode
-        self.width = 192
-        self.height = 192
+        self.width = 96
+        self.height = 96
 
         # Action: (dx, dy, button) ∈ [-1, 1]³
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
