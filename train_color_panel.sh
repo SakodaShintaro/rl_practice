@@ -8,7 +8,7 @@ uv run python scripts/train.py baseline$suffix \
   --env_id ColorPanel-v0 \
   --agent_type off_policy \
   --network_class vlm_actor_critic_with_action_value \
-  --step_limit 80_000 \
+  --step_limit 400_000 \
   --batch_size 16 \
   --learning_rate 1e-5 \
   --use_done 0 \
