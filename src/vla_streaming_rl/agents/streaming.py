@@ -119,7 +119,7 @@ class StreamingAgent:
             self.action_chunk = None
             self.chunk_step = 0
             self.prev_action_token_ids = []
-            self._episode_reset = True
+            self._episode_reset = self.use_done
 
         action_norm = np.linalg.norm(self.prev_action)
         if not self.normalizing_by_return:
