@@ -49,7 +49,7 @@ class ColorPanelEnv(BaseGUIEnv):
         self.cursor_y = 0.5
         if self.render_mode == "human":
             print(f"\n=== {self.task_prompt} ===")
-        return self._get_observation(), {"task_prompt": self.task_prompt}
+        return self._render_frame(), {"task_prompt": self.task_prompt}
 
     def step(self, action):
         self.step_count += 1
@@ -78,7 +78,7 @@ class ColorPanelEnv(BaseGUIEnv):
             self.correct_color_idx = random.randint(0, 3)
             self._update_task_prompt()
 
-        observation = self._get_observation()
+        observation = self._render_frame()
         truncated = self.step_count >= 200 if self.render_mode != "human" else False
 
         if self.render_mode == "human":
@@ -86,9 +86,6 @@ class ColorPanelEnv(BaseGUIEnv):
             print(f"[{self.task_prompt}] reward={reward:.4f}")
 
         return observation, reward, False, truncated, {"task_prompt": self.task_prompt}
-
-    def _get_observation(self):
-        return self._render_frame()
 
     def _render_frame(self):
         image = np.full((self.height, self.width, 3), 255, dtype=np.uint8)
