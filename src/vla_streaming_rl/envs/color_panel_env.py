@@ -59,6 +59,8 @@ class ColorPanelEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
+        if self.render_mode == "human":
+            print(f"\n=== {self.task_prompt} ===")
         return self._get_observation(), {"task_prompt": self.task_prompt}
 
     def step(self, action):
@@ -78,6 +80,8 @@ class ColorPanelEnv(BaseGUIEnv):
                 self.correct_color_idx = random.randint(0, 3)
                 self._update_task_prompt()
                 self.state_timer = 0
+                if self.render_mode == "human":
+                    print(f"\n=== {self.task_prompt} ===")
         else:
             if current_button_state:
                 clicked_quadrant = None
@@ -103,10 +107,11 @@ class ColorPanelEnv(BaseGUIEnv):
                     self._update_task_prompt()
 
         observation = self._get_observation()
-        truncated = self.step_count >= 200
+        truncated = self.step_count >= 200 if self.render_mode != "human" else False
 
         if self.render_mode == "human":
             self._render_human(observation)
+            print(f"[{self.task_prompt}] reward={reward:.4f}")
 
         return observation, reward, False, truncated, {"task_prompt": self.task_prompt}
 
