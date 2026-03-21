@@ -470,23 +470,19 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return outputs.past_key_values
 
-    def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
-        """Run state query tokens through StateExpert with zero adaRMS conditioning."""
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
-        B = vlm_kv_list[0][0].shape[0]
-        query = self.state_query_tokens.expand(B, -1, -1)
-        state_expert_hidden = self.state_query_tokens.shape[-1]
-        adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
-        state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
-        return state_seq.flatten(start_dim=1)
-
     def _forward_state(
         self, obs: torch.Tensor, task_prompts: list[str]
     ) -> tuple[torch.Tensor, object]:
         """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
         if self.state_mode == "expert":
             vlm_past_kv = self._vlm_forward(obs, task_prompts)
-            state = self._compute_state_from_kv(vlm_past_kv)
+            vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
+            B = vlm_kv_list[0][0].shape[0]
+            query = self.state_query_tokens.expand(B, -1, -1)
+            state_expert_hidden = self.state_query_tokens.shape[-1]
+            adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
+            state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
+            state = state_seq.flatten(start_dim=1)
             return state, vlm_past_kv
         state, vlm_past_kv = self._vlm_forward(obs, task_prompts)
         return state, vlm_past_kv
