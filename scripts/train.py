@@ -175,7 +175,6 @@ def parse_args() -> argparse.Namespace:
         "--vlm_model_id",
         type=str,
         default="Qwen/Qwen3.5-0.8B",
-        choices=["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3-VL-2B-Instruct"],
     )
     parser.add_argument("--expert_hidden_size", type=int, default=8)
     parser.add_argument("--state_expert_hidden_size", type=int, default=576)
@@ -299,9 +298,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         task_prompt = reset_info["task_prompt"]
 
         # initial action
-        action, agent_info = agent.select_action(
-            global_step, obs, 0.0, False, False, task_prompt
-        )
+        action, agent_info = agent.select_action(global_step, obs, 0.0, False, False, task_prompt)
 
         # initial render
         obs_for_render = obs.copy().transpose(1, 2, 0)

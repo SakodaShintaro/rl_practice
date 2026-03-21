@@ -13,7 +13,7 @@ from .prediction_head import StatePredictionHead
 from .reward_processor import RewardProcessor
 from .value_head import ActionValueHead, maybe_update_hl_gauss_range
 from .video_encoder import VideoEncoder
-from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
+from .vlm_backbone import load_model, prepare_vlm_inputs
 
 
 class VLMActorCriticWithActionValue(nn.Module):
@@ -68,7 +68,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.device = device
 
         # VLM config
-        self.is_qwen35 = is_qwen35(args.vlm_model_id)
         vlm_cfg = self.vlm_model.config.text_config
         vlm_hidden_size = vlm_cfg.hidden_size
         num_layers = vlm_cfg.num_hidden_layers
@@ -85,13 +84,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.pad_token_id = args.pad_token_id
 
         # Determine which VLM layers have KV cache for cross-attention
-        if self.is_qwen35:
-            layer_types = vlm_cfg.layer_types
-            self.attn_layer_indices = [
-                i for i, lt in enumerate(layer_types) if lt == "full_attention"
-            ]
-        else:
-            self.attn_layer_indices = list(range(num_layers))
+        layer_types = vlm_cfg.layer_types
+        self.attn_layer_indices = [i for i, lt in enumerate(layer_types) if lt == "full_attention"]
         num_expert_layers = len(self.attn_layer_indices)
 
         # Shared rotary embedding from VLM
@@ -361,7 +355,6 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.processor,
             dummy_images,
             [self.default_task_prompt],
-            self.is_qwen35,
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
         output = self._vlm_language_forward(inputs, inputs_embeds)
@@ -447,7 +440,6 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.processor,
             images,
             task_prompts,
-            self.is_qwen35,
         )
 
         inputs_embeds = self._build_inputs_embeds(inputs)
@@ -509,15 +501,9 @@ class VLMActorCriticWithActionValue(nn.Module):
             vlm_seq_len: sequence length of the VLM KV cache
         """
         kv_list = []
-        if self.is_qwen35:
-            for idx in self.attn_layer_indices:
-                kv_list.append((vlm_past_kv.key_cache[idx], vlm_past_kv.value_cache[idx]))
-            seq_len = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[2]
-        else:
-            for j in range(self.num_layers):
-                layer = vlm_past_kv.layers[j]
-                kv_list.append((layer.keys, layer.values))
-            seq_len = vlm_past_kv.layers[0].keys.shape[2]
+        for idx in self.attn_layer_indices:
+            kv_list.append((vlm_past_kv.key_cache[idx], vlm_past_kv.value_cache[idx]))
+        seq_len = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[2]
         return kv_list, seq_len
 
     def _denoise(
@@ -563,10 +549,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         if prompt:
             prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
-            if self.is_qwen35:
-                B = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[0]
-            else:
-                B = vlm_past_kv.layers[0].keys.shape[0]
+            B = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[0]
             next_ids = prompt_ids.expand(B, -1)  # (B, prompt_len)
             cur_pos = kv_len
         else:
