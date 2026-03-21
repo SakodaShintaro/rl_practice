@@ -432,10 +432,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         # language_model forward via the outer model (handles lm_head, cache wrapping)
         return self.vlm_model.forward(**forward_kwargs)
 
-    def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str] | None = None):
+    def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
         """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
-        if task_prompts is None:
-            task_prompts = [self.default_task_prompt] * images.shape[0]
         inputs = prepare_vlm_inputs(
             self.processor,
             images,
@@ -483,7 +481,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         return state_seq.flatten(start_dim=1)
 
     def _forward_state(
-        self, obs: torch.Tensor, task_prompts: list[str] | None = None
+        self, obs: torch.Tensor, task_prompts: list[str]
     ) -> tuple[torch.Tensor, object]:
         """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
         if self.state_mode == "expert":
