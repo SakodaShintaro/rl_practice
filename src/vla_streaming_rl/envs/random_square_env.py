@@ -57,7 +57,7 @@ class RandomSquareEnv(BaseGUIEnv):
         self.state = STATE_PLAYING
         self.current_score = 0.0
         self.state_timer = 0
-        return self._get_observation(), {"prompt": self.prompt}
+        return self._get_observation(), {"task_prompt": self.prompt}
 
     def step(self, action):
         self.step_count += 1
@@ -96,7 +96,7 @@ class RandomSquareEnv(BaseGUIEnv):
         if self.render_mode == "human":
             self._render_human(observation)
 
-        return observation, reward, False, truncated, {"prompt": self.prompt}
+        return observation, reward, False, truncated, {"task_prompt": self.prompt}
 
     def _get_observation(self):
         return self._render_frame()

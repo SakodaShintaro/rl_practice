@@ -87,6 +87,7 @@ def parse_args() -> argparse.Namespace:
             "FourQuadrant-v0",
             "RandomSquare-v0",
             "ColorPanel-v0",
+            "STL10Panel-v0",
             "MovingCircle-v0",
             "Hopper-v5",
         ],
@@ -202,6 +203,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clip_param_policy", type=float, default=0.2)
     parser.add_argument("--clip_param_value", type=float, default=0.2)
     parser.add_argument("--max_new_tokens", type=int, default=64)
+    parser.add_argument("--max_prompt_tokens", type=int, default=256)
     parser.add_argument("--pad_token_id", type=int, default=0)
     parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
     parser.add_argument("--text_q_margin", type=float, default=1.0)
@@ -274,7 +276,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     score_list = []
     best_score = -float("inf")
     obs, reset_info = env.reset(seed=seed)
-    args.prompt = reset_info["prompt"]
+    task_prompt = reset_info["task_prompt"]
+    args.prompt = task_prompt
     step_limit = args.step_limit
 
     if args.agent_type == "off_policy":
@@ -292,10 +295,13 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     episode_id = 0
     while True:
         # initialize episode
-        obs, _ = env.reset()
+        obs, reset_info = env.reset()
+        task_prompt = reset_info["task_prompt"]
 
         # initial action
-        action, agent_info = agent.select_action(global_step, obs, 0.0, False, False)
+        action, agent_info = agent.select_action(
+            global_step, obs, 0.0, False, False, task_prompt
+        )
 
         # initial render
         obs_for_render = obs.copy().transpose(1, 2, 0)
@@ -321,12 +327,15 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
             # step
             obs, reward, terminated, truncated, env_info = env.step(action)
+            task_prompt = env_info["task_prompt"]
 
             # save action and reward
             action_list.append(action.copy())
             reward_list.append(reward)
 
-            action, agent_info = agent.step(global_step, obs, reward, terminated, truncated)
+            action, agent_info = agent.step(
+                global_step, obs, reward, terminated, truncated, task_prompt
+            )
 
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)

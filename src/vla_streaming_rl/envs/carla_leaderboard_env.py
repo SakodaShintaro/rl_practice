@@ -229,7 +229,7 @@ class CARLALeaderboardEnv(gym.Env):
                 break
             time.sleep(0.1)
 
-        return self.current_image.copy(), {"prompt": self.prompt}
+        return self.current_image.copy(), {"task_prompt": self.prompt}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # Apply action: action[0]=steer, action[1]=gas_or_brake (same as CarRacing)
@@ -296,7 +296,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.vehicle_physics.update(self.vehicle)
 
         info = {
-            "prompt": self.prompt,
+            "task_prompt": self.prompt,
             "route_completion": self.route_completion,
             "infractions": self.infractions.copy(),
             "velocity": self.vehicle_physics.velocity,

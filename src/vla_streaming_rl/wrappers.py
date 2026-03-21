@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import re
+from pathlib import Path
 
 import cv2
 import gymnasium as gym
@@ -12,6 +13,7 @@ from vla_streaming_rl.envs.four_quadrant_env import FourQuadrantEnv
 from vla_streaming_rl.envs.letter_tracing_env import LetterTracingEnv
 from vla_streaming_rl.envs.moving_circle_env import MovingCircleEnv
 from vla_streaming_rl.envs.random_square_env import RandomSquareEnv
+from vla_streaming_rl.envs.stl10_panel_env import STL10PanelEnv
 
 REPEAT = 4
 
@@ -97,7 +99,6 @@ def make_env(env_id: str) -> gym.Env:
         env = LetterTracingEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         return env
@@ -106,7 +107,6 @@ def make_env(env_id: str) -> gym.Env:
         env = FourQuadrantEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         return env
@@ -115,7 +115,6 @@ def make_env(env_id: str) -> gym.Env:
         env = RandomSquareEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         return env
@@ -124,8 +123,17 @@ def make_env(env_id: str) -> gym.Env:
         env = ColorPanelEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
+        env.unwrapped.eval_range = 20
+        env.unwrapped.parse_action_text = _color_panel_parse_action
+        return env
+
+    elif env_id == "STL10Panel-v0":
+        data_dir = Path.home() / "data/stl-10/train"
+        env = STL10PanelEnv(render_mode="rgb_array", data_dir=data_dir)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env.unwrapped.spec = EnvSpec(id="STL10Panel-v0", reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         env.unwrapped.parse_action_text = _color_panel_parse_action
         return env
@@ -134,7 +142,6 @@ def make_env(env_id: str) -> gym.Env:
         env = MovingCircleEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         return env
@@ -359,10 +366,10 @@ class PromptWrapper(gym.Wrapper):
 
     def reset(self, **kwargs) -> tuple:
         obs, info = self.env.reset(**kwargs)
-        info["prompt"] = self.prompt
+        info["task_prompt"] = self.prompt
         return obs, info
 
     def step(self, action: np.ndarray) -> tuple:
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info["prompt"] = self.prompt
+        info["task_prompt"] = self.prompt
         return obs, reward, terminated, truncated, info

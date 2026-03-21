@@ -76,6 +76,7 @@ class OffPolicyAgent:
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
             max_new_tokens=args.max_new_tokens,
+            max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=args.pad_token_id,
         )
 
@@ -85,7 +86,13 @@ class OffPolicyAgent:
 
     @torch.inference_mode()
     def select_action(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+        self,
+        global_step: int,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
@@ -106,6 +113,7 @@ class OffPolicyAgent:
         obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
         normalized_action = (self.prev_action - self.action_bias) / self.action_scale
+        task_prompt_token_ids = self.network.tokenize_task_prompt(task_prompt)
         self.rb.add(
             obs_tensor,
             obs_z,
@@ -116,6 +124,7 @@ class OffPolicyAgent:
             0.0,
             0.0,
             [],
+            task_prompt_token_ids,
         )
 
         # Use cached action from chunk if available (except during random exploration)
@@ -140,6 +149,7 @@ class OffPolicyAgent:
             latest_data.actions,
             latest_data.rewards,
             self.rnn_state,
+            task_prompts=[task_prompt],
         )
         self.rnn_state = infer_dict["rnn_state"]
         info_dict["value"] = infer_dict["value"]
@@ -167,7 +177,13 @@ class OffPolicyAgent:
         return action, info_dict
 
     def step(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+        self,
+        global_step: int,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
@@ -176,7 +192,9 @@ class OffPolicyAgent:
         info_dict.update(train_info)
 
         # make decision
-        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
+        action, action_info = self.select_action(
+            global_step, obs, reward, terminated, truncated, task_prompt
+        )
         info_dict.update(action_info)
 
         return action, info_dict

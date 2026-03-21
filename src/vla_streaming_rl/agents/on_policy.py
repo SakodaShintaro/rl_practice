@@ -108,6 +108,7 @@ class OnPolicyAgent:
             output_device=self.device,
             storage_device=torch.device(args.buffer_device),
             max_new_tokens=self.max_new_tokens,
+            max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=self.pad_token_id,
         )
 
@@ -122,7 +123,13 @@ class OnPolicyAgent:
 
     @torch.inference_mode()
     def select_action(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+        self,
+        global_step: int,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
@@ -143,6 +150,7 @@ class OnPolicyAgent:
         obs_z = self.network.image_processor.encode(obs_tensor.unsqueeze(0))
         obs_z = obs_z.squeeze(0)
         normalized_action = (self.prev_action - self.action_bias) / self.action_scale
+        task_prompt_token_ids = self.network.tokenize_task_prompt(task_prompt)
         self.rb.add(
             obs_tensor,
             obs_z,
@@ -153,6 +161,7 @@ class OnPolicyAgent:
             self.prev_logp,
             self.prev_value,
             self.prev_action_token_ids,
+            task_prompt_token_ids,
         )
 
         # Use cached action from chunk if available
@@ -175,6 +184,7 @@ class OnPolicyAgent:
             latest_data.actions,
             latest_data.rewards,
             self.rnn_state,
+            task_prompts=[task_prompt],
         )
         self.rnn_state = result_dict["rnn_state"]
 
@@ -215,7 +225,13 @@ class OnPolicyAgent:
         return action, info_dict
 
     def step(
-        self, global_step: int, obs: np.ndarray, reward: float, terminated: bool, truncated: bool
+        self,
+        global_step: int,
+        obs: np.ndarray,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        task_prompt: str,
     ) -> tuple[np.ndarray, dict]:
         info_dict = {}
 
@@ -224,7 +240,9 @@ class OnPolicyAgent:
         info_dict.update(train_info)
 
         # make decision
-        action, action_info = self.select_action(global_step, obs, reward, terminated, truncated)
+        action, action_info = self.select_action(
+            global_step, obs, reward, terminated, truncated, task_prompt
+        )
         info_dict.update(action_info)
 
         return action, info_dict
@@ -252,6 +270,7 @@ class OnPolicyAgent:
         done = buffer_data.dones.view(-1, 1)
         rnn_states = buffer_data.rnn_state
         action_token_ids = buffer_data.action_token_ids
+        task_prompt_token_ids_all = buffer_data.task_prompt_token_ids
 
         bias = torch.tensor(self.action_bias, device=self.device).view(1, -1)
         scale = torch.tensor(self.action_scale, device=self.device).view(1, -1)
@@ -302,6 +321,7 @@ class OnPolicyAgent:
                     log_probs=old_a_logp[indices],
                     values=v[indices],
                     action_token_ids=action_token_ids[indices],
+                    task_prompt_token_ids=task_prompt_token_ids_all[indices],
                 )
                 # Index for chunk start point (last frame of input sequence)
                 chunk_start_idx = indices[:, -self.horizon - 1]

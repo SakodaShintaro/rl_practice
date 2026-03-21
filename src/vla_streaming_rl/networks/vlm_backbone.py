@@ -86,7 +86,7 @@ def _images_to_pil(images: torch.Tensor) -> list[Image.Image]:
 def prepare_vlm_inputs(
     processor: AutoProcessor,
     images: torch.Tensor,
-    task_prompt: str,
+    task_prompts: list[str],
     is_qwen35: bool,
 ) -> dict[str, torch.Tensor]:
     """Build VLM messages and prepare model inputs.
@@ -98,7 +98,7 @@ def prepare_vlm_inputs(
     Args:
         processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
-        task_prompt: Task prompt string (can be empty)
+        task_prompts: List of task prompt strings, one per batch element
         is_qwen35: Whether the model is Qwen3.5
 
     Returns:
@@ -114,8 +114,9 @@ def prepare_vlm_inputs(
     messages = []
     for b in range(batch_size):
         content: list[dict] = []
-        if task_prompt:
-            content.append({"type": "text", "text": task_prompt})
+        prompt = task_prompts[b]
+        if prompt:
+            content.append({"type": "text", "text": prompt})
         # Last frame as image
         last_img = images[b, seq_len - 1].to(torch.float32)
         last_img_np = (last_img.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)

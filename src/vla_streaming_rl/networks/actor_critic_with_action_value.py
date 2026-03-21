@@ -130,6 +130,12 @@ class ActorCriticWithActionValue(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
+    def tokenize_task_prompt(self, task_prompt: str) -> list[int]:
+        return []
+
+    def decode_task_prompt_ids(self, token_ids: torch.Tensor) -> list[str]:
+        return [""] * token_ids.shape[0]
+
     @torch.inference_mode()
     def infer(
         self,
@@ -138,6 +144,7 @@ class ActorCriticWithActionValue(nn.Module):
         a_seq: torch.Tensor,  # (B, T, action_dim)
         r_seq: torch.Tensor,  # (B, T, 1)
         rnn_state: torch.Tensor,
+        task_prompts: list[str] | None = None,
     ) -> dict:
         assert s_seq.shape[0] == 1, "Batch size must be 1 for inference"
 

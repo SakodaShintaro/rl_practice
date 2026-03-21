@@ -10,7 +10,7 @@ class BaseGUIEnv(gym.Env):
     """Base environment for GUI games with delta mouse movement.
 
     Provides:
-    - Common action/observation spaces (192x192 RGB, delta mouse)
+    - Common action/observation spaces (RGB, delta mouse)
     - Cursor position tracking
     - Cursor rendering (crosshair)
     - Pygame human-mode display
@@ -22,8 +22,8 @@ class BaseGUIEnv(gym.Env):
     def __init__(self, render_mode):
         super().__init__()
         self.render_mode = render_mode
-        self.width = 192
-        self.height = 192
+        self.width = 96
+        self.height = 96
 
         # Action: (dx, dy, button) ∈ [-1, 1]³
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
@@ -148,19 +148,21 @@ class BaseGUIEnv(gym.Env):
             mouse_x, mouse_y = pygame.mouse.get_pos()
             mouse_pressed = pygame.mouse.get_pressed()[0]
 
-            # Convert mouse position delta to action delta (normalized)
-            # ±1.0 in action space = ±0.5 in cursor space, so scale accordingly
-            dx_pixels = mouse_x - prev_mouse_x
-            dy_pixels = mouse_y - prev_mouse_y
-            dx = dx_pixels / (self.width * 0.5)  # pixels -> action scale
-            dy = dy_pixels / (self.height * 0.5)
-            dx = np.clip(dx, -1.0, 1.0)
-            dy = np.clip(dy, -1.0, 1.0)
             button = 1.0 if mouse_pressed else 0.0
 
-            prev_mouse_x, prev_mouse_y = mouse_x, mouse_y
+            if self.absolute_mouse:
+                # Convert pixel position to [-1, 1] range
+                ax = (mouse_x / self.width) * 2.0 - 1.0
+                ay = (mouse_y / self.height) * 2.0 - 1.0
+            else:
+                # Convert mouse position delta to action delta (normalized)
+                dx_pixels = mouse_x - prev_mouse_x
+                dy_pixels = mouse_y - prev_mouse_y
+                ax = np.clip(dx_pixels / (self.width * 0.5), -1.0, 1.0)
+                ay = np.clip(dy_pixels / (self.height * 0.5), -1.0, 1.0)
+                prev_mouse_x, prev_mouse_y = mouse_x, mouse_y
 
-            action = np.array([dx, dy, button], dtype=np.float32)
+            action = np.array([ax, ay, button], dtype=np.float32)
             obs, reward, terminated, truncated, info = self.step(action)
 
             if terminated or truncated:
@@ -172,6 +174,6 @@ class BaseGUIEnv(gym.Env):
             surface = pygame.surfarray.make_surface(obs.transpose(1, 0, 2))
             screen.blit(surface, (0, 0))
             pygame.display.flip()
-            clock.tick(self.metadata["render_fps"])
+            clock.tick(10)
 
         pygame.quit()
