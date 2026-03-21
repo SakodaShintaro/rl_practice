@@ -6,8 +6,7 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
-from .action_expert import ActionExpert, create_sinusoidal_pos_embedding
-from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
+from .action_tokenizer import ActionTokenizer
 from .image_processor import ImageProcessor
 from .prediction_head import StatePredictionHead
 from .reward_processor import RewardProcessor
@@ -17,13 +16,13 @@ from .vlm_backbone import load_model, prepare_vlm_inputs
 
 
 class VLMActorCriticWithActionValue(nn.Module):
-    """VLM backbone + Action Expert (flow matching) + Action Value critic.
+    """VLM backbone + Action Token policy + Action Value critic.
 
-    Architecture (Knowledge Insulation):
-    - VLM (Qwen3-VL, frozen): processes images + text, provides intermediate representations
-    - Action Expert: transformer that cross-attends to VLM at each layer, denoises actions
+    Architecture:
+    - VLM (Qwen3.5, frozen or LoRA): processes images + text
+    - Actor: VLM lm_head outputs logits over action token bins (categorical policy)
     - Critic: Q(state, action) with dueling architecture
-    - Stop-gradient: VLM hidden states are detached before Expert uses them
+    - Actor loss: policy gradient weighted by Q-value advantage
     """
 
     def __init__(
@@ -40,11 +39,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.action_dim = action_space_shape[0]
         self.observation_space_shape = observation_space_shape
         self.critic_loss_weight = args.critic_loss_weight
-        self.denoising_steps = args.denoising_steps
-        self.denoising_time = args.denoising_time
-        self.dacer_loss_weight = args.dacer_loss_weight
-        self.text_q_margin = args.text_q_margin
-        self.text_action_mode = args.text_action_mode
 
         self.predictor_step_num = args.predictor_step_num
         self.disable_state_predictor = args.disable_state_predictor
@@ -70,80 +64,26 @@ class VLMActorCriticWithActionValue(nn.Module):
         # VLM config
         vlm_cfg = self.vlm_model.config.text_config
         vlm_hidden_size = vlm_cfg.hidden_size
-        num_layers = vlm_cfg.num_hidden_layers
-        self.num_layers = num_layers
-        self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
-        self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        self.default_task_prompt = args.prompt if args.text_action_mode != "none" else ""
-        self.parse_action_text = args.parse_action_text
-        self.text_action_prompt = args.prompt
-        self.high_level_prompt = args.prompt
-        self.max_new_tokens = args.max_new_tokens
+        self.default_task_prompt = args.prompt
         self.max_prompt_tokens = args.max_prompt_tokens
         self.pad_token_id = args.pad_token_id
 
-        # Determine which VLM layers have KV cache for cross-attention
-        layer_types = vlm_cfg.layer_types
-        self.attn_layer_indices = [i for i, lt in enumerate(layer_types) if lt == "full_attention"]
-        num_expert_layers = len(self.attn_layer_indices)
-
-        # Shared rotary embedding from VLM
-        expert_hidden = args.expert_hidden_size
-        state_expert_hidden = args.state_expert_hidden_size
-        # PEFT wraps the model with an extra .model level
-        if self.use_lora:
-            rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
-        else:
-            rotary_emb = self.vlm_model.model.language_model.rotary_emb
-
-        # State computation mode
-        self.state_mode = args.state_mode
-        self.num_state_queries = args.num_state_queries
+        # Action tokenizer: maps continuous actions to discrete token IDs
+        vocab_size = vlm_cfg.vocab_size
+        self.action_tokenizer = ActionTokenizer(vocab_size)
+        self.action_token_begin_idx = self.action_tokenizer.action_token_begin_idx
+        self.n_action_bins = self.action_tokenizer.n_bins
 
         self.video_encoder = VideoEncoder()
 
-        if self.state_mode == "expert":
-            self.state_query_tokens = nn.Parameter(
-                torch.randn(1, args.num_state_queries, state_expert_hidden) * 0.02
-            )
-            state_dim = args.num_state_queries * state_expert_hidden
-            # State Expert: separate instance for state extraction
-            self.state_expert = ActionExpert(
-                num_layers=num_expert_layers,
-                expert_hidden_size=state_expert_hidden,
-                num_attention_heads=vlm_cfg.num_attention_heads,
-                num_kv_heads=vlm_cfg.num_key_value_heads,
-                head_dim=vlm_cfg.head_dim,
-                rms_norm_eps=vlm_cfg.rms_norm_eps,
-                rotary_emb=rotary_emb,
-            )
-        elif self.state_mode == "projection":
-            state_out_dim = 4
-            self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
-            self._target_seq_len, state_dim = self._compute_state_dim()
-            torch.cuda.empty_cache()
+        # State via projection from VLM hidden states
+        state_out_dim = 4
+        self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
+        self._target_seq_len, state_dim = self._compute_state_dim()
+        torch.cuda.empty_cache()
 
-        # Action Expert: cross-attends to VLM KV cache
-        self.action_expert = ActionExpert(
-            num_layers=num_expert_layers,
-            expert_hidden_size=expert_hidden,
-            num_attention_heads=vlm_cfg.num_attention_heads,
-            num_kv_heads=vlm_cfg.num_key_value_heads,
-            head_dim=vlm_cfg.head_dim,
-            rms_norm_eps=vlm_cfg.rms_norm_eps,
-            rotary_emb=rotary_emb,
-        )
-
-        # Action in/out projections
-        self.action_in_proj = nn.Linear(self.action_dim, expert_hidden)
-        self.action_out_proj = nn.Linear(expert_hidden, self.action_dim)
-
-        # Time MLP for adaRMS conditioning
-        self.time_mlp_in = nn.Linear(expert_hidden, expert_hidden)
-        self.time_mlp_out = nn.Linear(expert_hidden, expert_hidden)
-
-        # Critic (state from StateExpert, flattened)
+        # Critic (state, action -> Q-value)
         self.value_head = ActionValueHead(
             in_channels=state_dim,
             action_dim=self.action_dim,
@@ -161,9 +101,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
         )
-        # Project state output to match FluxDiT context_in_dim
-        predictor_in_dim = state_expert_hidden if self.state_mode == "expert" else 4
-        self.state_to_predictor_proj = nn.Linear(predictor_in_dim, hidden_image_dim)
+        self.state_to_predictor_proj = nn.Linear(state_out_dim, hidden_image_dim)
 
         self.value_range = 1.0
         if self.num_bins > 1:
@@ -194,7 +132,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         results = []
         for i in range(token_ids.shape[0]):
             ids = token_ids[i]
-            # Remove padding tokens
             mask = ids != self.pad_token_id
             valid_ids = ids[mask].tolist()
             text = self.processor.tokenizer.decode(valid_ids, skip_special_tokens=True)
@@ -213,7 +150,7 @@ class VLMActorCriticWithActionValue(nn.Module):
     ) -> dict:
         if task_prompts is None:
             task_prompts = [self.default_task_prompt] * s_seq.shape[0]
-        state, action, q_value = self._infer(s_seq, task_prompts)
+        state, action, log_probs, q_value = self._infer(s_seq, task_prompts)
 
         next_image, next_reward = self.prediction_head.predict_next_state(
             self._state_for_predictor(state),
@@ -225,29 +162,25 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         return {
             "action": action,
-            "a_logp": torch.zeros(s_seq.shape[0], 1, device=self.device),
+            "a_logp": log_probs.sum(dim=-1, keepdim=True),  # (B, 1)
             "value": q_value.item(),
             "x": state,
             "rnn_state": rnn_state,
             "next_image": next_image,
             "next_reward": next_reward,
-            "action_token_ids": [],
-            "parse_success": True,
         }
 
     def compute_loss(self, data) -> tuple[torch.Tensor, dict, dict]:
-        # Decode task prompts from buffer: use last timestep's prompt for next-state
         next_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -1])
-        # Use prompt at the boundary between seq and horizon for current state
         curr_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -self.horizon - 1])
 
-        _, _, next_q = self._infer(data.observations[:, self.horizon :], next_prompts)
+        _, _, _, next_q = self._infer(data.observations[:, self.horizon :], next_prompts)
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._forward_state(curr_obs, curr_prompts)
+        state, logits = self._vlm_forward(curr_obs, curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -255,8 +188,10 @@ class VLMActorCriticWithActionValue(nn.Module):
             state, action_chunk, target_value
         )
 
-        # Actor loss (advantage + DACER)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
+        # Actor loss (policy gradient with Q-value advantage)
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(
+            state, logits
+        )
 
         # Sequence (state prediction) loss
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state)
@@ -277,13 +212,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         next_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -1])
         curr_prompts = self.decode_task_prompt_ids(data.task_prompt_token_ids[:, -self.horizon - 1])
 
-        _, next_action, next_q = self._infer(data.observations[:, self.horizon :], next_prompts)
+        _, next_action, _, next_q = self._infer(data.observations[:, self.horizon :], next_prompts)
         chunk_rewards = data.rewards[:, -self.horizon :]
         chunk_dones = data.dones[:, -self.horizon :]
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._forward_state(curr_obs, curr_prompts)
+        state, logits = self._vlm_forward(curr_obs, curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -291,8 +226,10 @@ class VLMActorCriticWithActionValue(nn.Module):
             state, action_chunk, target_value
         )
 
-        # Actor loss (advantage + DACER)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
+        # Actor loss (policy gradient with Q-value advantage)
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(
+            state, logits
+        )
 
         # Sequence (state prediction) loss
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state)
@@ -376,19 +313,13 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.model
 
     def _build_inputs_embeds(self, inputs: dict) -> torch.Tensor:
-        """Build inputs_embeds by running video encoder on all frames and injecting last-frame embeddings.
-
-        1. Embed input_ids to get inputs_embeds (with <image_pad> as placeholder)
-        2. Run all frames through ViT → extract last frame embeddings
-        3. masked_scatter last-frame embeddings into <image_pad> positions
-        """
+        """Build inputs_embeds by running video encoder on all frames and injecting last-frame embeddings."""
         vlm_inner = self._get_vlm_model_inner()
         inputs_embeds = vlm_inner.get_input_embeddings()(inputs["input_ids"])
 
         batch_size = inputs["input_ids"].shape[0]
         seq_len = inputs["seq_len"]
 
-        # Run video encoder: all frames through ViT, keep last frame
         last_frame_embeds = self.video_encoder(
             self._get_visual(),
             inputs["all_pixel_values"],
@@ -398,7 +329,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         last_frame_embeds = last_frame_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
 
-        # masked_scatter into <image_pad> positions
         image_token_id = vlm_inner.config.image_token_id
         image_mask = (inputs["input_ids"] == image_token_id).unsqueeze(-1).expand_as(inputs_embeds)
         inputs_embeds = inputs_embeds.masked_scatter(image_mask, last_frame_embeds)
@@ -409,7 +339,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         """Run the VLM language model with pre-built inputs_embeds (no pixel_values)."""
         vlm_inner = self._get_vlm_model_inner()
 
-        # Compute 3D position_ids (needed for image token positions)
         position_ids = vlm_inner.compute_3d_position_ids(
             input_ids=inputs["input_ids"],
             image_grid_thw=inputs["image_grid_thw"],
@@ -425,15 +354,20 @@ class VLMActorCriticWithActionValue(nn.Module):
             position_ids=position_ids,
             attention_mask=inputs["attention_mask"],
             output_hidden_states=True,
-            use_cache=True,
+            use_cache=False,
             return_dict=True,
         )
 
-        # language_model forward via the outer model (handles lm_head, cache wrapping)
         return self.vlm_model.forward(**forward_kwargs)
 
-    def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
-        """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
+    def _vlm_forward(
+        self, images: torch.Tensor, task_prompts: list[str]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run VLM forward. Returns (state, action_logits).
+
+        state: (B, state_dim) flattened projection of hidden states
+        action_logits: (B, n_action_bins) logits over action token bins from last token
+        """
         inputs = prepare_vlm_inputs(
             self.processor,
             images,
@@ -448,212 +382,92 @@ class VLMActorCriticWithActionValue(nn.Module):
             with torch.no_grad():
                 outputs = self._vlm_language_forward(inputs, inputs_embeds)
 
-        # Store last input_id for text generation seeding
-        self._last_input_ids = inputs["input_ids"]
+        # State from hidden states
+        all_hidden_states = outputs.hidden_states
+        hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
+        state = self.state_out_proj(hidden)
+        seq_len = state.shape[1]
+        if seq_len > self._target_seq_len:
+            state = state[:, seq_len - self._target_seq_len :, :]
+        elif seq_len < self._target_seq_len:
+            pad = torch.zeros(
+                state.shape[0],
+                self._target_seq_len - seq_len,
+                state.shape[2],
+                device=state.device,
+            )
+            state = torch.cat([pad, state], dim=1)
+        state = state.flatten(start_dim=1)
 
-        if self.state_mode == "projection":
-            all_hidden_states = outputs.hidden_states
-            hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
-            state = self.state_out_proj(hidden)
-            seq_len = state.shape[1]
-            if seq_len > self._target_seq_len:
-                state = state[:, seq_len - self._target_seq_len :, :]
-            elif seq_len < self._target_seq_len:
-                pad = torch.zeros(
-                    state.shape[0],
-                    self._target_seq_len - seq_len,
-                    state.shape[2],
-                    device=state.device,
-                )
-                state = torch.cat([pad, state], dim=1)
-            return state.flatten(start_dim=1), outputs.past_key_values
+        # Action logits: slice out the action token range from last-position logits
+        last_logits = outputs.logits[:, -1, :]  # (B, vocab_size)
+        action_logits = last_logits[:, self.action_token_begin_idx : self.action_token_begin_idx + self.n_action_bins]
+        # (B, n_action_bins)
 
-        return outputs.past_key_values
+        return state, action_logits
 
-    def _forward_state(
-        self, obs: torch.Tensor, task_prompts: list[str]
-    ) -> tuple[torch.Tensor, object]:
-        """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
-        if self.state_mode == "expert":
-            vlm_past_kv = self._vlm_forward(obs, task_prompts)
-            vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
-            B = vlm_kv_list[0][0].shape[0]
-            query = self.state_query_tokens.expand(B, -1, -1)
-            state_expert_hidden = self.state_query_tokens.shape[-1]
-            adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
-            state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
-            state = state_seq.flatten(start_dim=1)
-            return state, vlm_past_kv
-        state, vlm_past_kv = self._vlm_forward(obs, task_prompts)
-        return state, vlm_past_kv
+    def _sample_action(
+        self, action_logits: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sample actions from categorical distribution over action bins.
 
-    def _extract_kv(self, vlm_past_kv) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
-        """Extract (K, V) pairs for the attention layers used by ActionExpert.
+        Args:
+            action_logits: (B, n_action_bins) logits for one action dimension
 
         Returns:
-            vlm_kv_list: list of (K, V) tuples, one per expert layer
-            vlm_seq_len: sequence length of the VLM KV cache
+            actions: (B, horizon, action_dim) continuous actions
+            log_probs: (B, action_dim) log probabilities of sampled actions
         """
-        kv_list = []
-        for idx in self.attn_layer_indices:
-            kv_list.append((vlm_past_kv.key_cache[idx], vlm_past_kv.value_cache[idx]))
-        seq_len = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[2]
-        return kv_list, seq_len
+        B = action_logits.shape[0]
+        # For each action dimension, sample from the same logits independently
+        # (the VLM produces a single set of logits; we sample action_dim times)
+        all_actions = []
+        all_log_probs = []
+        for _ in range(self.action_dim):
+            dist = torch.distributions.Categorical(logits=action_logits)
+            bin_idx = dist.sample()  # (B,)
+            log_prob = dist.log_prob(bin_idx)  # (B,)
 
-    def _denoise(
-        self,
-        noisy_actions: torch.Tensor,
-        vlm_past_kv,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        """Run one denoising step through the Action Expert."""
-        expert_hidden = self.time_mlp_in.in_features
-        time_emb = create_sinusoidal_pos_embedding(
-            timestep, expert_hidden, min_period=4e-3, max_period=4.0
-        )
-        adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
-        action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
-        expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
-        return self.action_out_proj(expert_out.to(torch.float32))
+            # Convert bin index to continuous action via bin centers
+            bin_centers = torch.from_numpy(
+                self.action_tokenizer.bin_centers
+            ).to(action_logits.device, dtype=torch.float32)
+            continuous = bin_centers[bin_idx]  # (B,)
 
-    def _generate_action(self, B: int, vlm_past_kv) -> torch.Tensor:
-        """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
-        noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
+            all_actions.append(continuous)
+            all_log_probs.append(log_prob)
 
-        def predict_velocity_fn(x_t, t):
-            return self._denoise(x_t, vlm_past_kv, t)
+        # Stack: (B, action_dim)
+        action = torch.stack(all_actions, dim=-1)
+        log_probs = torch.stack(all_log_probs, dim=-1)
 
-        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
+        # Expand to (B, horizon, action_dim) by repeating the same action
+        action = action.unsqueeze(1).expand(-1, self.horizon, -1)
 
-    def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
-        """Generate text via manual forward loop (supports batched KV cache).
+        return action, log_probs
 
-        Uses greedy decoding (argmax) with manual model.forward() calls
-        instead of generate() to avoid rope_deltas batch mismatch issues.
-        Returns (first_item_text, extended_kv_cache).
+    @torch.inference_mode()
+    def _infer(
+        self, obs: torch.Tensor, task_prompts: list[str]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run inference: VLM forward -> sample action -> compute Q.
+
+        Returns:
+            state: (B, state_dim)
+            action: (B, horizon, action_dim)
+            log_probs: (B, action_dim)
+            q: (B,) scalar Q-values
         """
-        tokenizer = self.processor.tokenizer
-        _, kv_len = self._extract_kv(vlm_past_kv)
-        eos_token_id = tokenizer.eos_token_id
-
-        if prompt:
-            prompt_ids = tokenizer.encode(prompt, return_tensors="pt").to(self.device)
-            B = vlm_past_kv.key_cache[self.attn_layer_indices[0]].shape[0]
-            next_ids = prompt_ids.expand(B, -1)  # (B, prompt_len)
-            cur_pos = kv_len
-        else:
-            next_ids = self._last_input_ids[:, -1:].to(self.device)  # (B, 1)
-            B = next_ids.shape[0]
-            cur_pos = kv_len - 1  # re-feed last cached token
-
-        # rope_deltas from the initial VLM forward (accounts for image token positions)
-        rope_deltas = self.vlm_model.model.rope_deltas  # (B, 1)
-
-        self.vlm_model.eval()
-
-        generated_tokens = [[] for _ in range(B)]
-        finished = [False] * B
-
-        for step in range(max_new_tokens + 1):  # +1 for initial seed step
-            seq_len = next_ids.shape[1]
-            cache_position = torch.arange(cur_pos, cur_pos + seq_len, device=self.device)
-
-            # Build 3D position_ids: (3, B, seq_len) for mrope
-            text_pos = cache_position.view(1, 1, -1).expand(1, B, -1)  # (1, B, seq_len)
-            if rope_deltas is not None:
-                text_pos = text_pos + rope_deltas.unsqueeze(0)  # broadcast (1, B, 1)
-            position_ids = text_pos.expand(3, -1, -1)  # (3, B, seq_len)
-
-            outputs = self.vlm_model(
-                input_ids=next_ids,
-                attention_mask=torch.ones(B, cur_pos + seq_len, device=self.device),
-                past_key_values=vlm_past_kv,
-                cache_position=cache_position,
-                position_ids=position_ids,
-            )
-
-            vlm_past_kv = outputs.past_key_values
-            cur_pos = cur_pos + seq_len
-
-            # Skip collecting tokens on seed step (step 0 when no prompt)
-            if step == 0 and not prompt:
-                next_ids = outputs.logits[:, -1:, :].argmax(dim=-1)
-                continue
-
-            next_token = outputs.logits[:, -1:, :].argmax(dim=-1)  # (B, 1)
-
-            for b in range(B):
-                if not finished[b]:
-                    tid = next_token[b, 0].item()
-                    if tid == eos_token_id:
-                        finished[b] = True
-                    else:
-                        generated_tokens[b].append(tid)
-
-            if all(finished):
-                break
-
-            next_ids = next_token
-
-        self.vlm_model.train()
-
-        first_text = tokenizer.decode(generated_tokens[0], skip_special_tokens=True).strip()
-        return first_text, vlm_past_kv
+        state, action_logits = self._vlm_forward(obs, task_prompts)
+        action, log_probs = self._sample_action(action_logits)
+        q = self._compute_q(state, action)
+        return state, action, log_probs, q
 
     def _compute_q(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Compute scalar Q-value for a (state, action) pair."""
         q_dict = self.value_head(state, action)
         q = q_dict["output"]
         return self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
-
-    @torch.inference_mode()
-    def _infer(
-        self, obs: torch.Tensor, task_prompts: list[str] | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        state, vlm_past_kv = self._forward_state(obs, task_prompts)
-        B = obs.shape[0]
-        mode = self.text_action_mode
-
-        if mode == "none":
-            action_kv = vlm_past_kv
-        elif mode == "high_level":
-            generated_text, action_kv = self._generate_text_and_extend_kv(
-                "", vlm_past_kv, max_new_tokens=30
-            )
-            print(f"[HighLevel] {generated_text}")
-        elif mode == "text_action":
-            generated_text, action_kv = self._generate_text_and_extend_kv(
-                "", vlm_past_kv, max_new_tokens=self.max_new_tokens
-            )
-            print(f"[TextAction] {generated_text}")
-        elif mode == "pi_fast":
-            raise NotImplementedError("pi_fast mode is not yet implemented")
-        else:
-            raise ValueError(f"Unknown text_action_mode: {mode}")
-
-        # Diffusion action using (possibly extended) kv_cache
-        diff_action = self._generate_action(B, action_kv)
-        diff_q = self._compute_q(state, diff_action)
-
-        # For text_action mode, parse generated text and compare Q values
-        if mode == "text_action":
-            action_array, parse_success = self.parse_action_text(generated_text)
-            text_action = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
-            text_q = self._compute_q(state, text_action)
-            use_text = text_q > diff_q + self.text_q_margin
-            action = torch.where(use_text.unsqueeze(-1).unsqueeze(-1), text_action, diff_action)
-            q = torch.where(use_text, text_q, diff_q)
-            print(
-                f"[ActionSelect] diff_q={diff_q.item():.3f}, text_q={text_q.item():.3f}, "
-                f"use_text={use_text.item()}, parse_success={parse_success}, "
-                f"action_text={generated_text}"
-            )
-        else:
-            action = diff_action
-            q = diff_q
-
-        return state, action, q
 
     @torch.no_grad()
     def _compute_target_value(
@@ -705,37 +519,47 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _compute_actor_loss(
         self,
         state: torch.Tensor,
-        vlm_past_kv,
+        action_logits: torch.Tensor,
     ) -> tuple[torch.Tensor, dict, dict]:
-        """Advantage-based loss + DACER loss, matching actor_critic_with_action_value."""
-        B = state.shape[0]
+        """Policy gradient loss weighted by Q-value advantage.
 
-        action = self._generate_action(B, vlm_past_kv)
+        Sample action from categorical policy, compute Q(s, a),
+        and use -log_prob * advantage as the loss.
+        """
+        action, log_probs = self._sample_action(action_logits)
 
-        def predict_velocity_fn(a_t, t):
-            return self._denoise(a_t, vlm_past_kv, t)
+        # Advantage from dueling critic: A(s, a) = Q(s, a) - V(s)
+        advantage_dict = self.value_head.get_advantage(state.detach(), action.detach())
+        advantage = advantage_dict["output"]
+        if self.num_bins > 1:
+            advantage = self.hl_gauss_loss(advantage)
+        advantage = advantage.view(-1).detach()
 
-        total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
-            state,
-            action,
-            self.value_head,
-            getattr(self, "hl_gauss_loss", None),
-            self.num_bins,
-            self.dacer_loss_weight,
-            predict_velocity_fn,
-        )
+        # Policy gradient: -log_prob * advantage
+        # log_probs: (B, action_dim), sum over action dims
+        total_log_prob = log_probs.sum(dim=-1)  # (B,)
+        actor_loss = -(total_log_prob * advantage).mean()
+
+        # Entropy bonus for exploration
+        dist = torch.distributions.Categorical(logits=action_logits)
+        entropy = dist.entropy().mean()
+
+        total_loss = actor_loss - 0.01 * entropy
 
         activations_dict = {"critic": advantage_dict["activation"]}
 
-        return total_actor_loss, activations_dict, info_dict
+        info_dict = {
+            "actor_loss": actor_loss.item(),
+            "entropy": entropy.item(),
+            "advantage": advantage.mean().item(),
+        }
+
+        return total_loss, activations_dict, info_dict
 
     def _state_for_predictor(self, state: torch.Tensor) -> torch.Tensor:
         """Reshape and project state for StatePredictionHead context."""
         B = state.shape[0]
-        if self.state_mode == "expert":
-            x = state.view(B, self.num_state_queries, -1)
-        else:
-            x = state.view(B, self._target_seq_len, -1)
+        x = state.view(B, self._target_seq_len, -1)
         return self.state_to_predictor_proj(x)
 
     def _compute_sequence_loss(self, data, curr_state):

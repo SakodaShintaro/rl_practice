@@ -168,28 +168,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
     parser.add_argument("--detach_predictor", type=int, default=0, choices=[0, 1])
     parser.add_argument("--disable_state_predictor", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
-    parser.add_argument("--denoising_time", type=float, default=0.9)
-    parser.add_argument("--denoising_steps", type=int, default=1)
     parser.add_argument(
         "--vlm_model_id",
         type=str,
         default="Qwen/Qwen3.5-0.8B",
     )
-    parser.add_argument("--expert_hidden_size", type=int, default=8)
     parser.add_argument("--state_expert_hidden_size", type=int, default=576)
     parser.add_argument("--num_state_queries", type=int, default=1)
     parser.add_argument(
         "--state_mode",
         type=str,
         default="projection",
-        choices=["projection", "expert"],
-    )
-    parser.add_argument(
-        "--text_action_mode",
-        type=str,
-        default="none",
-        choices=["none", "high_level", "text_action", "pi_fast"],
+        choices=["projection"],
     )
 
     # for AVG
@@ -205,7 +195,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_prompt_tokens", type=int, default=256)
     parser.add_argument("--pad_token_id", type=int, default=0)
     parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--text_q_margin", type=float, default=1.0)
 
     return parser.parse_args()
 
@@ -265,8 +254,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
     target_score = env.spec.reward_threshold
     eval_range = env.unwrapped.eval_range
-
-    args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
 
     start_time = time.time()
 
