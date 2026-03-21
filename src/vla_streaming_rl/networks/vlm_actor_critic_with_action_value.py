@@ -51,12 +51,11 @@ class VLMActorCriticWithActionValue(nn.Module):
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
-        # Load VLM
+        # Load VLM (LoRA is always enabled for action token policy)
         device = "cuda"
-        self.use_lora = bool(args.use_lora)
         self.vlm_model, self.processor = load_model(
             args.vlm_model_id,
-            use_lora=self.use_lora,
+            use_lora=True,
             device=device,
         )
         self.device = device
@@ -301,16 +300,12 @@ class VLMActorCriticWithActionValue(nn.Module):
         return target_seq_len, state_dim
 
     def _get_visual(self) -> nn.Module:
-        """Get the visual encoder from the VLM model (handles PEFT wrapping)."""
-        if self.use_lora:
-            return self.vlm_model.model.model.visual
-        return self.vlm_model.model.visual
+        """Get the visual encoder from the VLM model (PEFT wrapped)."""
+        return self.vlm_model.model.model.visual
 
     def _get_vlm_model_inner(self) -> nn.Module:
-        """Get the inner Qwen3_5Model (handles PEFT wrapping)."""
-        if self.use_lora:
-            return self.vlm_model.model.model
-        return self.vlm_model.model
+        """Get the inner Qwen3_5Model (PEFT wrapped)."""
+        return self.vlm_model.model.model
 
     def _build_inputs_embeds(self, inputs: dict) -> torch.Tensor:
         """Build inputs_embeds by running video encoder on all frames and injecting last-frame embeddings."""
@@ -376,11 +371,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         inputs_embeds = self._build_inputs_embeds(inputs)
 
-        if self.use_lora:
-            outputs = self._vlm_language_forward(inputs, inputs_embeds)
-        else:
-            with torch.no_grad():
-                outputs = self._vlm_language_forward(inputs, inputs_embeds)
+        outputs = self._vlm_language_forward(inputs, inputs_embeds)
 
         # State from hidden states
         all_hidden_states = outputs.hidden_states
