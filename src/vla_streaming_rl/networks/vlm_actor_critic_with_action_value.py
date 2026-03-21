@@ -521,11 +521,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
         return self.action_out_proj(expert_out.to(torch.float32))
 
-    def _generate_action(
-        self,
-        B: int,
-        vlm_past_kv,
-    ) -> torch.Tensor:
+    def _generate_action(self, B: int, vlm_past_kv) -> torch.Tensor:
         """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
 
