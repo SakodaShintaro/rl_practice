@@ -6,9 +6,10 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
-from .action_expert import ActionExpert, create_sinusoidal_pos_embedding
-from .diffusion_utils import compute_actor_loss_with_dacer, euler_denoise
+from .action_expert import ActionExpert
+from .diffusion_utils import compute_actor_loss_with_dacer
 from .image_processor import ImageProcessor
+from .policy_head import DiffusionPolicy
 from .prediction_head import StatePredictionHead
 from .reward_processor import RewardProcessor
 from .value_head import ActionValueHead, maybe_update_hl_gauss_range
@@ -17,13 +18,12 @@ from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
 
 
 class VLMActorCriticWithActionValue(nn.Module):
-    """VLM backbone + Action Expert (flow matching) + Action Value critic.
+    """VLM backbone + Diffusion Policy + Action Value critic.
 
-    Architecture (Knowledge Insulation):
-    - VLM (Qwen3-VL, frozen): processes images + text, provides intermediate representations
-    - Action Expert: transformer that cross-attends to VLM at each layer, denoises actions
+    Architecture:
+    - VLM (Qwen3-VL): processes images + text, provides state via StateExpert or projection
+    - DiffusionPolicy: state-conditioned flow matching policy head (same as non-VLM version)
     - Critic: Q(state, action) with dueling architecture
-    - Stop-gradient: VLM hidden states are detached before Expert uses them
     """
 
     def __init__(
@@ -40,8 +40,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.action_dim = action_space_shape[0]
         self.observation_space_shape = observation_space_shape
         self.critic_loss_weight = args.critic_loss_weight
-        self.denoising_steps = args.denoising_steps
-        self.denoising_time = args.denoising_time
         self.dacer_loss_weight = args.dacer_loss_weight
         self.text_q_margin = args.text_q_margin
         self.text_action_mode = args.text_action_mode
@@ -130,24 +128,17 @@ class VLMActorCriticWithActionValue(nn.Module):
             self._target_seq_len, state_dim = self._compute_state_dim()
             torch.cuda.empty_cache()
 
-        # Action Expert: cross-attends to VLM KV cache
-        self.action_expert = ActionExpert(
-            num_layers=num_expert_layers,
-            expert_hidden_size=expert_hidden,
-            num_attention_heads=vlm_cfg.num_attention_heads,
-            num_kv_heads=vlm_cfg.num_key_value_heads,
-            head_dim=vlm_cfg.head_dim,
-            rms_norm_eps=vlm_cfg.rms_norm_eps,
-            rotary_emb=rotary_emb,
+        # Diffusion Policy head: takes state vector, denoises actions
+        self.policy_head = DiffusionPolicy(
+            state_dim=state_dim,
+            action_dim=self.action_dim,
+            hidden_dim=args.actor_hidden_dim,
+            block_num=args.actor_block_num,
+            denoising_time=args.denoising_time,
+            sparsity=args.sparsity,
+            horizon=args.horizon,
+            denoising_steps=args.denoising_steps,
         )
-
-        # Action in/out projections
-        self.action_in_proj = nn.Linear(self.action_dim, expert_hidden)
-        self.action_out_proj = nn.Linear(expert_hidden, self.action_dim)
-
-        # Time MLP for adaRMS conditioning
-        self.time_mlp_in = nn.Linear(expert_hidden, expert_hidden)
-        self.time_mlp_out = nn.Linear(expert_hidden, expert_hidden)
 
         # Critic (state from StateExpert, flattened)
         self.value_head = ActionValueHead(
@@ -253,7 +244,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._forward_state(curr_obs, curr_prompts)
+        state, _ = self._forward_state(curr_obs, curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]  # (B, horizon, action_dim)
 
         # Critic loss
@@ -262,7 +253,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
 
         # Actor loss (advantage + DACER)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state)
 
         # Sequence (state prediction) loss
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state)
@@ -289,7 +280,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         target_value = self._compute_target_value(next_q, chunk_rewards, chunk_dones)
 
         curr_obs = data.observations[:, : -self.horizon]
-        state, vlm_past_kv = self._forward_state(curr_obs, curr_prompts)
+        state, _ = self._forward_state(curr_obs, curr_prompts)
         action_chunk = data.actions[:, -self.horizon :]
 
         # Critic loss
@@ -298,7 +289,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
 
         # Actor loss (advantage + DACER)
-        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state, vlm_past_kv)
+        actor_loss, actor_activations, actor_info = self._compute_actor_loss(state)
 
         # Sequence (state prediction) loss
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, state)
@@ -520,36 +511,6 @@ class VLMActorCriticWithActionValue(nn.Module):
             seq_len = vlm_past_kv.layers[0].keys.shape[2]
         return kv_list, seq_len
 
-    def _denoise(
-        self,
-        noisy_actions: torch.Tensor,
-        vlm_past_kv,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        """Run one denoising step through the Action Expert."""
-        expert_hidden = self.time_mlp_in.in_features
-        time_emb = create_sinusoidal_pos_embedding(
-            timestep, expert_hidden, min_period=4e-3, max_period=4.0
-        )
-        adarms_cond = F.silu(self.time_mlp_out(F.silu(self.time_mlp_in(time_emb))))
-        action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
-        expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
-        return self.action_out_proj(expert_out.to(torch.float32))
-
-    def _generate_action(
-        self,
-        B: int,
-        vlm_past_kv,
-    ) -> torch.Tensor:
-        """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
-        noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
-
-        def predict_velocity_fn(x_t, t):
-            return self._denoise(x_t, vlm_past_kv, t)
-
-        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
-
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
         """Generate text via manual forward loop (supports batched KV cache).
 
@@ -639,46 +600,27 @@ class VLMActorCriticWithActionValue(nn.Module):
         self, obs: torch.Tensor, task_prompts: list[str] | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         state, vlm_past_kv = self._forward_state(obs, task_prompts)
-        B = obs.shape[0]
-        mode = self.text_action_mode
 
-        if mode == "none":
-            action_kv = vlm_past_kv
-        elif mode == "high_level":
-            generated_text, action_kv = self._generate_text_and_extend_kv(
+        # Text generation (high_level mode only prints, does not affect action)
+        mode = self.text_action_mode
+        if mode == "high_level":
+            generated_text, _ = self._generate_text_and_extend_kv(
                 "", vlm_past_kv, max_new_tokens=30
             )
             print(f"[HighLevel] {generated_text}")
         elif mode == "text_action":
-            generated_text, action_kv = self._generate_text_and_extend_kv(
+            generated_text, _ = self._generate_text_and_extend_kv(
                 "", vlm_past_kv, max_new_tokens=self.max_new_tokens
             )
             print(f"[TextAction] {generated_text}")
         elif mode == "pi_fast":
             raise NotImplementedError("pi_fast mode is not yet implemented")
-        else:
+        elif mode != "none":
             raise ValueError(f"Unknown text_action_mode: {mode}")
 
-        # Diffusion action using (possibly extended) kv_cache
-        diff_action = self._generate_action(B, action_kv)
-        diff_q = self._compute_q(state, diff_action)
-
-        # For text_action mode, parse generated text and compare Q values
-        if mode == "text_action":
-            action_array, parse_success = self.parse_action_text(generated_text)
-            text_action = torch.from_numpy(action_array).unsqueeze(0).to(obs.device)
-            text_q = self._compute_q(state, text_action)
-            use_text = text_q > diff_q + self.text_q_margin
-            action = torch.where(use_text.unsqueeze(-1).unsqueeze(-1), text_action, diff_action)
-            q = torch.where(use_text, text_q, diff_q)
-            print(
-                f"[ActionSelect] diff_q={diff_q.item():.3f}, text_q={text_q.item():.3f}, "
-                f"use_text={use_text.item()}, parse_success={parse_success}, "
-                f"action_text={generated_text}"
-            )
-        else:
-            action = diff_action
-            q = diff_q
+        # Diffusion action from state via DiffusionPolicy
+        action, _ = self.policy_head.get_action(state)
+        q = self._compute_q(state, action)
 
         return state, action, q
 
@@ -732,15 +674,18 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _compute_actor_loss(
         self,
         state: torch.Tensor,
-        vlm_past_kv,
     ) -> tuple[torch.Tensor, dict, dict]:
         """Advantage-based loss + DACER loss, matching actor_critic_with_action_value."""
-        B = state.shape[0]
+        action, log_pi = self.policy_head.get_action(state)  # (B, horizon, action_dim)
 
-        action = self._generate_action(B, vlm_past_kv)
+        bs = action.shape[0]
+        actor_activation = {}
 
         def predict_velocity_fn(a_t, t):
-            return self._denoise(a_t, vlm_past_kv, t)
+            a_flat = a_t.view(bs, -1)
+            result = self.policy_head.forward(a_flat, t, state)
+            actor_activation["value"] = result["activation"]
+            return result["output"].view(bs, self.horizon, self.action_dim)
 
         total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
             state,
@@ -752,7 +697,11 @@ class VLMActorCriticWithActionValue(nn.Module):
             predict_velocity_fn,
         )
 
-        activations_dict = {"critic": advantage_dict["activation"]}
+        activations_dict = {
+            "actor": actor_activation["value"],
+            "critic": advantage_dict["activation"],
+        }
+        info_dict["log_pi"] = log_pi.mean().item()
 
         return total_actor_loss, activations_dict, info_dict
 
