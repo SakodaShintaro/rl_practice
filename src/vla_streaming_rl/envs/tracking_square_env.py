@@ -29,6 +29,7 @@ class TrackingSquareEnv(BaseGUIEnv):
         self._window_title = "Tracking Square Game"
         self.task_prompt = ""
         self.square_size = self.width // 3
+        self.num_squares = 2
 
         self.squares = []
         self.target_color_name = ""
@@ -90,8 +91,8 @@ class TrackingSquareEnv(BaseGUIEnv):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        chosen = random.sample(COLOR_NAMES, 2)
-        self.squares = [self._create_square(chosen[0]), self._create_square(chosen[1])]
+        chosen = random.sample(COLOR_NAMES, self.num_squares)
+        self.squares = [self._create_square(name) for name in chosen]
         self.target_color_name = random.choice(chosen)
         self.task_prompt = f"Track {self.target_color_name}"
 
