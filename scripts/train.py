@@ -89,6 +89,7 @@ def parse_args() -> argparse.Namespace:
             "ColorPanel-v0",
             "STL10Panel-v0",
             "MovingCircle-v0",
+            "TrackingSquare-v0",
             "Hopper-v5",
         ],
     )
@@ -299,9 +300,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         task_prompt = reset_info["task_prompt"]
 
         # initial action
-        action, agent_info = agent.select_action(
-            global_step, obs, 0.0, False, False, task_prompt
-        )
+        action, agent_info = agent.select_action(global_step, obs, 0.0, False, False, task_prompt)
 
         # initial render
         obs_for_render = obs.copy().transpose(1, 2, 0)
