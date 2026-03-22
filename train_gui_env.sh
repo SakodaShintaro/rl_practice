@@ -4,8 +4,12 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
+ENV_ID=FourQuadrant-v0
+ENV_ID=ColorPanel-v0
+ENV_ID=TrackingSquare-v0
+
 uv run python scripts/train.py baseline$suffix \
-  --env_id ColorPanel-v0 \
+  --env_id $ENV_ID \
   --agent_type off_policy \
   --network_class vlm_actor_critic_with_action_value \
   --step_limit 100_000 \
