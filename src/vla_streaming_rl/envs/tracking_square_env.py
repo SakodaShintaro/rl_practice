@@ -5,12 +5,16 @@ Tracking Square Game - Gymnasium Environment
 Two colored squares move with constant velocity, bouncing off walls.
 A language instruction tells the agent which color to track.
 Reward is based on cursor distance to the target square's center.
+
+Hard mode uses STL-10 images as square textures instead of solid colors.
 """
 
 import math
 import random
+from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from vla_streaming_rl.envs.base_gui_env import BaseGUIEnv
 
@@ -30,11 +34,31 @@ class TrackingSquareEnv(BaseGUIEnv):
         self.task_prompt = ""
         self.square_size = self.width // 3
         self.num_squares = 2
+        self.hard_mode = False
 
         self.squares = []
-        self.target_color_name = ""
+        self.target_label = ""
+        self._stl10_dir = Path.home() / "data/stl-10/train"
+        self._stl10_classes = []
+        self._stl10_cache = {}
 
-    def _create_square(self, color_name):
+    def _load_stl10_classes(self):
+        if not self._stl10_classes:
+            self._stl10_classes = sorted([d.name for d in self._stl10_dir.iterdir() if d.is_dir()])
+            for cls_name in self._stl10_classes:
+                cls_dir = self._stl10_dir / cls_name
+                self._stl10_cache[cls_name] = sorted(
+                    [p for p in cls_dir.iterdir() if p.suffix == ".png"]
+                )
+
+    def _load_stl10_texture(self, class_name):
+        img_path = random.choice(self._stl10_cache[class_name])
+        img = Image.open(img_path).convert("RGB")
+        s = self.square_size
+        img = img.resize((s, s), Image.BILINEAR)
+        return np.array(img)
+
+    def _create_square(self, label, texture):
         s = self.square_size
         angle = random.uniform(0, 2 * math.pi)
         speed = 3.0
@@ -43,8 +67,8 @@ class TrackingSquareEnv(BaseGUIEnv):
             "y": random.uniform(0, self.height - s),
             "vx": speed * math.cos(angle),
             "vy": speed * math.sin(angle),
-            "color_name": color_name,
-            "color": COLORS[color_name],
+            "label": label,
+            "texture": texture,
         }
 
     def _move_squares(self):
@@ -69,7 +93,7 @@ class TrackingSquareEnv(BaseGUIEnv):
 
     def _get_target_square(self):
         for sq in self.squares:
-            if sq["color_name"] == self.target_color_name:
+            if sq["label"] == self.target_label:
                 return sq
         return self.squares[0]
 
@@ -91,10 +115,21 @@ class TrackingSquareEnv(BaseGUIEnv):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        chosen = random.sample(COLOR_NAMES, self.num_squares)
-        self.squares = [self._create_square(name) for name in chosen]
-        self.target_color_name = random.choice(chosen)
-        self.task_prompt = f"Track {self.target_color_name}"
+        if self.hard_mode:
+            self._load_stl10_classes()
+            chosen = random.sample(self._stl10_classes, self.num_squares)
+            self.squares = [
+                self._create_square(name, self._load_stl10_texture(name)) for name in chosen
+            ]
+        else:
+            chosen = random.sample(COLOR_NAMES, self.num_squares)
+            s = self.square_size
+            self.squares = [
+                self._create_square(name, np.full((s, s, 3), COLORS[name], dtype=np.uint8))
+                for name in chosen
+            ]
+        self.target_label = random.choice(chosen)
+        self.task_prompt = f"Track {self.target_label}"
 
         self.step_count = 0
         self.cursor_x = 0.5
@@ -131,11 +166,17 @@ class TrackingSquareEnv(BaseGUIEnv):
         for sq in self.squares:
             x0 = int(round(sq["x"]))
             y0 = int(round(sq["y"]))
-            x1 = min(x0 + s, self.width)
-            y1 = min(y0 + s, self.height)
-            x0 = max(x0, 0)
-            y0 = max(y0, 0)
-            image[y0:y1, x0:x1] = sq["color"]
+            # clamp to screen bounds
+            sx0 = max(x0, 0)
+            sy0 = max(y0, 0)
+            sx1 = min(x0 + s, self.width)
+            sy1 = min(y0 + s, self.height)
+            # corresponding region in texture
+            tx0 = sx0 - x0
+            ty0 = sy0 - y0
+            tx1 = tx0 + (sx1 - sx0)
+            ty1 = ty0 + (sy1 - sy0)
+            image[sy0:sy1, sx0:sx1] = sq["texture"][ty0:ty1, tx0:tx1]
 
         self._draw_cursor(image)
         return image
