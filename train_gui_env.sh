@@ -15,6 +15,5 @@ uv run python scripts/train.py baseline$suffix \
   --step_limit 100_000 \
   --batch_size 16 \
   --learning_rate 1e-5 \
-  --use_lora 1 \
   --disable_state_predictor 1 \
   --state_mode expert \
