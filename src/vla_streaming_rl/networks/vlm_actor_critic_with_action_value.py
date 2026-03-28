@@ -78,8 +78,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.target_layer_idx = args.target_layer_idx
         self.default_task_prompt = args.prompt if args.text_action_mode != "none" else ""
         self.parse_action_text = args.parse_action_text
-        self.text_action_prompt = args.prompt
-        self.high_level_prompt = args.prompt
         self.max_new_tokens = args.max_new_tokens
         self.max_prompt_tokens = args.max_prompt_tokens
         self.pad_token_id = args.pad_token_id
