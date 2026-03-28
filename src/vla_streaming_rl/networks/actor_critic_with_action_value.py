@@ -406,7 +406,7 @@ class ActorCriticWithActionValue(nn.Module):
         bs = action.shape[0]
         actor_activation = {}
 
-        def predict_velocity_fn(a_t, t):
+        def predict_data_fn(a_t, t):
             a_flat = a_t.view(bs, -1)
             result = self.policy_head.forward(a_flat, t, curr_state)
             actor_activation["value"] = result["activation"]
@@ -416,10 +416,10 @@ class ActorCriticWithActionValue(nn.Module):
             curr_state,
             action,
             self.value_head,
-            getattr(self, "hl_gauss_loss", None),
+            self.hl_gauss_loss if self.num_bins > 1 else None,
             self.num_bins,
             self.dacer_loss_weight,
-            predict_velocity_fn,
+            predict_data_fn,
         )
 
         activations_dict = {
@@ -498,7 +498,7 @@ class ActorCriticWithActionValue(nn.Module):
             drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
             condition = torch.where(drop_mask, torch.full_like(condition, 2), condition)
 
-        # Flow Matching for conditional policy
+        # Flow Matching for conditional policy (x-prediction)
         eps = 1e-4
         t = torch.rand((batch_size, 1), device=device) * (1 - eps) + eps
 
@@ -507,15 +507,15 @@ class ActorCriticWithActionValue(nn.Module):
         noise = torch.clamp(noise, -3.0, 3.0)
         a_t = (1.0 - t) * noise + t * action_flat
 
-        # Predict velocity conditionally
+        # Predict clean data conditionally
         actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), curr_state, condition)
-        v_pred = actor_output_dict["output"]
+        x_1_pred = actor_output_dict["output"]
 
-        # Target velocity: action_flat - noise
-        v_target = action_flat - noise
+        # Target: clean data (action_flat)
+        x_1_target = action_flat
 
-        # Flow Matching loss
-        actor_loss = F.mse_loss(v_pred, v_target)
+        # x-prediction loss
+        actor_loss = F.mse_loss(x_1_pred, x_1_target)
 
         activations_dict = {
             "actor": actor_output_dict["activation"],

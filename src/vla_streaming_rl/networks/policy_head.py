@@ -108,13 +108,11 @@ class DiffusionPolicy(nn.Module):
         bs = x.size(0)
         noise = torch.randn(bs, self.horizon, self.action_dim, device=x.device)
 
-        def predict_velocity_fn(x_t, t):
+        def predict_data_fn(x_t, t):
             x_flat = x_t.view(bs, -1)
             return self.forward(x_flat, t, x)["output"].view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_velocity_fn
-        )
+        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_data_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
@@ -196,10 +194,10 @@ class CFGDiffusionPolicy(nn.Module):
 
     def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Inference using CFG
+        Inference using CFG with x-prediction.
 
-        Inference formula: v = (1 - beta) * v_uncond + beta * v_positive
-        Higher beta increases guidance towards positive advantage direction
+        Guidance in data space: x_1 = (1 - beta) * x_1_uncond + beta * x_1_positive
+        Higher beta increases guidance towards positive advantage direction.
         """
         bs = x.size(0)
         device = x.device
@@ -209,16 +207,14 @@ class CFGDiffusionPolicy(nn.Module):
         cond_positive = torch.ones((bs,), dtype=torch.long, device=device)
         cond_uncond = torch.full((bs,), 2, dtype=torch.long, device=device)
 
-        def predict_velocity_fn(x_t, t):
+        def predict_data_fn(x_t, t):
             x_flat = x_t.view(bs, -1)
-            v_pos = self.forward(x_flat, t, x, cond_positive)["output"]
-            v_unc = self.forward(x_flat, t, x, cond_uncond)["output"]
-            v = (1 - self.cfgrl_beta) * v_unc + self.cfgrl_beta * v_pos
-            return v.view(bs, self.horizon, self.action_dim)
+            x_1_pos = self.forward(x_flat, t, x, cond_positive)["output"]
+            x_1_unc = self.forward(x_flat, t, x, cond_uncond)["output"]
+            x_1 = (1 - self.cfgrl_beta) * x_1_unc + self.cfgrl_beta * x_1_pos
+            return x_1.view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_velocity_fn
-        )
+        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_data_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p

@@ -539,10 +539,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
 
-        def predict_velocity_fn(x_t, t):
+        def predict_data_fn(x_t, t):
             return self._denoise(x_t, vlm_past_kv, t)
 
-        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_velocity_fn)
+        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_data_fn)
 
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
         """Generate text via manual forward loop (supports batched KV cache).
@@ -733,7 +733,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         action = self._generate_action(B, vlm_past_kv)
 
-        def predict_velocity_fn(a_t, t):
+        def predict_data_fn(a_t, t):
             return self._denoise(a_t, vlm_past_kv, t)
 
         total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
@@ -743,7 +743,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.hl_gauss_loss if self.num_bins > 1 else None,
             self.num_bins,
             self.dacer_loss_weight,
-            predict_velocity_fn,
+            predict_data_fn,
         )
 
         activations_dict = {"critic": advantage_dict["activation"]}
