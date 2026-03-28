@@ -76,7 +76,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        self.default_task_prompt = args.prompt if args.text_action_mode != "none" else ""
+        initial_task_prompt = args.prompt if args.text_action_mode != "none" else ""
         self.parse_action_text = args.parse_action_text
         self.max_new_tokens = args.max_new_tokens
         self.max_prompt_tokens = args.max_prompt_tokens
@@ -125,7 +125,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         elif self.state_mode == "projection":
             state_out_dim = 4
             self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
-            self._target_seq_len, state_dim = self._compute_state_dim()
+            self._target_seq_len, state_dim = self._compute_state_dim(initial_task_prompt)
             torch.cuda.empty_cache()
 
         # Action Expert: cross-attends to VLM KV cache
@@ -213,10 +213,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         a_seq: torch.Tensor,
         r_seq: torch.Tensor,
         rnn_state: torch.Tensor,
-        task_prompts: list[str] | None = None,
+        task_prompts: list[str],
     ) -> dict:
-        if task_prompts is None:
-            task_prompts = [self.default_task_prompt] * s_seq.shape[0]
         state, action, q_value = self._infer(s_seq, task_prompts)
 
         next_image, next_reward = self.prediction_head.predict_next_state(
@@ -350,7 +348,7 @@ class VLMActorCriticWithActionValue(nn.Module):
     ####################
 
     @torch.no_grad()
-    def _compute_state_dim(self) -> tuple[int, int]:
+    def _compute_state_dim(self, task_prompt: str) -> tuple[int, int]:
         """Compute target sequence length and state dimension via dummy forward pass."""
         dummy_images = torch.zeros(
             1, self.seq_len, *self.observation_space_shape, device=self.device
@@ -358,7 +356,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         inputs = prepare_vlm_inputs(
             self.processor,
             dummy_images,
-            [self.default_task_prompt],
+            [task_prompt],
             self.is_qwen35,
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
@@ -437,10 +435,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         # language_model forward via the outer model (handles lm_head, cache wrapping)
         return self.vlm_model.forward(**forward_kwargs)
 
-    def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str] | None = None):
+    def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
         """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
-        if task_prompts is None:
-            task_prompts = [self.default_task_prompt] * images.shape[0]
         inputs = prepare_vlm_inputs(
             self.processor,
             images,
@@ -489,7 +485,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         return state_seq.flatten(start_dim=1)
 
     def _forward_state(
-        self, obs: torch.Tensor, task_prompts: list[str] | None = None
+        self, obs: torch.Tensor, task_prompts: list[str]
     ) -> tuple[torch.Tensor, object]:
         """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
         if self.state_mode == "expert":
@@ -634,7 +630,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     @torch.inference_mode()
     def _infer(
-        self, obs: torch.Tensor, task_prompts: list[str] | None = None
+        self, obs: torch.Tensor, task_prompts: list[str]
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         state, vlm_past_kv = self._forward_state(obs, task_prompts)
         B = obs.shape[0]
