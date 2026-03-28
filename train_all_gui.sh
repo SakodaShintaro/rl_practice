@@ -19,42 +19,13 @@ fi
 git show -s > $RESULT_DIR/git_show.txt
 git diff > $RESULT_DIR/git_diff.txt
 
-STEP_LIMIT=100_000
+STEP_LIMIT=50_000
 
 # ENV_ID=FourQuadrant-v0
 # ENV_ID=ColorPanel-v0
 ENV_ID=TrackingSquare-v0
 
-for network_class in actor_critic_with_action_value vlm_actor_critic_with_action_value; do
-
-  # Off-policy, batch size 16
-  uv run python scripts/train.py ${network_class}_off_policy_bs16$suffix \
-    --env_id $ENV_ID \
-    --agent_type off_policy \
-    --network_class $network_class \
-    --step_limit $STEP_LIMIT \
-    --batch_size 16 \
-    --learning_rate 1e-5 \
-    --result_dir $RESULT_DIR \
-    --wandb_group $WANDB_GROUP \
-    --disable_state_predictor 1 \
-    --state_mode expert \
-    --use_lora 1 \
-
-  # Off-policy, batch size 1
-  uv run python scripts/train.py ${network_class}_off_policy_bs1$suffix \
-    --env_id $ENV_ID \
-    --agent_type off_policy \
-    --network_class $network_class \
-    --step_limit $STEP_LIMIT \
-    --batch_size 1 \
-    --learning_rate 1e-5 \
-    --result_dir $RESULT_DIR \
-    --wandb_group $WANDB_GROUP \
-    --disable_state_predictor 1 \
-    --state_mode expert \
-    --use_lora 1 \
-
+for use_prompt in 1 0; do
   # Streaming
   uv run python scripts/train.py ${network_class}_streaming_et$suffix \
     --env_id $ENV_ID \
@@ -68,5 +39,6 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
     --disable_state_predictor 1 \
     --state_mode expert \
     --use_lora 1 \
+    --use_prompt $use_prompt
 
 done
