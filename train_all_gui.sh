@@ -39,6 +39,7 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
     --wandb_group $WANDB_GROUP \
     --disable_state_predictor 1 \
     --state_mode expert \
+    --use_lora 1 \
 
   # Off-policy, batch size 1
   uv run python scripts/train.py ${network_class}_off_policy_bs1$suffix \
@@ -52,6 +53,7 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
     --wandb_group $WANDB_GROUP \
     --disable_state_predictor 1 \
     --state_mode expert \
+    --use_lora 1 \
 
   # Streaming
   uv run python scripts/train.py ${network_class}_streaming_et$suffix \
@@ -65,5 +67,6 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
     --wandb_group $WANDB_GROUP \
     --disable_state_predictor 1 \
     --state_mode expert \
+    --use_lora 1 \
 
 done
