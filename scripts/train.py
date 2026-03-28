@@ -206,6 +206,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_new_tokens", type=int, default=64)
     parser.add_argument("--max_prompt_tokens", type=int, default=256)
     parser.add_argument("--pad_token_id", type=int, default=0)
+    parser.add_argument("--use_prompt", type=int, default=1, choices=[0, 1])
     parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
     parser.add_argument("--text_q_margin", type=float, default=1.0)
 
@@ -277,7 +278,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     score_list = []
     best_score = -float("inf")
     obs, reset_info = env.reset(seed=seed)
-    task_prompt = reset_info["task_prompt"]
+    task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
     args.prompt = task_prompt
     step_limit = args.step_limit
 
@@ -297,7 +298,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     while True:
         # initialize episode
         obs, reset_info = env.reset()
-        task_prompt = reset_info["task_prompt"]
+        task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
 
         # initial action
         action, agent_info = agent.select_action(global_step, obs, 0.0, False, False, task_prompt)
@@ -326,7 +327,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
             # step
             obs, reward, terminated, truncated, env_info = env.step(action)
-            task_prompt = env_info["task_prompt"]
+            task_prompt = env_info["task_prompt"] if args.use_prompt else ""
 
             # save action and reward
             action_list.append(action.copy())
