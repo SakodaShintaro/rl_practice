@@ -740,7 +740,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             state,
             action,
             self.value_head,
-            getattr(self, "hl_gauss_loss", None),
+            self.hl_gauss_loss if self.num_bins > 1 else None,
             self.num_bins,
             self.dacer_loss_weight,
             predict_velocity_fn,
