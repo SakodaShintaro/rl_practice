@@ -129,7 +129,11 @@ class TrackingSquareEnv(BaseGUIEnv):
                 for name in chosen
             ]
         self.target_label = random.choice(chosen)
-        self.task_prompt = f"Track {self.target_label}"
+        self.task_prompt = (
+            f"You are working on a task to track colored tiles. "
+            f"A black cross indicates the cursor position. "
+            f"Track the center of the **{self.target_label}** tile."
+        )
 
         self.step_count = 0
         self.cursor_x = 0.5
