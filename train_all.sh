@@ -35,17 +35,6 @@ for network_class in actor_critic_with_action_value vlm_actor_critic_with_action
     --result_dir $RESULT_DIR \
     --wandb_group $WANDB_GROUP \
 
-  # Off-policy, batch size 1, learning rate 5e-6
-  uv run python scripts/train.py ${network_class}_off_policy_bs1$suffix \
-    --env_id $ENV_ID \
-    --agent_type off_policy \
-    --network_class $network_class \
-    --step_limit $STEP_LIMIT \
-    --batch_size 1 \
-    --learning_rate 5e-6 \
-    --result_dir $RESULT_DIR \
-    --wandb_group $WANDB_GROUP \
-
   # Streaming, with eligibility trace, learning rate 5e-6
   uv run python scripts/train.py ${network_class}_streaming_et$suffix \
     --env_id $ENV_ID \
