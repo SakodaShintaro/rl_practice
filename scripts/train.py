@@ -96,7 +96,6 @@ def parse_args() -> argparse.Namespace:
             "CARLA-Leaderboard-v0",
             "LetterTracing-v0",
             "FourQuadrant-v0",
-            "RandomSquare-v0",
             "ColorPanel-v0",
             "STL10Panel-v0",
             "TrackingSquare-v0",
