@@ -34,6 +34,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 def save_episode_data(
     video_dir: Path,
     image_dir: Path,
+    obs_dir: Path,
     name: str,
     bgr_image_list: list[np.ndarray],
     action_list: list[np.ndarray],
@@ -49,14 +50,14 @@ def save_episode_data(
     imageio.mimsave(str(video_path), rgb_images, fps=10, macro_block_size=1)
 
     # Save as images
-    curr_image_dir = image_dir / f"{name}_frames"
+    curr_image_dir = image_dir / f"{name}"
     curr_image_dir.mkdir(parents=True, exist_ok=True)
     for idx, img in enumerate(bgr_image_list):
         image_path = curr_image_dir / f"{idx:08d}.png"
         cv2.imwrite(str(image_path), img)
 
     # Save raw observations as images
-    obs_image_dir = image_dir / f"{name}_obs"
+    obs_image_dir = obs_dir / f"{name}"
     obs_image_dir.mkdir(parents=True, exist_ok=True)
     for idx, obs in enumerate(obs_list):
         obs_hwc = (obs.transpose(1, 2, 0) * 255).astype(np.uint8)
@@ -264,10 +265,14 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
         image_dir = result_dir / "images"
         image_dir.mkdir(parents=True, exist_ok=True)
+
+        obs_dir = result_dir / "obs"
+        obs_dir.mkdir(parents=True, exist_ok=True)
     else:
         result_dir = None
         video_dir = None
         image_dir = None
+        obs_dir = None
     log_episode_path = result_dir / "log_episode.tsv" if result_dir is not None else None
     log_episode_file = None
     log_episode_writer = None
@@ -440,7 +445,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
             save_episode_data(
-                video_dir, image_dir, "best_episode", bgr_image_list, action_list, reward_list, obs_list
+                video_dir, image_dir, obs_dir, "best_episode", bgr_image_list, action_list, reward_list, obs_list
             )
 
         if (
@@ -449,6 +454,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             save_episode_data(
                 video_dir,
                 image_dir,
+                obs_dir,
                 f"ep_{episode_id + 1:08d}",
                 bgr_image_list,
                 action_list,
