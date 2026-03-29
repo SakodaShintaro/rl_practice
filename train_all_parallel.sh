@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 set -eux
 
+trap 'kill 0' EXIT
+
 RESULT_DIR=${1:?"Usage: $0 <result_dir>"}
 RESULT_DIR=$(readlink -f "$RESULT_DIR")
 
