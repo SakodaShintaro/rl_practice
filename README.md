@@ -12,13 +12,6 @@ NVIDIA GPU with driver is required for training.
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Install system dependencies
-
-```bash
-sudo apt update
-sudo apt install -y swig libgl1-mesa-glx libglfw3 mesa-utils
-```
-
 ### Setup project
 
 ```bash
