@@ -51,6 +51,7 @@ packages = ["src/vla_streaming_rl"]
 
 [tool.uv]
 exclude-newer = "60 days"
+exclude-newer-package = ["torch", "torchvision"]
 index-url = "https://pypi.org/simple"
 
 [[tool.uv.index]]
