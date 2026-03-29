@@ -7,6 +7,8 @@ trap 'kill 0' EXIT
 RESULT_DIR=${1:?"Usage: $0 <result_dir>"}
 RESULT_DIR=$(readlink -f "$RESULT_DIR")
 
+mkdir -p "$RESULT_DIR"
+
 NUM_GPUS=$(nvidia-smi -L | wc -l)
 
 pids=()
