@@ -59,7 +59,8 @@ def save_episode_data(
     obs_image_dir = image_dir / f"{name}_obs"
     obs_image_dir.mkdir(parents=True, exist_ok=True)
     for idx, obs in enumerate(obs_list):
-        obs_bgr = cv2.cvtColor(obs.transpose(1, 2, 0), cv2.COLOR_RGB2BGR)
+        obs_hwc = (obs.transpose(1, 2, 0) * 255).astype(np.uint8)
+        obs_bgr = cv2.cvtColor(obs_hwc, cv2.COLOR_RGB2BGR)
         obs_path = obs_image_dir / f"{idx:08d}.png"
         cv2.imwrite(str(obs_path), obs_bgr)
 
