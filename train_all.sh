@@ -23,7 +23,7 @@ STEP_LIMIT=200_000
 ENV_ID=CarRacing-v3
 
 # Streaming, with eligibility trace, learning rate 5e-6
-uv run python scripts/train.py vlm_actor_critic_with_action_value_streaming_$suffix \
+uv run python scripts/train.py vlm_actor_critic_with_action_value_streaming$suffix \
   --env_id $ENV_ID \
   --agent_type streaming \
   --network_class vlm_actor_critic_with_action_value \
