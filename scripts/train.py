@@ -38,6 +38,7 @@ def save_episode_data(
     bgr_image_list: list[np.ndarray],
     action_list: list[np.ndarray],
     reward_list: list[float],
+    obs_list: list[np.ndarray],
 ) -> None:
     """Save episode video, images, actions and rewards"""
     if not bgr_image_list:
@@ -53,6 +54,14 @@ def save_episode_data(
     for idx, img in enumerate(bgr_image_list):
         image_path = curr_image_dir / f"{idx:08d}.png"
         cv2.imwrite(str(image_path), img)
+
+    # Save raw observations as images
+    obs_image_dir = image_dir / f"{name}_obs"
+    obs_image_dir.mkdir(parents=True, exist_ok=True)
+    for idx, obs in enumerate(obs_list):
+        obs_bgr = cv2.cvtColor(obs.transpose(1, 2, 0), cv2.COLOR_RGB2BGR)
+        obs_path = obs_image_dir / f"{idx:08d}.png"
+        cv2.imwrite(str(obs_path), obs_bgr)
 
     # Save actions and rewards to TSV file
     tsv_path = curr_image_dir / "log.tsv"
@@ -158,7 +167,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--critic_loss_weight", type=float, default=1.0)
     parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
     parser.add_argument("--normalizing_by_return", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--image_save_interval", type=int, default=10)
+    parser.add_argument("--image_save_interval", type=int, default=100)
     parser.add_argument("--accumulation_steps", type=int, default=1)
     parser.add_argument("--debug", action="store_true")
 
@@ -317,6 +326,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         # action and reward history for this episode
         action_list = []
         reward_list = []
+        obs_list = [obs.copy()]
 
         # initial prediction for next step
         pred_image = agent_info.get("next_image", np.zeros_like(obs_for_render))
@@ -329,9 +339,10 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
             obs, reward, terminated, truncated, env_info = env.step(action)
             task_prompt = env_info["task_prompt"] if args.use_prompt else ""
 
-            # save action and reward
+            # save action, reward, and observation
             action_list.append(action.copy())
             reward_list.append(reward)
+            obs_list.append(obs.copy())
 
             action, agent_info = agent.step(
                 global_step, obs, reward, terminated, truncated, task_prompt
@@ -428,7 +439,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
             save_episode_data(
-                video_dir, image_dir, "best_episode", bgr_image_list, action_list, reward_list
+                video_dir, image_dir, "best_episode", bgr_image_list, action_list, reward_list, obs_list
             )
 
         if (
@@ -441,6 +452,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
                 bgr_image_list,
                 action_list,
                 reward_list,
+                obs_list,
             )
 
         episode_id += 1
