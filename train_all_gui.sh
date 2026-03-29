@@ -37,7 +37,6 @@ for use_prompt in 1 0; do
     --wandb_group $WANDB_GROUP \
     --disable_state_predictor 1 \
     --state_mode expert \
-    --use_lora 0 \
     --use_prompt $use_prompt
 
 done

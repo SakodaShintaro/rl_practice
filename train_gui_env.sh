@@ -17,4 +17,3 @@ uv run python scripts/train.py baseline$suffix \
   --learning_rate 1e-5 \
   --disable_state_predictor 1 \
   --state_mode expert \
-  --use_lora 1 \
