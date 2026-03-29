@@ -99,7 +99,6 @@ def parse_args() -> argparse.Namespace:
             "RandomSquare-v0",
             "ColorPanel-v0",
             "STL10Panel-v0",
-            "MovingCircle-v0",
             "TrackingSquare-v0",
             "Hopper-v5",
         ],

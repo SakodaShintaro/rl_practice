@@ -11,7 +11,6 @@ from gymnasium.envs.registration import EnvSpec
 from vla_streaming_rl.envs.color_panel_env import ColorPanelEnv
 from vla_streaming_rl.envs.four_quadrant_env import FourQuadrantEnv
 from vla_streaming_rl.envs.letter_tracing_env import LetterTracingEnv
-from vla_streaming_rl.envs.moving_circle_env import MovingCircleEnv
 from vla_streaming_rl.envs.random_square_env import RandomSquareEnv
 from vla_streaming_rl.envs.stl10_panel_env import STL10PanelEnv
 from vla_streaming_rl.envs.tracking_square_env import TrackingSquareEnv
@@ -137,14 +136,6 @@ def make_env(env_id: str) -> gym.Env:
         env.unwrapped.spec = EnvSpec(id="STL10Panel-v0", reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         env.unwrapped.parse_action_text = _color_panel_parse_action
-        return env
-
-    elif env_id == "MovingCircle-v0":
-        env = MovingCircleEnv(render_mode="rgb_array")
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = TransposeAndNormalizeObs(env)
-        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
-        env.unwrapped.eval_range = 20
         return env
 
     elif env_id == "TrackingSquare-v0":
