@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
         "--env_id",
         type=str,
         default="CarRacing-v3",
-        choices=["CarRacing-v3", "MiniGrid-Empty-5x5-v0"],
+        choices=["CarRacing-v3"],
     )
     parser.add_argument("--agent_type", type=str, choices=["random"])
     parser.add_argument("--seed", type=int, default=-1)
