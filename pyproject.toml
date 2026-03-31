@@ -50,6 +50,8 @@ build-backend = "hatchling.build"
 packages = ["src/vla_streaming_rl"]
 
 [tool.uv]
+exclude-newer = "40 days"
+exclude-newer-package = { torch = false, torchvision = false }
 index-url = "https://pypi.org/simple"
 
 [[tool.uv.index]]
