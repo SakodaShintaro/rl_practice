@@ -100,7 +100,7 @@ class DiffusionPolicy(nn.Module):
 
         result_dict["activation"] = x
 
-        x = self.fc_out(x)
+        x = torch.tanh(self.fc_out(x))
         result_dict["output"] = x
         return result_dict
 
@@ -188,7 +188,7 @@ class CFGDiffusionPolicy(nn.Module):
 
         result_dict["activation"] = x
 
-        x = self.fc_out(x)
+        x = torch.tanh(self.fc_out(x))
         result_dict["output"] = x
         return result_dict
 
