@@ -229,6 +229,8 @@ class CARLALeaderboardEnv(gym.Env):
                 break
             time.sleep(0.1)
 
+        self._update_spectator()
+
         return self.current_image.copy(), {"task_prompt": self.prompt}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
@@ -244,6 +246,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.vehicle.apply_control(control)
 
         self.world.tick()
+        self._update_spectator()
 
         # Update route tracking
         self._update_route_progress()
@@ -533,6 +536,19 @@ class CARLALeaderboardEnv(gym.Env):
         pixel_y = int(-rotated_y / scale + map_size // 2)
 
         return pixel_x, pixel_y
+
+    def _update_spectator(self):
+        """Move spectator camera to follow the vehicle from behind and above."""
+        vehicle_transform = self.vehicle.get_transform()
+        forward = vehicle_transform.get_forward_vector()
+        spectator_location = vehicle_transform.location + carla.Location(
+            x=-8.0 * forward.x, y=-8.0 * forward.y, z=5.0
+        )
+        spectator_transform = carla.Transform(
+            spectator_location,
+            carla.Rotation(pitch=-20.0, yaw=vehicle_transform.rotation.yaw),
+        )
+        self.world.get_spectator().set_transform(spectator_transform)
 
     def _process_image(self, image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
