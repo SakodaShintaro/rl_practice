@@ -240,7 +240,7 @@ class CARLALeaderboardEnv(gym.Env):
         steer = float(np.clip(action[0], -1.0, 1.0))
         gas_or_brake = float(np.clip(action[1], -1.0, 1.0))
         throttle = max(gas_or_brake, 0.0)
-        brake = max(-gas_or_brake, 0.0)
+        brake = 0.0
 
         control = carla.VehicleControl(
             steer=steer, throttle=throttle, brake=brake, hand_brake=False, manual_gear_shift=False
