@@ -557,7 +557,7 @@ class CARLALeaderboardEnv(gym.Env):
     def _process_image(self, image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
         array = array.reshape((image.height, image.width, 4))
-        array = array[:, :, :3]
+        array = array[:, :, [2, 1, 0]]
         array = array.transpose(2, 0, 1).astype(np.float32) / 255.0
         self.current_image = array
 
