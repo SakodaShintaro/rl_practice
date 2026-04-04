@@ -1,11 +1,8 @@
 #!/bin/bash
 
-# Off-policy training in the CARLA Leaderboard environment
-# Start the CARLA server before running:
-#   cd ~/CARLA_0.9.16
-#   ./CarlaUE4.sh
+trap 'kill 0' EXIT
 
-export TOKENIZERS_PARALLELISM=false
+pgrep -f CarlaUE4 > /dev/null || ~/CARLA_0.9.16/CarlaUE4.sh &
 
 uv run python scripts/train.py carla_test \
     --env_id CARLA-Leaderboard-v0 \
