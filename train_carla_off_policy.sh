@@ -2,7 +2,7 @@
 
 trap 'kill 0' EXIT
 
-pgrep -f CarlaUE4 > /dev/null || ~/CARLA_0.9.16/CarlaUE4.sh -windowed -ResX=800 -ResY=600 &
+pgrep -f CarlaUE4 > /dev/null || ~/CARLA_0.9.16/CarlaUE4.sh -RenderOffScreen &
 
 uv run python scripts/train.py carla_test \
     --env_id CARLA-Leaderboard-v0 \

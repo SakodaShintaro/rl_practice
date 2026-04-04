@@ -101,11 +101,13 @@ class CARLALeaderboardEnv(gym.Env):
         # Sensors and vehicle
         self.vehicle = None
         self.camera_sensor = None
+        self.third_person_camera = None
         self.collision_sensor = None
         self.lane_invasion_sensor = None
 
         # Sensor data
         self.current_image = None
+        self.third_person_image = None
         self.lane_invasion_history = []
 
         # Route information
@@ -152,6 +154,8 @@ class CARLALeaderboardEnv(gym.Env):
         # Delete existing vehicle and sensors
         if self.camera_sensor is not None:
             self.camera_sensor.destroy()
+        if self.third_person_camera is not None:
+            self.third_person_camera.destroy()
         if self.collision_sensor is not None:
             self.collision_sensor.destroy()
         if self.lane_invasion_sensor is not None:
@@ -186,6 +190,17 @@ class CARLALeaderboardEnv(gym.Env):
             camera_bp, camera_transform, attach_to=self.vehicle
         )
         self.camera_sensor.listen(lambda image: self._process_image(image))
+
+        # Third-person camera (for human monitoring)
+        tp_bp = blueprint_library.find("sensor.camera.rgb")
+        tp_bp.set_attribute("image_size_x", "800")
+        tp_bp.set_attribute("image_size_y", "600")
+        tp_bp.set_attribute("fov", "90")
+        tp_transform = carla.Transform(carla.Location(x=-8.0, z=5.0), carla.Rotation(pitch=-20.0))
+        self.third_person_camera = self.world.spawn_actor(
+            tp_bp, tp_transform, attach_to=self.vehicle
+        )
+        self.third_person_camera.listen(lambda image: self._process_third_person_image(image))
 
         # Collision sensor
         collision_bp = blueprint_library.find("sensor.other.collision")
@@ -394,15 +409,19 @@ class CARLALeaderboardEnv(gym.Env):
         return render_img
 
     def render(self) -> np.ndarray | None:
-        """Visualize map + route + vehicle position"""
+        """Return third-person camera image for human monitoring"""
         if self.render_mode != "rgb_array":
             return None
+        if self.third_person_image is None:
+            return None
 
-        return self._generate_route_image(show_text=True)
+        return self.third_person_image.copy()
 
     def close(self):
         if self.camera_sensor is not None:
             self.camera_sensor.destroy()
+        if self.third_person_camera is not None:
+            self.third_person_camera.destroy()
         if self.collision_sensor is not None:
             self.collision_sensor.destroy()
         if self.lane_invasion_sensor is not None:
@@ -560,6 +579,12 @@ class CARLALeaderboardEnv(gym.Env):
         array = array[:, :, [2, 1, 0]]
         array = array.transpose(2, 0, 1).astype(np.float32) / 255.0
         self.current_image = array
+
+    def _process_third_person_image(self, image):
+        array = np.frombuffer(image.raw_data, dtype=np.uint8)
+        array = array.reshape((image.height, image.width, 4))
+        array = array[:, :, [2, 1, 0]]
+        self.third_person_image = array
 
     def _on_collision(self, event):
         other_actor = event.other_actor
