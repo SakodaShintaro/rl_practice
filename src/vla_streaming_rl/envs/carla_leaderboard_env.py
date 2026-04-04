@@ -140,6 +140,7 @@ class CARLALeaderboardEnv(gym.Env):
             angular_acceleration=0.0,
             dt=self.dt,
         )
+        self.current_action = np.zeros(2, dtype=np.float32)
 
     def reset(
         self,
@@ -235,6 +236,7 @@ class CARLALeaderboardEnv(gym.Env):
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # Apply action: action[0]=steer, action[1]=gas_or_brake (same as CarRacing)
+        self.current_action = np.array(action, dtype=np.float32)
         steer = float(np.clip(action[0], -1.0, 1.0))
         gas_or_brake = float(np.clip(action[1], -1.0, 1.0))
         throttle = max(gas_or_brake, 0.0)
@@ -373,6 +375,8 @@ class CARLALeaderboardEnv(gym.Env):
                 f"Jerk: {self.vehicle_physics.jerk:.2f} m/s^3",
                 f"Angular Vel: {self.vehicle_physics.angular_velocity:.2f} rad/s",
                 f"Angular Accel: {self.vehicle_physics.angular_acceleration:.2f} rad/s^2",
+                f"Steer: {self.current_action[0]:+.3f}",
+                f"Gas/Brake: {self.current_action[1]:+.3f}",
             ]
 
             for i, text in enumerate(texts):
