@@ -65,4 +65,3 @@ uv run python scripts/train.py no_vlm_off_policy_bs16$suffix \
   --learning_rate 1e-5 \
   --result_dir $RESULT_DIR \
   --wandb_group $WANDB_GROUP \
-
