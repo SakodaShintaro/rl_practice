@@ -71,7 +71,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.image_size = (256, 256)  # (width, height)
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
-        self.fps = 20  # Simulation FPS
+        self.fps = 10  # Simulation FPS
         self.dt = 1.0 / self.fps  # Time step (seconds)
 
         # Gymnasium spaces
