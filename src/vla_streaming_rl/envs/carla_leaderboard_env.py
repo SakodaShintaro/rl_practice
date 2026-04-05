@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import copy
 import time
 from dataclasses import dataclass
 
@@ -7,6 +8,8 @@ import cv2
 import gymnasium as gym
 import numpy as np
 import scipy
+
+from vla_streaming_rl.envs.vehicle_graph import overlay_vehicle_graphs
 
 # Comfort thresholds (from Alpamayo comfort_reward.py)
 # https://github.com/NVlabs/alpamayo/blob/main/finetune/rl/rewards/comfort_reward.py
@@ -18,14 +21,16 @@ COMFORT_MAX_ABS_LON_JERK = 4.13  # [m/s^3]
 COMFORT_MAX_ABS_YAW_RATE = 0.95  # [rad/s]
 COMFORT_MAX_ABS_YAW_ACCEL = 1.93  # [rad/s^2]
 
+DT = 0.1  # [s] (10 FPS)
+
 
 @dataclass
 class VehiclePhysics:
-    """Class for managing vehicle physics information"""
+    """Vehicle physics and action state for a single timestep."""
 
     acceleration_vector: np.ndarray
     angular_velocity_vector: np.ndarray
-    velocity: carla.Vector3D
+    velocity: np.ndarray
     velocity_kph: float
     acceleration: float
     lon_acceleration: float
@@ -35,15 +40,20 @@ class VehiclePhysics:
     prev_lon_acceleration: float
     angular_velocity: float
     angular_acceleration: float
-    dt: float
+    throttle: float
+    brake: float
+    steering: float
 
-    def update(self, vehicle):
-        """Update vehicle physics information"""
+    def update(self, vehicle, throttle: float, brake: float, steering: float):
+        """Update vehicle physics information and action state."""
+        self.throttle = throttle
+        self.brake = brake
+        self.steering = steering
+
         # Calculate velocity
-        self.velocity = vehicle.get_velocity()
-        self.velocity_kph = 3.6 * np.sqrt(
-            self.velocity.x**2 + self.velocity.y**2 + self.velocity.z**2
-        )
+        vel = vehicle.get_velocity()
+        self.velocity = np.array([vel.x, vel.y, vel.z])
+        self.velocity_kph = 3.6 * np.linalg.norm(self.velocity)
 
         # Vehicle forward/right vectors from yaw
         yaw = np.radians(vehicle.get_transform().rotation.yaw)
@@ -58,9 +68,9 @@ class VehiclePhysics:
         self.lat_acceleration = float(np.dot(acceleration_vec, right))
 
         # Calculate jerk
-        jerk_vec = (acceleration_vec - self.acceleration_vector) / self.dt
+        jerk_vec = (acceleration_vec - self.acceleration_vector) / DT
         self.jerk = np.linalg.norm(jerk_vec)
-        self.lon_jerk = (self.lon_acceleration - self.prev_lon_acceleration) / self.dt
+        self.lon_jerk = (self.lon_acceleration - self.prev_lon_acceleration) / DT
         self.prev_lon_acceleration = self.lon_acceleration
         self.acceleration_vector = acceleration_vec
 
@@ -72,9 +82,29 @@ class VehiclePhysics:
         self.angular_velocity = np.linalg.norm(angular_velocity_vec)
 
         # Calculate angular acceleration
-        angular_accel_vec = (angular_velocity_vec - self.angular_velocity_vector) / self.dt
+        angular_accel_vec = (angular_velocity_vec - self.angular_velocity_vector) / DT
         self.angular_acceleration = np.linalg.norm(angular_accel_vec)
         self.angular_velocity_vector = angular_velocity_vec
+
+    @classmethod
+    def create(cls) -> "VehiclePhysics":
+        return cls(
+            acceleration_vector=np.zeros(3),
+            angular_velocity_vector=np.zeros(3),
+            velocity=np.zeros(3),
+            velocity_kph=0.0,
+            acceleration=0.0,
+            lon_acceleration=0.0,
+            lat_acceleration=0.0,
+            jerk=0.0,
+            lon_jerk=0.0,
+            prev_lon_acceleration=0.0,
+            angular_velocity=0.0,
+            angular_acceleration=0.0,
+            throttle=0.0,
+            brake=0.0,
+            steering=0.0,
+        )
 
 
 class CARLALeaderboardEnv(gym.Env):
@@ -95,7 +125,6 @@ class CARLALeaderboardEnv(gym.Env):
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
         self.fps = 10  # Simulation FPS
-        self.dt = 1.0 / self.fps  # Time step (seconds)
 
         # Gymnasium spaces
         self.observation_space = gym.spaces.Box(
@@ -114,7 +143,7 @@ class CARLALeaderboardEnv(gym.Env):
         # Synchronous mode settings
         settings = self.world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = self.dt
+        settings.fixed_delta_seconds = DT
         self.world.apply_settings(settings)
 
         # Map and spawn points
@@ -154,22 +183,12 @@ class CARLALeaderboardEnv(gym.Env):
         self.min_distance_to_route = 0.0  # Minimum distance to route
 
         # Vehicle physics information
-        self.vehicle_physics = VehiclePhysics(
-            acceleration_vector=np.zeros(3),
-            angular_velocity_vector=np.zeros(3),
-            velocity=carla.Vector3D(0.0, 0.0, 0.0),
-            velocity_kph=0.0,
-            acceleration=0.0,
-            lon_acceleration=0.0,
-            lat_acceleration=0.0,
-            jerk=0.0,
-            lon_jerk=0.0,
-            prev_lon_acceleration=0.0,
-            angular_velocity=0.0,
-            angular_acceleration=0.0,
-            dt=self.dt,
-        )
+        self.vehicle_physics = VehiclePhysics.create()
         self.current_action = np.zeros(2, dtype=np.float32)
+
+        # History buffer for render graphs
+        self.history_length = 200
+        self.physics_history: list[VehiclePhysics] = []
 
     def reset(
         self,
@@ -253,21 +272,8 @@ class CARLALeaderboardEnv(gym.Env):
         self.current_image = None
         self.negative_reward_count = 0
         self.min_distance_to_route = 0.0
-        self.vehicle_physics = VehiclePhysics(
-            acceleration_vector=np.zeros(3),
-            angular_velocity_vector=np.zeros(3),
-            velocity=carla.Vector3D(0.0, 0.0, 0.0),
-            velocity_kph=0.0,
-            acceleration=0.0,
-            lon_acceleration=0.0,
-            lat_acceleration=0.0,
-            jerk=0.0,
-            lon_jerk=0.0,
-            prev_lon_acceleration=0.0,
-            angular_velocity=0.0,
-            angular_acceleration=0.0,
-            dt=self.dt,
-        )
+        self.vehicle_physics = VehiclePhysics.create()
+        self.physics_history = []
 
         # Get the first frame
         while True:
@@ -345,7 +351,12 @@ class CARLALeaderboardEnv(gym.Env):
         obs = camera_img_hwc.transpose(2, 0, 1).astype(np.float32) / 255.0
 
         # Update various physics quantities
-        self.vehicle_physics.update(self.vehicle)
+        self.vehicle_physics.update(self.vehicle, throttle, brake, steer)
+
+        # Record history
+        self.physics_history.append(copy.deepcopy(self.vehicle_physics))
+        if len(self.physics_history) > self.history_length:
+            self.physics_history = self.physics_history[-self.history_length :]
 
         info = {
             "task_prompt": self.prompt,
@@ -444,13 +455,15 @@ class CARLALeaderboardEnv(gym.Env):
         return render_img
 
     def render(self) -> np.ndarray | None:
-        """Return third-person camera image for human monitoring"""
+        """Return third-person camera image with time-series graphs overlay."""
         if self.render_mode != "rgb_array":
             return None
         if self.third_person_image is None:
             return None
 
-        return self.third_person_image.copy()
+        img = self.third_person_image.copy()
+        overlay_vehicle_graphs(img, self.physics_history)
+        return img
 
     def close(self):
         if self.camera_sensor is not None:
