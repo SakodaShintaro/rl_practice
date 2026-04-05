@@ -589,7 +589,7 @@ class CARLALeaderboardEnv(gym.Env):
                 penalty += (value - hi) / hi + 1
             elif value < lo:
                 penalty += (lo - value) / abs(lo) + 1
-        return -0.05 * penalty
+        return -0.0 * penalty
 
     def _world_to_vehicle_coords(
         self,
