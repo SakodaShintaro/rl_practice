@@ -1,12 +1,7 @@
 # SPDX-License-Identifier: MIT
-import io
 from dataclasses import dataclass
 
 import cv2
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 # Comfort thresholds (from Alpamayo comfort_reward.py)
@@ -23,6 +18,12 @@ class GraphConfig:
     ymin: float
     ymax: float
     thresholds: list[float]
+
+
+def _hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return (b, g, r)
 
 
 GRAPH_CONFIGS = [
@@ -60,58 +61,78 @@ GRAPH_CONFIGS = [
 ]
 
 
-def _extract_series(history, attr: str) -> list[float]:
-    return [getattr(record, attr) for record in history]
-
-
 def render_vehicle_graphs(history, panel_w: int, panel_h: int) -> np.ndarray:
-    """Render time-series graphs of vehicle metrics using matplotlib.
+    """Render time-series graphs of vehicle metrics using cv2 only.
 
     Returns an (panel_h, panel_w, 3) uint8 BGR image.
     """
+    img = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
+
     num = len(GRAPH_CONFIGS)
-    fig, axes = plt.subplots(num, 1, figsize=(panel_w / 100, panel_h / 100), dpi=100)
-    fig.patch.set_facecolor("black")
-    fig.subplots_adjust(left=0.24, right=0.98, top=0.98, bottom=0.02, hspace=0.3)
+    label_w = 38
+    margin_top = 3
+    margin_bottom = 3
+    gap = 2
+    total_graph_h = panel_h - margin_top - margin_bottom - gap * (num - 1)
+    graph_h = total_graph_h // num
 
     series_map = {
-        "throttle": _extract_series(history, "throttle"),
-        "brake": _extract_series(history, "brake"),
-        "steer": _extract_series(history, "steering"),
-        "vel": _extract_series(history, "velocity_kph"),
+        "throttle": [p.throttle for p in history],
+        "brake": [p.brake for p in history],
+        "steer": [p.steering for p in history],
+        "vel": [p.velocity_kph for p in history],
         "lat G": [p.lat_acceleration / 9.81 for p in history],
         "lon G": [p.lon_acceleration / 9.81 for p in history],
-        "jerk": _extract_series(history, "jerk"),
+        "jerk": [p.jerk for p in history],
     }
 
-    for ax, cfg in zip(axes, GRAPH_CONFIGS):
-        data = series_map[cfg.label]
-        ax.set_facecolor("black")
-        ax.set_ylim(cfg.ymin, cfg.ymax)
-        ax.set_ylabel(cfg.label, color=cfg.color, fontsize=6, rotation=0, labelpad=25)
-        ax.tick_params(axis="y", labelsize=5, colors="gray")
-        ax.tick_params(axis="x", labelbottom=False)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["bottom"].set_color("gray")
-        ax.spines["left"].set_color("gray")
+    for i, cfg in enumerate(GRAPH_CONFIGS):
+        y0 = margin_top + i * (graph_h + gap)
+        y1 = y0 + graph_h
+        x0 = label_w
+        x1 = panel_w - 1
 
+        bgr = _hex_to_bgr(cfg.color)
+        gray = (80, 80, 80)
+
+        # Graph background
+        cv2.rectangle(img, (x0, y0), (x1, y1), (20, 20, 20), -1)
+
+        # Border
+        cv2.rectangle(img, (x0, y0), (x1, y1), gray, 1)
+
+        # Label
+        font_scale = 0.28
+        cv2.putText(img, cfg.label, (2, y0 + graph_h // 2 + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, bgr, 1, cv2.LINE_AA)
+
+        gh = y1 - y0
+
+        def val_to_y(v: float) -> int:
+            ratio = (v - cfg.ymin) / (cfg.ymax - cfg.ymin)
+            return int(y1 - ratio * gh)
+
+        # Threshold lines
         for thresh in cfg.thresholds:
-            ax.axhline(thresh, color="gray", linewidth=0.5, linestyle="--")
+            ty = val_to_y(thresh)
+            if y0 <= ty <= y1:
+                cv2.line(img, (x0, ty), (x1, ty), gray, 1)
 
-        if len(data) >= 2:
-            ax.plot(data, color=cfg.color, linewidth=0.8)
-            ax.set_xlim(0, len(data) - 1)
+        # Zero line (if ymin < 0 < ymax)
+        if cfg.ymin < 0 < cfg.ymax:
+            zy = val_to_y(0.0)
+            cv2.line(img, (x0, zy), (x1, zy), (50, 50, 50), 1)
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="raw", facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    w, h = int(fig.get_size_inches()[0] * fig.dpi), int(fig.get_size_inches()[1] * fig.dpi)
-    arr = np.frombuffer(buf.getvalue(), dtype=np.uint8).reshape(h, w, 4)[:, :, :3]
-    # RGB -> BGR for cv2
-    arr = arr[:, :, ::-1].copy()
-    return cv2.resize(arr, (panel_w, panel_h))
+        # Plot data
+        data = series_map[cfg.label]
+        n = len(data)
+        if n >= 2:
+            xs = np.linspace(x0, x1, n).astype(np.int32)
+            ys = np.array([val_to_y(float(np.clip(v, cfg.ymin, cfg.ymax))) for v in data], dtype=np.int32)
+            pts = np.stack([xs, ys], axis=1).reshape(-1, 1, 2)
+            cv2.polylines(img, [pts], isClosed=False, color=bgr, thickness=1, lineType=cv2.LINE_AA)
+
+    return img
 
 
 def overlay_vehicle_graphs(img: np.ndarray, history) -> None:
