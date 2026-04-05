@@ -8,6 +8,16 @@ import gymnasium as gym
 import numpy as np
 import scipy
 
+# Comfort thresholds (from Alpamayo comfort_reward.py)
+# https://github.com/NVlabs/alpamayo/blob/main/finetune/rl/rewards/comfort_reward.py
+COMFORT_MAX_ABS_MAG_JERK = 8.37  # [m/s^3]
+COMFORT_MAX_ABS_LAT_ACCEL = 4.89  # [m/s^2]
+COMFORT_MAX_LON_ACCEL = 2.40  # [m/s^2]
+COMFORT_MIN_LON_ACCEL = -4.05  # [m/s^2]
+COMFORT_MAX_ABS_LON_JERK = 4.13  # [m/s^3]
+COMFORT_MAX_ABS_YAW_RATE = 0.95  # [rad/s]
+COMFORT_MAX_ABS_YAW_ACCEL = 1.93  # [rad/s^2]
+
 
 @dataclass
 class VehiclePhysics:
@@ -18,7 +28,11 @@ class VehiclePhysics:
     velocity: carla.Vector3D
     velocity_kph: float
     acceleration: float
+    lon_acceleration: float
+    lat_acceleration: float
     jerk: float
+    lon_jerk: float
+    prev_lon_acceleration: float
     angular_velocity: float
     angular_acceleration: float
     dt: float
@@ -31,14 +45,23 @@ class VehiclePhysics:
             self.velocity.x**2 + self.velocity.y**2 + self.velocity.z**2
         )
 
+        # Vehicle forward/right vectors from yaw
+        yaw = np.radians(vehicle.get_transform().rotation.yaw)
+        forward = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+        right = np.array([np.sin(yaw), -np.cos(yaw), 0.0])
+
         # Calculate acceleration
         acceleration = vehicle.get_acceleration()
         acceleration_vec = np.array([acceleration.x, acceleration.y, acceleration.z])
         self.acceleration = np.linalg.norm(acceleration_vec)
+        self.lon_acceleration = float(np.dot(acceleration_vec, forward))
+        self.lat_acceleration = float(np.dot(acceleration_vec, right))
 
         # Calculate jerk
         jerk_vec = (acceleration_vec - self.acceleration_vector) / self.dt
         self.jerk = np.linalg.norm(jerk_vec)
+        self.lon_jerk = (self.lon_acceleration - self.prev_lon_acceleration) / self.dt
+        self.prev_lon_acceleration = self.lon_acceleration
         self.acceleration_vector = acceleration_vec
 
         # Calculate angular velocity
@@ -137,7 +160,11 @@ class CARLALeaderboardEnv(gym.Env):
             velocity=carla.Vector3D(0.0, 0.0, 0.0),
             velocity_kph=0.0,
             acceleration=0.0,
+            lon_acceleration=0.0,
+            lat_acceleration=0.0,
             jerk=0.0,
+            lon_jerk=0.0,
+            prev_lon_acceleration=0.0,
             angular_velocity=0.0,
             angular_acceleration=0.0,
             dt=self.dt,
@@ -232,7 +259,11 @@ class CARLALeaderboardEnv(gym.Env):
             velocity=carla.Vector3D(0.0, 0.0, 0.0),
             velocity_kph=0.0,
             acceleration=0.0,
+            lon_acceleration=0.0,
+            lat_acceleration=0.0,
             jerk=0.0,
+            lon_jerk=0.0,
+            prev_lon_acceleration=0.0,
             angular_velocity=0.0,
             angular_acceleration=0.0,
             dt=self.dt,
@@ -268,15 +299,6 @@ class CARLALeaderboardEnv(gym.Env):
         # Update route tracking
         self._update_route_progress()
 
-        # Calculate reward (Leaderboard compliant)
-        reward = self._compute_reward()
-
-        # Negative reward count
-        if reward < 0:
-            self.negative_reward_count += 1
-        else:
-            self.negative_reward_count = 0
-
         # Termination conditions
         has_collision = (
             self.infractions["collision_pedestrian"] > 0
@@ -284,6 +306,16 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_static"] > 0
         )
         terminated = has_collision or self.route_completion >= 1.0
+
+        # Calculate reward
+        reward = self._compute_reward(has_collision)
+
+        # Negative reward count
+        if reward < 0:
+            self.negative_reward_count += 1
+        else:
+            self.negative_reward_count = 0
+
         truncated = (
             self.episode_step >= self.max_episode_steps
             or self.negative_reward_count >= 100
@@ -322,7 +354,10 @@ class CARLALeaderboardEnv(gym.Env):
             "velocity": self.vehicle_physics.velocity,
             "velocity_kph": self.vehicle_physics.velocity_kph,
             "acceleration": self.vehicle_physics.acceleration,
+            "lon_acceleration": self.vehicle_physics.lon_acceleration,
+            "lat_acceleration": self.vehicle_physics.lat_acceleration,
             "jerk": self.vehicle_physics.jerk,
+            "lon_jerk": self.vehicle_physics.lon_jerk,
             "angular_velocity": self.vehicle_physics.angular_velocity,
             "angular_acceleration": self.vehicle_physics.angular_acceleration,
         }
@@ -502,36 +537,59 @@ class CARLALeaderboardEnv(gym.Env):
         self.route_completion = min(1.0, closest_idx / max(1, len(self.route_waypoints) - 1))
         self.min_distance_to_route = min_dist
 
-    def _compute_reward(self) -> float:
+    def _compute_reward(self, has_collision: bool) -> float:
         """
-        Leaderboard compliant reward calculation
-        Driving Score = Route Completion x Infraction Penalty
-        Reward is the difference from previous
+        Reward calculation combining route progress, collision penalty, and comfort.
+
+        - Collision: -1.0 (terminal)
+        - Route progress: delta of driving score
+        - Comfort: penalty for exceeding acceleration/jerk/yaw thresholds
         """
+        if has_collision:
+            return -1.0
+
         # Route Completion (0.0 ~ 100.0)
         route_completion_score = self.route_completion * 100.0
 
-        # Infraction Penalty (multiply by Leaderboard penalty coefficients)
-        infraction_penalty = 1.0
-        if self.infractions["collision_pedestrian"] > 0:
-            infraction_penalty *= 0.50
-        if self.infractions["collision_vehicle"] > 0:
-            infraction_penalty *= 0.60
-        if self.infractions["collision_static"] > 0:
-            infraction_penalty *= 0.65
-
-        # Driving Score
-        driving_score = route_completion_score * infraction_penalty
+        # Driving Score (no infraction penalty needed here since collision returns early)
+        driving_score = route_completion_score
 
         # Reward is the difference from previous
         reward = driving_score - self.prev_driving_score
         self.prev_driving_score = driving_score
 
-        # Give -0.1 if reward is 0.0
+        # Give -0.1 if reward is 0.0 (no progress)
         if reward == 0.0:
             reward = -0.1
 
+        # Comfort penalty: count how many comfort metrics are out of bounds
+        comfort_penalty = self._compute_comfort_penalty()
+        reward += comfort_penalty
+
         return reward
+
+    def _compute_comfort_penalty(self) -> float:
+        """
+        Compute comfort penalty based on vehicle dynamics thresholds.
+        Penalty scales with how much the value exceeds the bound:
+          penalty = (value - bound) / |bound| + 1  (0 if within bounds)
+        """
+        physics = self.vehicle_physics
+        metrics = [
+            (physics.lat_acceleration, -COMFORT_MAX_ABS_LAT_ACCEL, COMFORT_MAX_ABS_LAT_ACCEL),
+            (physics.lon_acceleration, COMFORT_MIN_LON_ACCEL, COMFORT_MAX_LON_ACCEL),
+            (physics.jerk, -COMFORT_MAX_ABS_MAG_JERK, COMFORT_MAX_ABS_MAG_JERK),
+            (physics.lon_jerk, -COMFORT_MAX_ABS_LON_JERK, COMFORT_MAX_ABS_LON_JERK),
+            (physics.angular_velocity, -COMFORT_MAX_ABS_YAW_RATE, COMFORT_MAX_ABS_YAW_RATE),
+            (physics.angular_acceleration, -COMFORT_MAX_ABS_YAW_ACCEL, COMFORT_MAX_ABS_YAW_ACCEL),
+        ]
+        penalty = 0.0
+        for value, lo, hi in metrics:
+            if value > hi:
+                penalty += (value - hi) / hi + 1
+            elif value < lo:
+                penalty += (lo - value) / abs(lo) + 1
+        return -0.05 * penalty
 
     def _world_to_vehicle_coords(
         self,
