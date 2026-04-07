@@ -12,7 +12,6 @@ import argparse
 import csv
 import random
 import time
-from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -21,6 +20,7 @@ import imageio
 import numpy as np
 import torch
 import wandb
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from vla_streaming_rl.agents.off_policy import OffPolicyAgent
@@ -86,9 +86,7 @@ def cfg_to_args(cfg: DictConfig) -> argparse.Namespace:
     return argparse.Namespace(**OmegaConf.to_container(cfg, resolve=True))
 
 
-def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
-    root_dir = Path(args.result_dir)
-    root_dir.mkdir(parents=True, exist_ok=True)
+def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -> None:
     wandb.init(
         project=f"vla_streaming_rl_{args.env_id}",
         config=vars(args),
@@ -96,7 +94,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
         group=args.wandb_group,
         save_code=True,
         settings=wandb.Settings(quiet=True),
-        dir=str(root_dir),
+        dir=str(result_dir),
     )
 
     # seeding
@@ -109,10 +107,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
     # Create result directories and save files only if not in debug mode
     if not args.debug:
-        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = root_dir / f"{datetime_str}_{exp_name}"
-        result_dir.mkdir(parents=True, exist_ok=True)
-
         # save seed to file
         with open(result_dir / "seed.txt", "w") as f:
             f.write(str(seed))
@@ -340,7 +334,9 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
 
 @hydra.main(version_base=None, config_path="../configs", config_name="default")
 def hydra_main(cfg: DictConfig) -> None:
-    # Hydra changes cwd to the output directory; restore to original
+    # Hydra's output dir is our result dir (configured via hydra.run.dir)
+    hydra_output_dir = Path(HydraConfig.get().runtime.output_dir)
+    # Restore cwd so relative paths in the code work correctly
     os.chdir(hydra.utils.get_original_cwd())
 
     args = cfg_to_args(cfg)
@@ -365,7 +361,7 @@ def hydra_main(cfg: DictConfig) -> None:
 
     for i in range(args.trial_num):
         suffix = f"_{i:02d}" if args.trial_num > 1 else ""
-        main(args, exp_name + suffix, seed + i)
+        main(args, exp_name + suffix, seed + i, hydra_output_dir)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,10 @@
+hydra:
+  run:
+    dir: ${result_dir}/${now:%Y%m%d_%H%M%S}_${agent_type}_${exp_name}
+  sweep:
+    dir: ${result_dir}
+    subdir: ${now:%Y%m%d_%H%M%S}_${agent_type}_${exp_name}
+
 exp_name: default
 result_dir: results
 trial_num: 1
