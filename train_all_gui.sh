@@ -26,18 +26,16 @@ STEP_LIMIT=50_000
 ENV_ID=TrackingSquare-v0
 
 for use_prompt in 1 0; do
-  uv run python scripts/train.py use_prompt${use_prompt} \
-    --env_id $ENV_ID \
-    --agent_type streaming \
-    --network_class vlm_actor_critic_with_action_value \
-    --step_limit $STEP_LIMIT \
-    --use_eligibility_trace 1 \
-    --learning_rate 1e-5 \
-    --result_dir $RESULT_DIR \
-    --wandb_group $WANDB_GROUP \
-    --disable_state_predictor 1 \
-    --state_mode expert \
-    --use_lora 1 \
-    --use_prompt $use_prompt
+  uv run python scripts/train.py \
+    --config-name gui_env \
+    exp_name=use_prompt${use_prompt} \
+    env_id=$ENV_ID \
+    step_limit=$STEP_LIMIT \
+    agent_type=streaming \
+    use_eligibility_trace=1 \
+    learning_rate=1e-5 \
+    result_dir=$RESULT_DIR \
+    wandb_group=$WANDB_GROUP \
+    use_prompt=$use_prompt
 
 done

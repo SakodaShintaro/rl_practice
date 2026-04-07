@@ -16,10 +16,12 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import hydra
 import imageio
 import numpy as np
 import torch
 import wandb
+from omegaconf import DictConfig, OmegaConf
 
 from vla_streaming_rl.agents.off_policy import OffPolicyAgent
 from vla_streaming_rl.agents.on_policy import OnPolicyAgent
@@ -79,146 +81,9 @@ def save_episode_data(
             f.write(f"{float(reward):.6f}\n")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("exp_name", type=str)
-    parser.add_argument("--result_dir", type=str, default="results")
-    parser.add_argument("--trial_num", type=int, default=1)
-    parser.add_argument(
-        "--env_id",
-        type=str,
-        default="CarRacing-v3",
-        choices=[
-            "CarRacing-v3",
-            "MiniGrid-MemoryS9-v0",
-            "MemoryMaze-9x9-v0",
-            "CARLA-Leaderboard-v0",
-            "LetterTracing-v0",
-            "FourQuadrant-v0",
-            "ColorPanel-v0",
-            "STL10Panel-v0",
-            "TrackingSquare-v0",
-            "Hopper-v5",
-        ],
-    )
-    parser.add_argument(
-        "--agent_type",
-        type=str,
-        default="on_policy",
-        choices=["off_policy", "on_policy", "streaming"],
-    )
-    parser.add_argument(
-        "--network_class",
-        type=str,
-        default="actor_critic_with_action_value",
-        choices=[
-            "actor_critic_with_state_value",
-            "actor_critic_with_action_value",
-            "vlm_actor_critic_with_action_value",
-        ],
-    )
-    parser.add_argument("--seed", type=int, default=-1)
-    parser.add_argument("--render", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--off_wandb", action="store_true")
-    parser.add_argument("--wandb_group", type=str, default="default_group")
-    parser.add_argument(
-        "--encoder",
-        type=str,
-        default="spatial_temporal",
-        choices=["spatial_temporal", "temporal_only"],
-    )
-    parser.add_argument(
-        "--temporal_model_type",
-        type=str,
-        default="transformer",
-        choices=["gru", "transformer", "gdn", "mamba", "identity"],
-    )
-    parser.add_argument(
-        "--image_processor_type", type=str, default="ae", choices=["simple_cnn", "ae"]
-    )
-    parser.add_argument(
-        "--policy_type",
-        type=str,
-        default="diffusion",
-        choices=["beta", "categorical", "diffusion", "cfgrl"],
-    )
-    parser.add_argument("--encoder_block_num", type=int, default=1)
-    parser.add_argument("--use_lora", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--target_layer_idx", type=int, default=2)
-    parser.add_argument("--actor_hidden_dim", type=int, default=512)
-    parser.add_argument("--actor_block_num", type=int, default=1)
-    parser.add_argument("--critic_hidden_dim", type=int, default=1024)
-    parser.add_argument("--critic_block_num", type=int, default=1)
-    parser.add_argument("--separate_critic", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--predictor_hidden_dim", type=int, default=512)
-    parser.add_argument("--predictor_block_num", type=int, default=2)
-    parser.add_argument("--predictor_step_num", type=int, default=1)
-    parser.add_argument("--num_bins", type=int, default=1)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--max_grad_norm", type=float, default=5.0)
-    parser.add_argument("--sparsity", type=float, default=0.0)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--step_limit", type=int, default=1_000_000)
-    parser.add_argument("--seq_len", type=int, default=1)
-    parser.add_argument("--horizon", type=int, default=1)
-    parser.add_argument("--buffer_device", type=str, default="cuda")
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--critic_loss_weight", type=float, default=1.0)
-    parser.add_argument("--use_done", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--normalizing_by_return", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--image_save_interval", type=int, default=100)
-    parser.add_argument("--accumulation_steps", type=int, default=1)
-    parser.add_argument("--debug", action="store_true")
-
-    # for off_policy
-    parser.add_argument("--buffer_size", type=int, default=int(2e4))
-    parser.add_argument("--learning_starts", type=int, default=int(2e3))
-    parser.add_argument("--detach_actor", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--detach_critic", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--detach_predictor", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--disable_state_predictor", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--dacer_loss_weight", type=float, default=0.05)
-    parser.add_argument("--denoising_time", type=float, default=0.9)
-    parser.add_argument("--denoising_steps", type=int, default=1)
-    parser.add_argument(
-        "--vlm_model_id",
-        type=str,
-        default="Qwen/Qwen3.5-0.8B",
-        choices=["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3-VL-2B-Instruct"],
-    )
-    parser.add_argument("--expert_hidden_size", type=int, default=8)
-    parser.add_argument("--state_expert_hidden_size", type=int, default=576)
-    parser.add_argument("--num_state_queries", type=int, default=1)
-    parser.add_argument(
-        "--state_mode",
-        type=str,
-        default="projection",
-        choices=["projection", "expert"],
-    )
-    parser.add_argument(
-        "--text_action_mode",
-        type=str,
-        default="none",
-        choices=["none", "high_level", "text_action", "pi_fast"],
-    )
-
-    # for AVG
-    parser.add_argument("--use_eligibility_trace", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--et_lambda", default=0.5, type=float)
-
-    # for on_policy
-    parser.add_argument("--buffer_capacity", type=int, default=4096)
-    parser.add_argument("--on_policy_epoch", type=int, default=10)
-    parser.add_argument("--clip_param_policy", type=float, default=0.2)
-    parser.add_argument("--clip_param_value", type=float, default=0.2)
-    parser.add_argument("--max_new_tokens", type=int, default=64)
-    parser.add_argument("--max_prompt_tokens", type=int, default=256)
-    parser.add_argument("--pad_token_id", type=int, default=0)
-    parser.add_argument("--use_prompt", type=int, default=1, choices=[0, 1])
-    parser.add_argument("--use_feedback", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--text_q_margin", type=float, default=1.0)
-
-    return parser.parse_args()
+def cfg_to_args(cfg: DictConfig) -> argparse.Namespace:
+    """Convert Hydra DictConfig to argparse.Namespace for backward compatibility."""
+    return argparse.Namespace(**OmegaConf.to_container(cfg, resolve=True))
 
 
 def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
@@ -473,8 +338,13 @@ def main(args: argparse.Namespace, exp_name: str, seed: int) -> None:
     wandb.finish()
 
 
-if __name__ == "__main__":
-    args = parse_args()
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def hydra_main(cfg: DictConfig) -> None:
+    # Hydra changes cwd to the output directory; restore to original
+    os.chdir(hydra.utils.get_original_cwd())
+
+    args = cfg_to_args(cfg)
+
     if args.debug:
         args.off_wandb = True
         args.learning_starts = max(10, args.seq_len + args.horizon + 5)
@@ -496,3 +366,7 @@ if __name__ == "__main__":
     for i in range(args.trial_num):
         suffix = f"_{i:02d}" if args.trial_num > 1 else ""
         main(args, exp_name + suffix, seed + i)
+
+
+if __name__ == "__main__":
+    hydra_main()

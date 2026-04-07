@@ -2,6 +2,7 @@
 *.pyc
 results/
 wandb/
+outputs/
 .venv
 *.egg-info
 cache
