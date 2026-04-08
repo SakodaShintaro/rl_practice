@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # This script was initially inspired by CleanRL https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/sac_continuous_action.py
+import logging
 import os
 import warnings
 
@@ -7,6 +8,7 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 warnings.filterwarnings("ignore", message=".*local_dir_use_symlinks.*")
 warnings.filterwarnings("ignore", message=".*Attempting to run cuBLAS.*")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 import argparse
 import csv
@@ -301,7 +303,14 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
                 f.write(f"{episode_id + 1}\t{score:.2f}")
             best_score = score
             save_episode_data(
-                video_dir, image_dir, obs_dir, "best_episode", bgr_image_list, action_list, reward_list, obs_list
+                video_dir,
+                image_dir,
+                obs_dir,
+                "best_episode",
+                bgr_image_list,
+                action_list,
+                reward_list,
+                obs_list,
             )
 
         if (
