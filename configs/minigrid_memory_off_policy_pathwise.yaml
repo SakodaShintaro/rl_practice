@@ -1,0 +1,8 @@
+defaults:
+  - default
+
+exp_name: pathwise
+agent_type: off_policy
+encoder: temporal_only
+step_limit: 800_000
+denoising_time: 0.8

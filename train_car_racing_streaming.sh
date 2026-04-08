@@ -4,10 +4,6 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-uv run python scripts/train.py baseline$suffix \
-  --env_id CarRacing-v3 \
-  --agent_type streaming \
-  --network_class actor_critic_with_action_value \
-  --step_limit 100_000 \
-  --batch_size 1 \
-  --learning_rate 1e-5 \
+uv run python scripts/train.py \
+  --config-name car_racing_streaming \
+  exp_name=baseline$suffix

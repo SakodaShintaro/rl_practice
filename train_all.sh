@@ -23,46 +23,49 @@ STEP_LIMIT=200_000
 ENV_ID=CarRacing-v3
 
 # Streaming, with eligibility trace, learning rate 5e-6
-uv run python scripts/train.py vlm_streaming$suffix \
-  --env_id $ENV_ID \
-  --agent_type streaming \
-  --network_class vlm_actor_critic_with_action_value \
-  --step_limit $STEP_LIMIT \
-  --use_eligibility_trace 1 \
-  --learning_rate 5e-6 \
-  --result_dir $RESULT_DIR \
-  --wandb_group $WANDB_GROUP \
+uv run python scripts/train.py \
+  exp_name=vlm_streaming$suffix \
+  env_id=$ENV_ID \
+  agent_type=streaming \
+  network_class=vlm_actor_critic_with_action_value \
+  step_limit=$STEP_LIMIT \
+  use_eligibility_trace=1 \
+  learning_rate=5e-6 \
+  result_dir=$RESULT_DIR \
+  wandb_group=$WANDB_GROUP
 
 # Off-policy, batch size 16, learning rate 1e-5
-uv run python scripts/train.py vlm_off_policy_bs16$suffix \
-  --env_id $ENV_ID \
-  --agent_type off_policy \
-  --network_class vlm_actor_critic_with_action_value \
-  --step_limit $STEP_LIMIT \
-  --batch_size 16 \
-  --learning_rate 1e-5 \
-  --result_dir $RESULT_DIR \
-  --wandb_group $WANDB_GROUP \
+uv run python scripts/train.py \
+  exp_name=vlm_off_policy_bs16$suffix \
+  env_id=$ENV_ID \
+  agent_type=off_policy \
+  network_class=vlm_actor_critic_with_action_value \
+  step_limit=$STEP_LIMIT \
+  batch_size=16 \
+  learning_rate=1e-5 \
+  result_dir=$RESULT_DIR \
+  wandb_group=$WANDB_GROUP
 
 # Off-policy, batch size 1, learning rate 5e-6
-uv run python scripts/train.py vlm_off_policy_bs1$suffix \
-  --env_id $ENV_ID \
-  --agent_type off_policy \
-  --network_class vlm_actor_critic_with_action_value \
-  --step_limit $STEP_LIMIT \
-  --batch_size 1 \
-  --learning_rate 5e-6 \
-  --result_dir $RESULT_DIR \
-  --wandb_group $WANDB_GROUP \
+uv run python scripts/train.py \
+  exp_name=vlm_off_policy_bs1$suffix \
+  env_id=$ENV_ID \
+  agent_type=off_policy \
+  network_class=vlm_actor_critic_with_action_value \
+  step_limit=$STEP_LIMIT \
+  batch_size=1 \
+  learning_rate=5e-6 \
+  result_dir=$RESULT_DIR \
+  wandb_group=$WANDB_GROUP
 
 # Comparison
-uv run python scripts/train.py no_vlm_off_policy_bs16$suffix \
-  --env_id $ENV_ID \
-  --agent_type off_policy \
-  --network_class actor_critic_with_action_value \
-  --step_limit $STEP_LIMIT \
-  --batch_size 16 \
-  --learning_rate 1e-5 \
-  --result_dir $RESULT_DIR \
-  --wandb_group $WANDB_GROUP \
-
+uv run python scripts/train.py \
+  exp_name=no_vlm_off_policy_bs16$suffix \
+  env_id=$ENV_ID \
+  agent_type=off_policy \
+  network_class=actor_critic_with_action_value \
+  step_limit=$STEP_LIMIT \
+  batch_size=16 \
+  learning_rate=1e-5 \
+  result_dir=$RESULT_DIR \
+  wandb_group=$WANDB_GROUP

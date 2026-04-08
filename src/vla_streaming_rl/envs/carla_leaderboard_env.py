@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import copy
 import time
 from dataclasses import dataclass
 
@@ -8,37 +9,69 @@ import gymnasium as gym
 import numpy as np
 import scipy
 
+from vla_streaming_rl.envs.vehicle_graph import overlay_vehicle_graphs
+
+# Comfort thresholds (from Alpamayo comfort_reward.py)
+# https://github.com/NVlabs/alpamayo/blob/main/finetune/rl/rewards/comfort_reward.py
+COMFORT_MAX_ABS_MAG_JERK = 8.37  # [m/s^3]
+COMFORT_MAX_ABS_LAT_ACCEL = 4.89  # [m/s^2]
+COMFORT_MAX_LON_ACCEL = 2.40  # [m/s^2]
+COMFORT_MIN_LON_ACCEL = -4.05  # [m/s^2]
+COMFORT_MAX_ABS_LON_JERK = 4.13  # [m/s^3]
+COMFORT_MAX_ABS_YAW_RATE = 0.95  # [rad/s]
+COMFORT_MAX_ABS_YAW_ACCEL = 1.93  # [rad/s^2]
+
+DT = 0.1  # [s] (10 FPS)
+
 
 @dataclass
 class VehiclePhysics:
-    """Class for managing vehicle physics information"""
+    """Vehicle physics and action state for a single timestep."""
 
     acceleration_vector: np.ndarray
     angular_velocity_vector: np.ndarray
-    velocity: carla.Vector3D
+    velocity: np.ndarray
     velocity_kph: float
     acceleration: float
+    lon_acceleration: float
+    lat_acceleration: float
     jerk: float
+    lon_jerk: float
+    prev_lon_acceleration: float
     angular_velocity: float
     angular_acceleration: float
-    dt: float
+    throttle: float
+    brake: float
+    steering: float
 
-    def update(self, vehicle):
-        """Update vehicle physics information"""
+    def update(self, vehicle, throttle: float, brake: float, steering: float):
+        """Update vehicle physics information and action state."""
+        self.throttle = throttle
+        self.brake = brake
+        self.steering = steering
+
         # Calculate velocity
-        self.velocity = vehicle.get_velocity()
-        self.velocity_kph = 3.6 * np.sqrt(
-            self.velocity.x**2 + self.velocity.y**2 + self.velocity.z**2
-        )
+        vel = vehicle.get_velocity()
+        self.velocity = np.array([vel.x, vel.y, vel.z])
+        self.velocity_kph = 3.6 * np.linalg.norm(self.velocity)
+
+        # Vehicle forward/right vectors from yaw
+        yaw = np.radians(vehicle.get_transform().rotation.yaw)
+        forward = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+        right = np.array([np.sin(yaw), -np.cos(yaw), 0.0])
 
         # Calculate acceleration
         acceleration = vehicle.get_acceleration()
         acceleration_vec = np.array([acceleration.x, acceleration.y, acceleration.z])
         self.acceleration = np.linalg.norm(acceleration_vec)
+        self.lon_acceleration = float(np.dot(acceleration_vec, forward))
+        self.lat_acceleration = float(np.dot(acceleration_vec, right))
 
         # Calculate jerk
-        jerk_vec = (acceleration_vec - self.acceleration_vector) / self.dt
+        jerk_vec = (acceleration_vec - self.acceleration_vector) / DT
         self.jerk = np.linalg.norm(jerk_vec)
+        self.lon_jerk = (self.lon_acceleration - self.prev_lon_acceleration) / DT
+        self.prev_lon_acceleration = self.lon_acceleration
         self.acceleration_vector = acceleration_vec
 
         # Calculate angular velocity
@@ -49,9 +82,29 @@ class VehiclePhysics:
         self.angular_velocity = np.linalg.norm(angular_velocity_vec)
 
         # Calculate angular acceleration
-        angular_accel_vec = (angular_velocity_vec - self.angular_velocity_vector) / self.dt
+        angular_accel_vec = (angular_velocity_vec - self.angular_velocity_vector) / DT
         self.angular_acceleration = np.linalg.norm(angular_accel_vec)
         self.angular_velocity_vector = angular_velocity_vec
+
+    @classmethod
+    def create(cls) -> "VehiclePhysics":
+        return cls(
+            acceleration_vector=np.zeros(3),
+            angular_velocity_vector=np.zeros(3),
+            velocity=np.zeros(3),
+            velocity_kph=0.0,
+            acceleration=0.0,
+            lon_acceleration=0.0,
+            lat_acceleration=0.0,
+            jerk=0.0,
+            lon_jerk=0.0,
+            prev_lon_acceleration=0.0,
+            angular_velocity=0.0,
+            angular_acceleration=0.0,
+            throttle=0.0,
+            brake=0.0,
+            steering=0.0,
+        )
 
 
 class CARLALeaderboardEnv(gym.Env):
@@ -71,8 +124,7 @@ class CARLALeaderboardEnv(gym.Env):
         self.image_size = (256, 256)  # (width, height)
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
-        self.fps = 20  # Simulation FPS
-        self.dt = 1.0 / self.fps  # Time step (seconds)
+        self.fps = 10  # Simulation FPS
 
         # Gymnasium spaces
         self.observation_space = gym.spaces.Box(
@@ -91,7 +143,7 @@ class CARLALeaderboardEnv(gym.Env):
         # Synchronous mode settings
         settings = self.world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = self.dt
+        settings.fixed_delta_seconds = DT
         self.world.apply_settings(settings)
 
         # Map and spawn points
@@ -101,11 +153,13 @@ class CARLALeaderboardEnv(gym.Env):
         # Sensors and vehicle
         self.vehicle = None
         self.camera_sensor = None
+        self.third_person_camera = None
         self.collision_sensor = None
         self.lane_invasion_sensor = None
 
         # Sensor data
         self.current_image = None
+        self.third_person_image = None
         self.lane_invasion_history = []
 
         # Route information
@@ -129,17 +183,12 @@ class CARLALeaderboardEnv(gym.Env):
         self.min_distance_to_route = 0.0  # Minimum distance to route
 
         # Vehicle physics information
-        self.vehicle_physics = VehiclePhysics(
-            acceleration_vector=np.zeros(3),
-            angular_velocity_vector=np.zeros(3),
-            velocity=carla.Vector3D(0.0, 0.0, 0.0),
-            velocity_kph=0.0,
-            acceleration=0.0,
-            jerk=0.0,
-            angular_velocity=0.0,
-            angular_acceleration=0.0,
-            dt=self.dt,
-        )
+        self.vehicle_physics = VehiclePhysics.create()
+        self.current_action = np.zeros(2, dtype=np.float32)
+
+        # History buffer for render graphs
+        self.history_length = 200
+        self.physics_history: list[VehiclePhysics] = []
 
     def reset(
         self,
@@ -151,6 +200,8 @@ class CARLALeaderboardEnv(gym.Env):
         # Delete existing vehicle and sensors
         if self.camera_sensor is not None:
             self.camera_sensor.destroy()
+        if self.third_person_camera is not None:
+            self.third_person_camera.destroy()
         if self.collision_sensor is not None:
             self.collision_sensor.destroy()
         if self.lane_invasion_sensor is not None:
@@ -186,6 +237,17 @@ class CARLALeaderboardEnv(gym.Env):
         )
         self.camera_sensor.listen(lambda image: self._process_image(image))
 
+        # Third-person camera (for human monitoring)
+        tp_bp = blueprint_library.find("sensor.camera.rgb")
+        tp_bp.set_attribute("image_size_x", "800")
+        tp_bp.set_attribute("image_size_y", "600")
+        tp_bp.set_attribute("fov", "90")
+        tp_transform = carla.Transform(carla.Location(x=-8.0, z=5.0), carla.Rotation(pitch=-20.0))
+        self.third_person_camera = self.world.spawn_actor(
+            tp_bp, tp_transform, attach_to=self.vehicle
+        )
+        self.third_person_camera.listen(lambda image: self._process_third_person_image(image))
+
         # Collision sensor
         collision_bp = blueprint_library.find("sensor.other.collision")
         self.collision_sensor = self.world.spawn_actor(
@@ -210,17 +272,8 @@ class CARLALeaderboardEnv(gym.Env):
         self.current_image = None
         self.negative_reward_count = 0
         self.min_distance_to_route = 0.0
-        self.vehicle_physics = VehiclePhysics(
-            acceleration_vector=np.zeros(3),
-            angular_velocity_vector=np.zeros(3),
-            velocity=carla.Vector3D(0.0, 0.0, 0.0),
-            velocity_kph=0.0,
-            acceleration=0.0,
-            jerk=0.0,
-            angular_velocity=0.0,
-            angular_acceleration=0.0,
-            dt=self.dt,
-        )
+        self.vehicle_physics = VehiclePhysics.create()
+        self.physics_history = []
 
         # Get the first frame
         while True:
@@ -229,14 +282,17 @@ class CARLALeaderboardEnv(gym.Env):
                 break
             time.sleep(0.1)
 
+        self._update_spectator()
+
         return self.current_image.copy(), {"task_prompt": self.prompt}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # Apply action: action[0]=steer, action[1]=gas_or_brake (same as CarRacing)
+        self.current_action = np.array(action, dtype=np.float32)
         steer = float(np.clip(action[0], -1.0, 1.0))
         gas_or_brake = float(np.clip(action[1], -1.0, 1.0))
         throttle = max(gas_or_brake, 0.0)
-        brake = max(-gas_or_brake, 0.0)
+        brake = 0.0
 
         control = carla.VehicleControl(
             steer=steer, throttle=throttle, brake=brake, hand_brake=False, manual_gear_shift=False
@@ -244,18 +300,10 @@ class CARLALeaderboardEnv(gym.Env):
         self.vehicle.apply_control(control)
 
         self.world.tick()
+        self._update_spectator()
 
         # Update route tracking
         self._update_route_progress()
-
-        # Calculate reward (Leaderboard compliant)
-        reward = self._compute_reward()
-
-        # Negative reward count
-        if reward < 0:
-            self.negative_reward_count += 1
-        else:
-            self.negative_reward_count = 0
 
         # Termination conditions
         has_collision = (
@@ -264,6 +312,16 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_static"] > 0
         )
         terminated = has_collision or self.route_completion >= 1.0
+
+        # Calculate reward
+        reward = self._compute_reward(has_collision)
+
+        # Negative reward count
+        if reward < 0:
+            self.negative_reward_count += 1
+        else:
+            self.negative_reward_count = 0
+
         truncated = (
             self.episode_step >= self.max_episode_steps
             or self.negative_reward_count >= 100
@@ -293,7 +351,12 @@ class CARLALeaderboardEnv(gym.Env):
         obs = camera_img_hwc.transpose(2, 0, 1).astype(np.float32) / 255.0
 
         # Update various physics quantities
-        self.vehicle_physics.update(self.vehicle)
+        self.vehicle_physics.update(self.vehicle, throttle, brake, steer)
+
+        # Record history
+        self.physics_history.append(copy.deepcopy(self.vehicle_physics))
+        if len(self.physics_history) > self.history_length:
+            self.physics_history = self.physics_history[-self.history_length :]
 
         info = {
             "task_prompt": self.prompt,
@@ -302,7 +365,10 @@ class CARLALeaderboardEnv(gym.Env):
             "velocity": self.vehicle_physics.velocity,
             "velocity_kph": self.vehicle_physics.velocity_kph,
             "acceleration": self.vehicle_physics.acceleration,
+            "lon_acceleration": self.vehicle_physics.lon_acceleration,
+            "lat_acceleration": self.vehicle_physics.lat_acceleration,
             "jerk": self.vehicle_physics.jerk,
+            "lon_jerk": self.vehicle_physics.lon_jerk,
             "angular_velocity": self.vehicle_physics.angular_velocity,
             "angular_acceleration": self.vehicle_physics.angular_acceleration,
         }
@@ -370,6 +436,8 @@ class CARLALeaderboardEnv(gym.Env):
                 f"Jerk: {self.vehicle_physics.jerk:.2f} m/s^3",
                 f"Angular Vel: {self.vehicle_physics.angular_velocity:.2f} rad/s",
                 f"Angular Accel: {self.vehicle_physics.angular_acceleration:.2f} rad/s^2",
+                f"Steer: {self.current_action[0]:+.3f}",
+                f"Gas/Brake: {self.current_action[1]:+.3f}",
             ]
 
             for i, text in enumerate(texts):
@@ -387,15 +455,21 @@ class CARLALeaderboardEnv(gym.Env):
         return render_img
 
     def render(self) -> np.ndarray | None:
-        """Visualize map + route + vehicle position"""
+        """Return third-person camera image with time-series graphs overlay."""
         if self.render_mode != "rgb_array":
             return None
+        if self.third_person_image is None:
+            return None
 
-        return self._generate_route_image(show_text=True)
+        img = self.third_person_image.copy()
+        overlay_vehicle_graphs(img, self.physics_history)
+        return img
 
     def close(self):
         if self.camera_sensor is not None:
             self.camera_sensor.destroy()
+        if self.third_person_camera is not None:
+            self.third_person_camera.destroy()
         if self.collision_sensor is not None:
             self.collision_sensor.destroy()
         if self.lane_invasion_sensor is not None:
@@ -476,36 +550,59 @@ class CARLALeaderboardEnv(gym.Env):
         self.route_completion = min(1.0, closest_idx / max(1, len(self.route_waypoints) - 1))
         self.min_distance_to_route = min_dist
 
-    def _compute_reward(self) -> float:
+    def _compute_reward(self, has_collision: bool) -> float:
         """
-        Leaderboard compliant reward calculation
-        Driving Score = Route Completion x Infraction Penalty
-        Reward is the difference from previous
+        Reward calculation combining route progress, collision penalty, and comfort.
+
+        - Collision: -1.0 (terminal)
+        - Route progress: delta of driving score
+        - Comfort: penalty for exceeding acceleration/jerk/yaw thresholds
         """
+        if has_collision:
+            return -1.0
+
         # Route Completion (0.0 ~ 100.0)
         route_completion_score = self.route_completion * 100.0
 
-        # Infraction Penalty (multiply by Leaderboard penalty coefficients)
-        infraction_penalty = 1.0
-        if self.infractions["collision_pedestrian"] > 0:
-            infraction_penalty *= 0.50
-        if self.infractions["collision_vehicle"] > 0:
-            infraction_penalty *= 0.60
-        if self.infractions["collision_static"] > 0:
-            infraction_penalty *= 0.65
-
-        # Driving Score
-        driving_score = route_completion_score * infraction_penalty
+        # Driving Score (no infraction penalty needed here since collision returns early)
+        driving_score = route_completion_score
 
         # Reward is the difference from previous
         reward = driving_score - self.prev_driving_score
         self.prev_driving_score = driving_score
 
-        # Give -0.1 if reward is 0.0
+        # Give -0.1 if reward is 0.0 (no progress)
         if reward == 0.0:
             reward = -0.1
 
+        # Comfort penalty: count how many comfort metrics are out of bounds
+        comfort_penalty = self._compute_comfort_penalty()
+        reward += comfort_penalty
+
         return reward
+
+    def _compute_comfort_penalty(self) -> float:
+        """
+        Compute comfort penalty based on vehicle dynamics thresholds.
+        Penalty scales with how much the value exceeds the bound:
+          penalty = (value - bound) / |bound| + 1  (0 if within bounds)
+        """
+        physics = self.vehicle_physics
+        metrics = [
+            (physics.lat_acceleration, -COMFORT_MAX_ABS_LAT_ACCEL, COMFORT_MAX_ABS_LAT_ACCEL),
+            (physics.lon_acceleration, COMFORT_MIN_LON_ACCEL, COMFORT_MAX_LON_ACCEL),
+            (physics.jerk, -COMFORT_MAX_ABS_MAG_JERK, COMFORT_MAX_ABS_MAG_JERK),
+            (physics.lon_jerk, -COMFORT_MAX_ABS_LON_JERK, COMFORT_MAX_ABS_LON_JERK),
+            (physics.angular_velocity, -COMFORT_MAX_ABS_YAW_RATE, COMFORT_MAX_ABS_YAW_RATE),
+            (physics.angular_acceleration, -COMFORT_MAX_ABS_YAW_ACCEL, COMFORT_MAX_ABS_YAW_ACCEL),
+        ]
+        penalty = 0.0
+        for value, lo, hi in metrics:
+            if value > hi:
+                penalty += (value - hi) / hi + 1
+            elif value < lo:
+                penalty += (lo - value) / abs(lo) + 1
+        return -0.0 * penalty
 
     def _world_to_vehicle_coords(
         self,
@@ -534,12 +631,31 @@ class CARLALeaderboardEnv(gym.Env):
 
         return pixel_x, pixel_y
 
+    def _update_spectator(self):
+        """Move spectator camera to follow the vehicle from behind and above."""
+        vehicle_transform = self.vehicle.get_transform()
+        forward = vehicle_transform.get_forward_vector()
+        spectator_location = vehicle_transform.location + carla.Location(
+            x=-8.0 * forward.x, y=-8.0 * forward.y, z=5.0
+        )
+        spectator_transform = carla.Transform(
+            spectator_location,
+            carla.Rotation(pitch=-20.0, yaw=vehicle_transform.rotation.yaw),
+        )
+        self.world.get_spectator().set_transform(spectator_transform)
+
     def _process_image(self, image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
         array = array.reshape((image.height, image.width, 4))
-        array = array[:, :, :3]
+        array = array[:, :, [2, 1, 0]]
         array = array.transpose(2, 0, 1).astype(np.float32) / 255.0
         self.current_image = array
+
+    def _process_third_person_image(self, image):
+        array = np.frombuffer(image.raw_data, dtype=np.uint8)
+        array = array.reshape((image.height, image.width, 4))
+        array = array[:, :, [2, 1, 0]]
+        self.third_person_image = array
 
     def _on_collision(self, event):
         other_actor = event.other_actor

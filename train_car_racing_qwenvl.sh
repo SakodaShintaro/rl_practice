@@ -4,11 +4,6 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-uv run python scripts/train.py qwenvl$suffix \
-  --env_id CarRacing-v3 \
-  --agent_type off_policy \
-  --network_class vlm_actor_critic_with_action_value \
-  --step_limit 100_000 \
-  --disable_state_predictor 0 \
-  --batch_size 16 \
-  --learning_rate 1e-5 \
+uv run python scripts/train.py \
+  --config-name car_racing_qwenvl \
+  exp_name=qwenvl$suffix

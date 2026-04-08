@@ -4,8 +4,6 @@ set -eux
 suffix=${1:-""}
 cd $(dirname $0)
 
-uv run python scripts/train.py pathwise$suffix \
-  --agent_type off_policy \
-  --encoder temporal_only \
-  --step_limit 800_000 \
-  --denoising_time 0.8 \
+uv run python scripts/train.py \
+  --config-name minigrid_memory_off_policy_pathwise \
+  exp_name=pathwise$suffix
