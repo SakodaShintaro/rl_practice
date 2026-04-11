@@ -11,7 +11,7 @@ parameters:
   gamma:
     min: 0.0
     max: 1.0
-    distribution: uniform_values
+    distribution: uniform
   use_lora:
     values: [0, 1]
   use_done:
