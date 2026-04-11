@@ -150,6 +150,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
     global_step = 0
     score_list = []
     best_score = -float("inf")
+    best_recent_average_score = -float("inf")
     obs, reset_info = env.reset(seed=seed)
     task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
     args.prompt = task_prompt
@@ -273,6 +274,8 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
         }
         if len(score_list) >= eval_range:
             data_dict["recent_average_score"] = recent_average_score
+            best_recent_average_score = max(best_recent_average_score, recent_average_score)
+            data_dict["best_recent_average_score"] = best_recent_average_score
         wandb.log(data_dict)
 
         if result_dir is not None:
