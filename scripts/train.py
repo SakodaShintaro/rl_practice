@@ -268,10 +268,11 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
             "global_step": global_step,
             "episodic_return": env_info["episode"]["r"],
             "episodic_length": env_info["episode"]["l"],
-            "recent_average_score": recent_average_score,
             "SPS": global_step / elapsed_time_sec,
             "elapsed_time_hour": elapsed_time_hour,
         }
+        if len(score_list) >= eval_range:
+            data_dict["recent_average_score"] = recent_average_score
         wandb.log(data_dict)
 
         if result_dir is not None:
