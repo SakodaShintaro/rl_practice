@@ -17,6 +17,7 @@ command:
   - run
   - python
   - ${program}
-  - --config-name gui_env
+  - --config-name
+  - gui_env
   - agent_type=streaming
   - ${args_no_hyphens}
