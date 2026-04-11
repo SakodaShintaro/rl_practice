@@ -35,6 +35,7 @@ class TrackingSquareEnv(BaseGUIEnv):
         self.square_size = self.width // 3
         self.num_squares = 2
         self.hard_mode = False
+        self.max_step_count = 100
 
         self.squares = []
         self.target_label = ""
@@ -152,10 +153,10 @@ class TrackingSquareEnv(BaseGUIEnv):
 
         self._move_squares()
 
-        reward = self._compute_reward(x, y)
+        reward = self._compute_reward(x, y) * 100 / self.max_step_count
 
         observation = self._render_frame()
-        truncated = self.step_count >= 100 if self.render_mode != "human" else False
+        truncated = self.step_count >= self.max_step_count if self.render_mode != "human" else False
 
         if self.render_mode == "human":
             self._render_human(observation)

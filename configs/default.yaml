@@ -53,6 +53,7 @@ use_done: 1
 normalizing_by_return: 0
 image_save_interval: 100
 accumulation_steps: 1
+max_step_count: 100
 debug: false
 
 # off_policy

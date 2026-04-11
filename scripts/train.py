@@ -137,6 +137,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
 
     # env setup
     env = make_env(args.env_id)
+    env.unwrapped.max_step_count = args.max_step_count
     env.action_space.seed(seed)
 
     target_score = env.spec.reward_threshold

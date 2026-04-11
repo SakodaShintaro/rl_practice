@@ -18,6 +18,10 @@ parameters:
     values: [0, 1]
   prediction_type:
     values: ["velocity", "data"]
+  max_step_count:
+    min: 10
+    max: 200
+    distribution: int_uniform
 command:
   - ${env}
   - uv
