@@ -282,9 +282,12 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
         if result_dir is not None:
             if log_episode_writer is None:
                 log_episode_file = open(log_episode_path, "w", newline="")
-                fieldnames = list(data_dict.keys())
+                fieldnames = list(data_dict.keys()) + [
+                    "recent_average_score",
+                    "best_recent_average_score",
+                ]
                 log_episode_writer = csv.DictWriter(
-                    log_episode_file, fieldnames=fieldnames, delimiter="\t"
+                    log_episode_file, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore"
                 )
                 log_episode_writer.writeheader()
             log_episode_writer.writerow(data_dict)
