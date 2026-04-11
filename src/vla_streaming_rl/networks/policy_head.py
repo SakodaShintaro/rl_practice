@@ -63,10 +63,12 @@ class DiffusionPolicy(nn.Module):
         sparsity: float,
         horizon: int,
         denoising_steps: int,
+        prediction_type: str,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
         self.horizon = horizon
+        self.prediction_type = prediction_type
         total_action_dim = action_dim * horizon
         self.fc_in = nn.Linear(state_dim + total_action_dim + time_embedding_size, hidden_dim)
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
@@ -101,6 +103,8 @@ class DiffusionPolicy(nn.Module):
         result_dict["activation"] = x
 
         x = self.fc_out(x)
+        if self.prediction_type == "data":
+            x = torch.tanh(x)
         result_dict["output"] = x
         return result_dict
 
@@ -108,12 +112,12 @@ class DiffusionPolicy(nn.Module):
         bs = x.size(0)
         noise = torch.randn(bs, self.horizon, self.action_dim, device=x.device)
 
-        def predict_velocity_fn(x_t, t):
+        def predict_fn(x_t, t):
             x_flat = x_t.view(bs, -1)
             return self.forward(x_flat, t, x)["output"].view(bs, self.horizon, self.action_dim)
 
         action = euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_velocity_fn
+            noise, self.denoising_time, self.denoising_steps, predict_fn, self.prediction_type
         )
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
@@ -139,10 +143,12 @@ class CFGDiffusionPolicy(nn.Module):
         cfgrl_beta: float,
         horizon: int,
         denoising_steps: int,
+        prediction_type: str,
     ) -> None:
         super().__init__()
         self.cfgrl_beta = cfgrl_beta
         self.horizon = horizon
+        self.prediction_type = prediction_type
         time_embedding_size = 256
         condition_embedding_size = 64
         total_action_dim = action_dim * horizon
@@ -191,15 +197,17 @@ class CFGDiffusionPolicy(nn.Module):
         result_dict["activation"] = x
 
         x = self.fc_out(x)
+        if self.prediction_type == "data":
+            x = torch.tanh(x)
         result_dict["output"] = x
         return result_dict
 
     def get_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Inference using CFG
+        Inference using CFG.
 
-        Inference formula: v = (1 - beta) * v_uncond + beta * v_positive
-        Higher beta increases guidance towards positive advantage direction
+        Guidance in output space: out = (1 - beta) * out_uncond + beta * out_positive
+        Higher beta increases guidance towards positive advantage direction.
         """
         bs = x.size(0)
         device = x.device
@@ -209,15 +217,15 @@ class CFGDiffusionPolicy(nn.Module):
         cond_positive = torch.ones((bs,), dtype=torch.long, device=device)
         cond_uncond = torch.full((bs,), 2, dtype=torch.long, device=device)
 
-        def predict_velocity_fn(x_t, t):
+        def predict_fn(x_t, t):
             x_flat = x_t.view(bs, -1)
-            v_pos = self.forward(x_flat, t, x, cond_positive)["output"]
-            v_unc = self.forward(x_flat, t, x, cond_uncond)["output"]
-            v = (1 - self.cfgrl_beta) * v_unc + self.cfgrl_beta * v_pos
-            return v.view(bs, self.horizon, self.action_dim)
+            out_pos = self.forward(x_flat, t, x, cond_positive)["output"]
+            out_unc = self.forward(x_flat, t, x, cond_uncond)["output"]
+            out = (1 - self.cfgrl_beta) * out_unc + self.cfgrl_beta * out_pos
+            return out.view(bs, self.horizon, self.action_dim)
 
         action = euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_velocity_fn
+            noise, self.denoising_time, self.denoising_steps, predict_fn, self.prediction_type
         )
 
         dummy_log_p = torch.zeros((bs, 1), device=device)

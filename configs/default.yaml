@@ -65,6 +65,7 @@ disable_state_predictor: 0
 dacer_loss_weight: 0.05
 denoising_time: 0.9
 denoising_steps: 1
+prediction_type: data  # "velocity" or "data" (x-prediction)
 vlm_model_id: Qwen/Qwen3.5-0.8B
 expert_hidden_size: 8
 state_expert_hidden_size: 576
