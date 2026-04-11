@@ -43,6 +43,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.denoising_steps = args.denoising_steps
         self.denoising_time = args.denoising_time
         self.dacer_loss_weight = args.dacer_loss_weight
+        self.prediction_type = args.prediction_type
         self.text_q_margin = args.text_q_margin
         self.text_action_mode = args.text_action_mode
 
@@ -529,7 +530,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         action_embs = self.action_in_proj(noisy_actions)  # (B, horizon, expert_hidden)
         vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
         expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
-        return self.action_out_proj(expert_out.to(torch.float32))
+        out = self.action_out_proj(expert_out.to(torch.float32))
+        if self.prediction_type == "data":
+            out = torch.tanh(out)
+        return out
 
     def _generate_action(
         self,
@@ -539,10 +543,12 @@ class VLMActorCriticWithActionValue(nn.Module):
         """Generate action via Euler denoising. Returns (B, horizon, action_dim)."""
         noise = torch.randn(B, self.horizon, self.action_dim, device=self.device)
 
-        def predict_data_fn(x_t, t):
+        def predict_fn(x_t, t):
             return self._denoise(x_t, vlm_past_kv, t)
 
-        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_data_fn)
+        return euler_denoise(
+            noise, self.denoising_time, self.denoising_steps, predict_fn, self.prediction_type
+        )
 
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
         """Generate text via manual forward loop (supports batched KV cache).
@@ -733,7 +739,7 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         action = self._generate_action(B, vlm_past_kv)
 
-        def predict_data_fn(a_t, t):
+        def predict_fn(a_t, t):
             return self._denoise(a_t, vlm_past_kv, t)
 
         total_actor_loss, advantage_dict, info_dict = compute_actor_loss_with_dacer(
@@ -743,7 +749,8 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.hl_gauss_loss if self.num_bins > 1 else None,
             self.num_bins,
             self.dacer_loss_weight,
-            predict_data_fn,
+            predict_fn,
+            self.prediction_type,
         )
 
         activations_dict = {"critic": advantage_dict["activation"]}

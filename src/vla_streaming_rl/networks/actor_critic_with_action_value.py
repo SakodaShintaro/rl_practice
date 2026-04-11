@@ -29,6 +29,7 @@ class ActorCriticWithActionValue(nn.Module):
         self.seq_len = args.seq_len
         self.dacer_loss_weight = args.dacer_loss_weight
         self.critic_loss_weight = args.critic_loss_weight
+        self.prediction_type = args.prediction_type
 
         self.action_dim = action_space_shape[0]
         self.predictor_step_num = args.predictor_step_num
@@ -75,6 +76,7 @@ class ActorCriticWithActionValue(nn.Module):
                 sparsity=args.sparsity,
                 horizon=args.horizon,
                 denoising_steps=args.denoising_steps,
+                prediction_type=args.prediction_type,
             )
         elif self.policy_type == "beta":
             self.policy_head = BetaPolicy(
@@ -93,6 +95,7 @@ class ActorCriticWithActionValue(nn.Module):
                 cfgrl_beta=1.5,
                 horizon=args.horizon,
                 denoising_steps=args.denoising_steps,
+                prediction_type=args.prediction_type,
             )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
@@ -406,7 +409,7 @@ class ActorCriticWithActionValue(nn.Module):
         bs = action.shape[0]
         actor_activation = {}
 
-        def predict_data_fn(a_t, t):
+        def predict_fn(a_t, t):
             a_flat = a_t.view(bs, -1)
             result = self.policy_head.forward(a_flat, t, curr_state)
             actor_activation["value"] = result["activation"]
@@ -419,7 +422,8 @@ class ActorCriticWithActionValue(nn.Module):
             self.hl_gauss_loss if self.num_bins > 1 else None,
             self.num_bins,
             self.dacer_loss_weight,
-            predict_data_fn,
+            predict_fn,
+            self.prediction_type,
         )
 
         activations_dict = {
@@ -498,7 +502,7 @@ class ActorCriticWithActionValue(nn.Module):
             drop_mask = torch.rand(batch_size, device=device) < self.condition_drop_prob
             condition = torch.where(drop_mask, torch.full_like(condition, 2), condition)
 
-        # Flow Matching for conditional policy (x-prediction)
+        # Flow Matching for conditional policy
         eps = 1e-4
         t = torch.rand((batch_size, 1), device=device) * (1 - eps) + eps
 
@@ -507,15 +511,17 @@ class ActorCriticWithActionValue(nn.Module):
         noise = torch.clamp(noise, -3.0, 3.0)
         a_t = (1.0 - t) * noise + t * action_flat
 
-        # Predict clean data conditionally
+        # Predict conditionally
         actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), curr_state, condition)
-        x_1_pred = actor_output_dict["output"]
+        pred = actor_output_dict["output"]
 
-        # Target: clean data (action_flat)
-        x_1_target = action_flat
+        # Target depends on prediction_type
+        if self.prediction_type == "data":
+            target = action_flat
+        else:
+            target = action_flat - noise
 
-        # x-prediction loss
-        actor_loss = F.mse_loss(x_1_pred, x_1_target)
+        actor_loss = F.mse_loss(pred, target)
 
         activations_dict = {
             "actor": actor_output_dict["activation"],
