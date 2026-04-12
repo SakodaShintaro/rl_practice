@@ -18,28 +18,14 @@ parameters:
     values: [0, 1]
   prediction_type:
     values: ["velocity", "data"]
-  max_step_count:
-    min: 50
-    max: 150
-    distribution: int_uniform
   state_mode:
     values: ["expert", "projection"]
   target_layer_idx:
     min: 0
-    max: 24
+    max: 12
     distribution: int_uniform
-  use_eligibility_trace:
-    values: [0, 1]
   et_lambda:
     min: 0.0
-    max: 1.0
-    distribution: uniform
-  dacer_loss_weight:
-    min: 0.0
-    max: 0.1
-    distribution: uniform
-  denoising_time:
-    min: 0.8
     max: 1.0
     distribution: uniform
 command:

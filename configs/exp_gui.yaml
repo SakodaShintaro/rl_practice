@@ -1,0 +1,17 @@
+program: scripts/train.py
+method: grid
+parameters:
+  use_prompt:
+    values: [0, 1]
+  seed:
+    values: [0, 1, 2]
+command:
+  - ${env}
+  - uv
+  - run
+  - python
+  - ${program}
+  - --config-name
+  - gui_env
+  - agent_type=streaming
+  - ${args_no_hyphens}
