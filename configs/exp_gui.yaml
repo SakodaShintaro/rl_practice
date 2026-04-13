@@ -4,7 +4,7 @@ parameters:
   use_prompt:
     values: [0, 1]
   seed:
-    values: [0, 1, 2]
+    values: [0, 1, 2, 3, 4]
 command:
   - ${env}
   - uv
