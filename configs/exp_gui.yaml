@@ -3,6 +3,8 @@ method: grid
 parameters:
   use_prompt:
     values: [0, 1]
+  agent_type:
+    values: [off_policy, streaming]
   seed:
     values: [0, 1, 2, 3, 4]
 command:
@@ -13,5 +15,4 @@ command:
   - ${program}
   - --config-name
   - gui_env
-  - agent_type=streaming
   - ${args_no_hyphens}
