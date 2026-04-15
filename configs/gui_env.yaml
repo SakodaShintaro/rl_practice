@@ -7,7 +7,7 @@ env_id: TrackingSquare-v0
 agent_type: streaming
 network_class: vlm_actor_critic_with_action_value
 step_limit: 50_000
-batch_size: 16
+batch_size: 1
 learning_rate: 1e-6
 disable_state_predictor: 1
 use_lora: 1
