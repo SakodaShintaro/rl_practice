@@ -1,0 +1,6 @@
+# @package _global_
+env_id: TrackingSquare-v0
+step_limit: 100_000
+max_step_count: 50
+use_done: 0
+gamma: 0.2

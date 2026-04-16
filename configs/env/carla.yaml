@@ -1,0 +1,3 @@
+# @package _global_
+env_id: CARLA-Leaderboard-v0
+step_limit: 400_000

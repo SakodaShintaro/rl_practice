@@ -25,7 +25,6 @@ gamma: 0.99
 seq_len: 1
 horizon: 1
 buffer_device: cuda
-batch_size: 32
 critic_loss_weight: 1.0
 use_done: 1
 normalizing_by_return: 0

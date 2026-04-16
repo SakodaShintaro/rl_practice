@@ -34,7 +34,6 @@ command:
   - run
   - python
   - ${program}
-  - --config-name
-  - gui_env
-  - agent_type=streaming
+  - agent=vlm_streaming
+  - env=gui
   - ${args_no_hyphens}

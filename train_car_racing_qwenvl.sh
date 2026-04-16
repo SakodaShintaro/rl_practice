@@ -5,5 +5,6 @@ suffix=${1:-""}
 cd $(dirname $0)
 
 uv run python scripts/train.py \
-  --config-name car_racing_qwenvl \
+  agent=vlm_off_policy_bs16 \
+  env=car_racing \
   exp_name=qwenvl$suffix

@@ -5,5 +5,6 @@ suffix=${1:-""}
 cd $(dirname $0)
 
 uv run python scripts/train.py \
-  --config-name minigrid_memory_off_policy_pathwise \
+  agent=vlm_off_policy_bs16 \
+  env=minigrid_memory \
   exp_name=pathwise$suffix

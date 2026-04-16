@@ -19,19 +19,12 @@ fi
 git show -s > $RESULT_DIR/git_show.txt
 git diff > $RESULT_DIR/git_diff.txt
 
-STEP_LIMIT=50_000
-
-# ENV_ID=FourQuadrant-v0
-# ENV_ID=ColorPanel-v0
-ENV_ID=TrackingSquare-v0
-
 for use_prompt in 1 0; do
   uv run python scripts/train.py \
-    --config-name gui_env \
+    agent=vlm_streaming \
+    env=gui \
     exp_name=use_prompt${use_prompt} \
-    env_id=$ENV_ID \
-    step_limit=$STEP_LIMIT \
-    agent_type=streaming \
+    step_limit=50_000 \
     learning_rate=1e-5 \
     result_dir=$RESULT_DIR \
     wandb_group=$WANDB_GROUP \
