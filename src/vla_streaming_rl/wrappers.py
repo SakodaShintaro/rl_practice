@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
+import io
 import re
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import cv2
@@ -391,7 +393,8 @@ class MissionPromptWrapper(gym.Wrapper):
         self._prompt = ""
 
     def reset(self, **kwargs) -> tuple:
-        obs, info = self.env.reset(**kwargs)
+        with redirect_stdout(io.StringIO()):
+            obs, info = self.env.reset(**kwargs)
         self._prompt = self.prefix + self.unwrapped.mission
         info["task_prompt"] = self._prompt
         return obs, info
