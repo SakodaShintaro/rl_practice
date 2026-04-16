@@ -25,12 +25,10 @@ CAR_RACING_PROMPT = (
 
 MINIGRID_PROMPT = (
     "Navigate the MiniGrid memory corridor. Remember the object seen at the start and choose the matching one at the end. "
-    "Actions: turn left, turn right, move forward."
 )
 
 BABYAI_GOTO_LOCAL_PROMPT_PREFIX = (
     "Navigate a small MiniGrid room to reach the target object. "
-    "Actions: turn left, turn right, move forward. "
     "Mission: "
 )
 
