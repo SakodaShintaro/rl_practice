@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT
-import argparse
+from collections.abc import Callable
 
+import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
+from omegaconf import DictConfig
 from torch import nn
 from torch.nn import functional as F
 
@@ -30,7 +32,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         self,
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
-        args: argparse.Namespace,
+        args: DictConfig,
+        parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
+        task_prompt: str,
     ) -> None:
         super().__init__()
         self.gamma = args.gamma
@@ -77,8 +81,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
         self.target_layer_idx = args.target_layer_idx
-        initial_task_prompt = args.prompt if args.text_action_mode != "none" else ""
-        self.parse_action_text = args.parse_action_text
+        initial_task_prompt = task_prompt if args.text_action_mode != "none" else ""
+        self.parse_action_text = parse_action_text
         self.max_new_tokens = args.max_new_tokens
         self.max_prompt_tokens = args.max_prompt_tokens
         self.pad_token_id = args.pad_token_id

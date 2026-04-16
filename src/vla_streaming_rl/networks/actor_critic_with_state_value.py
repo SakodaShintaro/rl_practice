@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: MIT
-import argparse
-
 import torch
 from hl_gauss_pytorch import HLGaussLoss
+from omegaconf import DictConfig
 from torch import nn
 from torch.nn import functional as F
 
@@ -23,7 +22,7 @@ class ActorCriticWithStateValue(nn.Module):
         self,
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
-        args: argparse.Namespace,
+        args: DictConfig,
     ) -> None:
         super().__init__()
         self.gamma = args.gamma

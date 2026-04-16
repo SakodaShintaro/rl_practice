@@ -10,7 +10,6 @@ warnings.filterwarnings("ignore", message=".*local_dir_use_symlinks.*")
 warnings.filterwarnings("ignore", message=".*Attempting to run cuBLAS.*")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-import argparse
 import csv
 import random
 import time
@@ -83,15 +82,10 @@ def save_episode_data(
             f.write(f"{float(reward):.6f}\n")
 
 
-def cfg_to_args(cfg: DictConfig) -> argparse.Namespace:
-    """Convert Hydra DictConfig to argparse.Namespace for backward compatibility."""
-    return argparse.Namespace(**OmegaConf.to_container(cfg, resolve=True))
-
-
-def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -> None:
+def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     wandb.init(
         project=f"vla_streaming_rl_{args.env_id}",
-        config=vars(args),
+        config=OmegaConf.to_container(args, resolve=True),
         name=exp_name,
         group=args.wandb_group,
         save_code=True,
@@ -142,7 +136,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
 
     eval_range = env.unwrapped.eval_range
 
-    args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
+    parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
 
     start_time = time.time()
 
@@ -153,15 +147,18 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
     best_recent_average_score = -float("inf")
     obs, reset_info = env.reset(seed=seed)
     task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
-    args.prompt = task_prompt
     step_limit = args.step_limit
 
     if args.agent_type == "off_policy":
-        agent = OffPolicyAgent(args, env.observation_space, env.action_space)
+        agent = OffPolicyAgent(
+            args, env.observation_space, env.action_space, parse_action_text, task_prompt
+        )
     elif args.agent_type == "on_policy":
         agent = OnPolicyAgent(args, env.observation_space, env.action_space)
     elif args.agent_type == "streaming":
-        agent = StreamingAgent(args, env.observation_space, env.action_space)
+        agent = StreamingAgent(
+            args, env.observation_space, env.action_space, parse_action_text, task_prompt
+        )
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
@@ -347,29 +344,27 @@ def hydra_main(cfg: DictConfig) -> None:
     # Restore cwd so relative paths in the code work correctly
     os.chdir(hydra.utils.get_original_cwd())
 
-    args = cfg_to_args(cfg)
+    if cfg.debug:
+        cfg.off_wandb = True
+        cfg.learning_starts = max(10, cfg.seq_len + cfg.horizon + 5)
+        cfg.buffer_capacity = 50
+        cfg.render = 0
+        cfg.step_limit = 100
+        cfg.buffer_size = int(2e4)
 
-    if args.debug:
-        args.off_wandb = True
-        args.learning_starts = max(10, args.seq_len + args.horizon + 5)
-        args.buffer_capacity = 50
-        args.render = 0
-        args.step_limit = 100
-        args.buffer_size = int(2e4)
-
-    if args.off_wandb:
+    if cfg.off_wandb:
         os.environ["WANDB_MODE"] = "offline"
 
     if not os.environ.get("DISPLAY"):
         print("Because a headless environment is detected, rendering is automatically disabled.")
-        args.render = 0
+        cfg.render = 0
 
-    exp_name = f"{args.agent_type.upper()}_{args.exp_name}"
-    seed = args.seed if args.seed != -1 else np.random.randint(0, 10000)
+    exp_name = f"{cfg.agent_type.upper()}_{cfg.exp_name}"
+    seed = cfg.seed if cfg.seed != -1 else np.random.randint(0, 10000)
 
-    for i in range(args.trial_num):
-        suffix = f"_{i:02d}" if args.trial_num > 1 else ""
-        main(args, exp_name + suffix, seed + i, hydra_output_dir)
+    for i in range(cfg.trial_num):
+        suffix = f"_{i:02d}" if cfg.trial_num > 1 else ""
+        main(cfg, exp_name + suffix, seed + i, hydra_output_dir)
 
 
 if __name__ == "__main__":

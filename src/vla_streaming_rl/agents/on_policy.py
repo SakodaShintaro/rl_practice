@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
-import argparse
-
 import gymnasium as gym
 import numpy as np
 import torch
+from omegaconf import DictConfig
 from torch import nn, optim
 
 from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
@@ -48,7 +47,7 @@ class SequentialBatchSampler:
 class OnPolicyAgent:
     def __init__(
         self,
-        args: argparse.Namespace,
+        args: DictConfig,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
     ) -> None:

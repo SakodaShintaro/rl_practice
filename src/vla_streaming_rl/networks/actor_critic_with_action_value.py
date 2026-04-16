@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: MIT
-import argparse
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
+from omegaconf import DictConfig
 
 from vla_streaming_rl.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from vla_streaming_rl.networks.diffusion_utils import compute_actor_loss_with_dacer
@@ -20,7 +19,7 @@ class ActorCriticWithActionValue(nn.Module):
         self,
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
-        args: argparse.Namespace,
+        args: DictConfig,
     ) -> None:
         super().__init__()
         self.gamma = args.gamma

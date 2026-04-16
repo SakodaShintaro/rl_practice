@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
-import argparse
+from collections.abc import Callable
 
 import gymnasium as gym
 import numpy as np
 import torch
+from omegaconf import DictConfig
 from torch import optim
 
 from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
@@ -17,9 +18,11 @@ from vla_streaming_rl.reward_processor import RewardProcessor
 class OffPolicyAgent:
     def __init__(
         self,
-        args: argparse.Namespace,
+        args: DictConfig,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
+        parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
+        task_prompt: str,
     ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -56,7 +59,11 @@ class OffPolicyAgent:
             ).to(self.device)
         elif args.network_class == "vlm_actor_critic_with_action_value":
             self.network = VLMActorCriticWithActionValue(
-                observation_space.shape, action_space.shape, args
+                observation_space.shape,
+                action_space.shape,
+                args,
+                parse_action_text,
+                task_prompt,
             ).to(self.device)
         else:
             raise ValueError(f"Unknown network class: {args.network_class}")
