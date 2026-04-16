@@ -9,3 +9,4 @@ network_class: vlm_actor_critic_with_action_value
 encoder: temporal_only
 step_limit: 800_000
 denoising_time: 0.8
+batch_size: 8
