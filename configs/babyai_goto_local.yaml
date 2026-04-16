@@ -5,6 +5,7 @@ defaults:
 exp_name: pathwise
 env_id: BabyAI-GoToLocal-v0
 agent_type: off_policy
+network_class: vlm_actor_critic_with_action_value
 encoder: temporal_only
 step_limit: 800_000
 denoising_time: 0.8
