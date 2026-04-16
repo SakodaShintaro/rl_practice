@@ -23,13 +23,10 @@ CAR_RACING_PROMPT = (
     "Typical actions: Turn Left -> steer=-0.20, accel=0.00; Turn Right -> steer=0.20, accel=0.00; Go Straight -> steer=0.00, accel=0.10; Slow Down -> steer=0.00, accel=-0.10. "
 )
 
-MINIGRID_PROMPT = (
-    "Navigate the MiniGrid memory corridor. Remember the object seen at the start and choose the matching one at the end. "
-)
+MINIGRID_PROMPT = "Navigate the MiniGrid memory corridor. Remember the object seen at the start and choose the matching one at the end. "
 
 BABYAI_GOTO_LOCAL_PROMPT_PREFIX = (
-    "Navigate a small MiniGrid room to reach the target object. "
-    "Mission: "
+    "Navigate a small MiniGrid room to reach the target object. Mission: "
 )
 
 HOPPER_PROMPT = "Control a 2D one-legged hopper. Keep it balanced and hopping forward as fast as possible without falling."
