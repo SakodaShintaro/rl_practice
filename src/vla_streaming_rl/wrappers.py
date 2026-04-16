@@ -28,6 +28,12 @@ MINIGRID_PROMPT = (
     "Actions: turn left, turn right, move forward."
 )
 
+BABYAI_GOTO_LOCAL_PROMPT_PREFIX = (
+    "Navigate a small MiniGrid room to reach the target object. "
+    "Actions: turn left, turn right, move forward. "
+    "Mission: "
+)
+
 HOPPER_PROMPT = "Control a 2D one-legged hopper. Keep it balanced and hopping forward as fast as possible without falling."
 
 
@@ -53,7 +59,21 @@ def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
 
 
 def make_env(env_id: str) -> gym.Env:
-    if env_id == "MiniGrid-MemoryS9-v0":
+    if env_id == "BabyAI-GoToLocal-v0":
+        env = gym.make(env_id, render_mode="rgb_array")
+        env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=32)
+        env = minigrid.wrappers.ImgObsWrapper(env)
+        env = ReduceActionSpaceWrapper(env, n_actions=3)
+        env = DiscreteToContinuousWrapper(env)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = TransposeAndNormalizeObs(env)
+        env = ZeroObsOnDoneWrapper(env)
+        env = MissionPromptWrapper(env, BABYAI_GOTO_LOCAL_PROMPT_PREFIX)
+        env.unwrapped.spec.reward_threshold = 0.95
+        env.unwrapped.eval_range = 100
+        return env
+
+    elif env_id == "MiniGrid-MemoryS9-v0":
         env = gym.make(env_id, agent_view_size=3, render_mode="rgb_array")
         env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=32)
         env = minigrid.wrappers.ImgObsWrapper(env)
@@ -364,4 +384,24 @@ class PromptWrapper(gym.Wrapper):
     def step(self, action: np.ndarray) -> tuple:
         obs, reward, terminated, truncated, info = self.env.step(action)
         info["task_prompt"] = self.prompt
+        return obs, reward, terminated, truncated, info
+
+
+class MissionPromptWrapper(gym.Wrapper):
+    """Inject a prompt built from the BabyAI mission string into info dict."""
+
+    def __init__(self, env: gym.Env, prefix: str) -> None:
+        super().__init__(env)
+        self.prefix = prefix
+        self._prompt = ""
+
+    def reset(self, **kwargs) -> tuple:
+        obs, info = self.env.reset(**kwargs)
+        self._prompt = self.prefix + self.unwrapped.mission
+        info["task_prompt"] = self._prompt
+        return obs, info
+
+    def step(self, action: np.ndarray) -> tuple:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info["task_prompt"] = self._prompt
         return obs, reward, terminated, truncated, info
