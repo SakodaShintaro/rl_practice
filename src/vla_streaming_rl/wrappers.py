@@ -61,7 +61,7 @@ def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
 def make_env(env_id: str) -> gym.Env:
     if env_id == "BabyAI-GoToLocal-v0":
         env = gym.make(env_id, render_mode="rgb_array")
-        env = minigrid.wrappers.RGBImgPartialObsWrapper(env, tile_size=32)
+        env = minigrid.wrappers.RGBImgObsWrapper(env, tile_size=32)
         env = minigrid.wrappers.ImgObsWrapper(env)
         env = ReduceActionSpaceWrapper(env, n_actions=3)
         env = DiscreteToContinuousWrapper(env)
