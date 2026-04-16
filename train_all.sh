@@ -29,7 +29,6 @@ uv run python scripts/train.py \
   agent_type=streaming \
   network_class=vlm_actor_critic_with_action_value \
   step_limit=$STEP_LIMIT \
-  use_eligibility_trace=1 \
   learning_rate=5e-6 \
   result_dir=$RESULT_DIR \
   wandb_group=$WANDB_GROUP

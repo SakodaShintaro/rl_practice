@@ -32,7 +32,6 @@ for use_prompt in 1 0; do
     env_id=$ENV_ID \
     step_limit=$STEP_LIMIT \
     agent_type=streaming \
-    use_eligibility_trace=1 \
     learning_rate=1e-5 \
     result_dir=$RESULT_DIR \
     wandb_group=$WANDB_GROUP \
