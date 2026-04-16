@@ -2,13 +2,10 @@ defaults:
   - default
   - _self_
 
-exp_name: baseline
-env_id: CarRacing-v3
 agent_type: on_policy
 network_class: actor_critic_with_state_value
 encoder: temporal_only
 temporal_model_type: identity
-step_limit: 200_000
 image_processor_type: simple_cnn
 batch_size: 16
 learning_rate: 1e-5

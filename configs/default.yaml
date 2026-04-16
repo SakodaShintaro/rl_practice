@@ -1,3 +1,7 @@
+defaults:
+  - _self_
+  - env: car_racing
+
 hydra:
   run:
     dir: ${result_dir}/${now:%Y%m%d_%H%M%S}_${agent_type}_${exp_name}
@@ -8,7 +12,6 @@ hydra:
 exp_name: default
 result_dir: results
 trial_num: 1
-env_id: CarRacing-v3
 agent_type: on_policy
 network_class: actor_critic_with_action_value
 seed: -1
@@ -43,7 +46,6 @@ learning_rate: 1e-4
 max_grad_norm: 5.0
 sparsity: 0.0
 gamma: 0.99
-step_limit: 1_000_000
 seq_len: 1
 horizon: 1
 buffer_device: cuda
