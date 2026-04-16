@@ -140,7 +140,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
     env.unwrapped.max_step_count = args.max_step_count
     env.action_space.seed(seed)
 
-    target_score = env.spec.reward_threshold
     eval_range = env.unwrapped.eval_range
 
     args.parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
@@ -293,9 +292,7 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
             log_episode_writer.writerow(data_dict)
             log_episode_file.flush()
 
-        is_solved = recent_average_score > target_score and episode_id >= eval_range
-
-        if episode_id % 5 == 0 or is_solved:
+        if episode_id % 5 == 0:
             print(
                 f"Ep: {episode_id}\tStep: {global_step}\tLast score: {score:.2f}\tAverage score: {recent_average_score:.2f}\tLength: {env_info['episode']['l']:.2f}\tElapsed time: {elapsed_time_hour:.2f}h"
             )
@@ -336,12 +333,6 @@ def main(args: argparse.Namespace, exp_name: str, seed: int, result_dir: Path) -
             )
 
         episode_id += 1
-
-        if is_solved:
-            print(
-                f"Solved! Running reward is now {recent_average_score} and the last episode runs to {score}!"
-            )
-            break
 
     env.close()
     if log_episode_file is not None:

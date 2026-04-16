@@ -8,7 +8,6 @@ import cv2
 import gymnasium as gym
 import minigrid
 import numpy as np
-from gymnasium.envs.registration import EnvSpec
 
 from vla_streaming_rl.envs.color_panel_env import ColorPanelEnv
 from vla_streaming_rl.envs.four_quadrant_env import FourQuadrantEnv
@@ -66,7 +65,6 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env = MissionPromptWrapper(env, BABYAI_GOTO_LOCAL_PROMPT_PREFIX)
-        env.unwrapped.spec.reward_threshold = 0.95
         env.unwrapped.eval_range = 100
         return env
 
@@ -80,7 +78,6 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env = PromptWrapper(env, MINIGRID_PROMPT)
-        env.unwrapped.spec.reward_threshold = 0.95
         env.unwrapped.eval_range = 100
         return env
 
@@ -96,7 +93,6 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env = PromptWrapper(env, CAR_RACING_PROMPT)
-        env.unwrapped.spec.reward_threshold = 2000.0
         env.unwrapped.eval_range = 20
         env.unwrapped.parse_action_text = _car_racing_parse_action
         return env
@@ -107,7 +103,6 @@ def make_env(env_id: str) -> gym.Env:
         env = CARLALeaderboardEnv()
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
-        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=100.0)
         env.unwrapped.eval_range = 100
         return env
 
@@ -115,7 +110,6 @@ def make_env(env_id: str) -> gym.Env:
         env = LetterTracingEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         return env
 
@@ -123,7 +117,6 @@ def make_env(env_id: str) -> gym.Env:
         env = FourQuadrantEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         return env
 
@@ -131,7 +124,6 @@ def make_env(env_id: str) -> gym.Env:
         env = ColorPanelEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         env.unwrapped.parse_action_text = _color_panel_parse_action
         return env
@@ -141,7 +133,6 @@ def make_env(env_id: str) -> gym.Env:
         env = STL10PanelEnv(render_mode="rgb_array", data_dir=data_dir)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env.unwrapped.spec = EnvSpec(id="STL10Panel-v0", reward_threshold=800.0)
         env.unwrapped.eval_range = 20
         env.unwrapped.parse_action_text = _color_panel_parse_action
         return env
@@ -150,7 +141,6 @@ def make_env(env_id: str) -> gym.Env:
         env = TrackingSquareEnv(render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = TransposeAndNormalizeObs(env)
-        env.unwrapped.spec = EnvSpec(id=env_id, reward_threshold=800.0)
         env.unwrapped.eval_range = 40
         env.unwrapped.parse_action_text = _color_panel_parse_action
         return env
@@ -162,7 +152,6 @@ def make_env(env_id: str) -> gym.Env:
         env = TransposeAndNormalizeObs(env)
         env = ZeroObsOnDoneWrapper(env)
         env = PromptWrapper(env, HOPPER_PROMPT)
-        env.unwrapped.spec.reward_threshold = 3800.0
         env.unwrapped.eval_range = 20
         return env
 
