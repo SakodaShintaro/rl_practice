@@ -5,9 +5,6 @@ import torch
 from omegaconf import DictConfig
 from torch import nn, optim
 
-from vla_streaming_rl.networks.vlm_actor_critic_with_action_value import (
-    VLMActorCriticWithActionValue,
-)
 from vla_streaming_rl.optimizers.adam_et import AdamET
 from vla_streaming_rl.replay_buffer import ReplayBuffer
 from vla_streaming_rl.reward_processor import RewardProcessor
@@ -48,8 +45,7 @@ class StreamingAgent:
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
         self.chunk_step = 0  # current step within chunk
 
-        self._is_vlm_network = isinstance(network, VLMActorCriticWithActionValue)
-        self.network = network.to(self.device)
+        self.network = network
         self.rnn_state = self.network.init_state().to(self.device)
 
         self.use_eligibility_trace = bool(args.use_eligibility_trace)
@@ -68,9 +64,6 @@ class StreamingAgent:
             self.optimizer = optim.AdamW(other_params, lr=lr, weight_decay=0.1)
         else:
             self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.1)
-
-        if not self._is_vlm_network:
-            self.network = torch.compile(self.network)
 
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(

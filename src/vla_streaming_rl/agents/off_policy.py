@@ -46,7 +46,7 @@ class OffPolicyAgent:
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
         self.chunk_step = 0  # current step within chunk
 
-        self.network = torch.compile(network.to(self.device))
+        self.network = network
         self.rnn_state = self.network.init_state().to(self.device)
         lr = args.learning_rate
         self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)

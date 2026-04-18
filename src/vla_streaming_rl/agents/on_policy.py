@@ -5,7 +5,6 @@ import torch
 from omegaconf import DictConfig
 from torch import nn, optim
 
-from vla_streaming_rl.networks.actor_critic_with_state_value import ActorCriticWithStateValue
 from vla_streaming_rl.replay_buffer import ReplayBuffer, ReplayBufferData
 from vla_streaming_rl.reward_processor import RewardProcessor
 
@@ -78,8 +77,8 @@ class OnPolicyAgent:
         self.reward_processor = RewardProcessor("scaling", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
 
-        self._uses_state_value = isinstance(network, ActorCriticWithStateValue)
-        self.network = torch.compile(network.to(self.device))
+        self._uses_state_value = args.network_class == "actor_critic_with_state_value"
+        self.network = network
         self.rnn_state = self.network.init_state().to(self.device)
         obs_z_shape = tuple(self.network.image_processor.output_shape)
 

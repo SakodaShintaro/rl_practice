@@ -2,6 +2,7 @@
 from collections.abc import Callable
 
 import numpy as np
+import torch
 from omegaconf import DictConfig
 from torch import nn
 
@@ -18,9 +19,11 @@ def build_network(
     action_space_shape: tuple[int, ...],
     parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
     task_prompt: str,
+    device: torch.device,
+    compile: bool,
 ) -> nn.Module:
     if args.network_class == "actor_critic_with_state_value":
-        return ActorCriticWithStateValue(
+        network = ActorCriticWithStateValue(
             observation_space_shape=observation_space_shape,
             action_space_shape=action_space_shape,
             gamma=args.gamma,
@@ -42,8 +45,8 @@ def build_network(
             predictor_block_num=args.predictor_block_num,
             disable_state_predictor=args.disable_state_predictor,
         )
-    if args.network_class == "actor_critic_with_action_value":
-        return ActorCriticWithActionValue(
+    elif args.network_class == "actor_critic_with_action_value":
+        network = ActorCriticWithActionValue(
             observation_space_shape=observation_space_shape,
             action_space_shape=action_space_shape,
             gamma=args.gamma,
@@ -73,8 +76,8 @@ def build_network(
             detach_predictor=args.detach_predictor,
             disable_state_predictor=args.disable_state_predictor,
         )
-    if args.network_class == "vlm_actor_critic_with_action_value":
-        return VLMActorCriticWithActionValue(
+    elif args.network_class == "vlm_actor_critic_with_action_value":
+        network = VLMActorCriticWithActionValue(
             observation_space_shape=observation_space_shape,
             action_space_shape=action_space_shape,
             parse_action_text=parse_action_text,
@@ -110,4 +113,10 @@ def build_network(
             predictor_block_num=args.predictor_block_num,
             sparsity=args.sparsity,
         )
-    raise ValueError(f"Unknown network class: {args.network_class}")
+    else:
+        raise ValueError(f"Unknown network class: {args.network_class}")
+
+    network = network.to(device)
+    if compile:
+        network = torch.compile(network)
+    return network
