@@ -1,6 +1,4 @@
 # @package _global_
 env_id: BabyAI-GoToLocal-v0
-step_limit: 800_000
-encoder: temporal_only
-denoising_time: 0.8
-batch_size: 8
+step_limit: 100_000
+batch_size: 16
