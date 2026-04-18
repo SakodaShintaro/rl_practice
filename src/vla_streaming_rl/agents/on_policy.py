@@ -81,12 +81,58 @@ class OnPolicyAgent:
 
         if self.network_class == "actor_critic_with_state_value":
             self.network = ActorCriticWithStateValue(
-                observation_space.shape, action_space.shape, args
+                observation_space_shape=observation_space.shape,
+                action_space_shape=action_space.shape,
+                gamma=args.gamma,
+                clip_param_policy=args.clip_param_policy,
+                clip_param_value=args.clip_param_value,
+                num_bins=args.num_bins,
+                predictor_step_num=args.predictor_step_num,
+                critic_loss_weight=args.critic_loss_weight,
+                separate_critic=args.separate_critic,
+                image_processor_type=args.image_processor_type,
+                encoder=args.encoder,
+                seq_len=args.seq_len,
+                encoder_block_num=args.encoder_block_num,
+                temporal_model_type=args.temporal_model_type,
+                horizon=args.horizon,
+                critic_block_num=args.critic_block_num,
+                policy_type=args.policy_type,
+                predictor_hidden_dim=args.predictor_hidden_dim,
+                predictor_block_num=args.predictor_block_num,
+                disable_state_predictor=args.disable_state_predictor,
             ).to(self.device)
             self.network = torch.compile(self.network)
         elif self.network_class == "actor_critic_with_action_value":
             self.network = ActorCriticWithActionValue(
-                observation_space.shape, action_space.shape, args
+                observation_space_shape=observation_space.shape,
+                action_space_shape=action_space.shape,
+                gamma=args.gamma,
+                num_bins=args.num_bins,
+                sparsity=args.sparsity,
+                seq_len=args.seq_len,
+                dacer_loss_weight=args.dacer_loss_weight,
+                critic_loss_weight=args.critic_loss_weight,
+                prediction_type=args.prediction_type,
+                predictor_step_num=args.predictor_step_num,
+                image_processor_type=args.image_processor_type,
+                encoder=args.encoder,
+                encoder_block_num=args.encoder_block_num,
+                temporal_model_type=args.temporal_model_type,
+                horizon=args.horizon,
+                policy_type=args.policy_type,
+                actor_hidden_dim=args.actor_hidden_dim,
+                actor_block_num=args.actor_block_num,
+                denoising_time=args.denoising_time,
+                denoising_steps=args.denoising_steps,
+                critic_hidden_dim=args.critic_hidden_dim,
+                critic_block_num=args.critic_block_num,
+                predictor_hidden_dim=args.predictor_hidden_dim,
+                predictor_block_num=args.predictor_block_num,
+                detach_actor=args.detach_actor,
+                detach_critic=args.detach_critic,
+                detach_predictor=args.detach_predictor,
+                disable_state_predictor=args.disable_state_predictor,
             ).to(self.device)
             self.network = torch.compile(self.network)
         else:

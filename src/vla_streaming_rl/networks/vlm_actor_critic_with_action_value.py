@@ -4,7 +4,6 @@ from collections.abc import Callable
 import numpy as np
 import torch
 from hl_gauss_pytorch import HLGaussLoss
-from omegaconf import DictConfig
 from torch import nn
 from torch.nn import functional as F
 
@@ -30,62 +29,92 @@ class VLMActorCriticWithActionValue(nn.Module):
 
     def __init__(
         self,
+        *,
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
-        args: DictConfig,
         parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
         task_prompt: str,
+        gamma: float,
+        num_bins: int,
+        seq_len: int,
+        horizon: int,
+        critic_loss_weight: float,
+        denoising_steps: int,
+        denoising_time: float,
+        dacer_loss_weight: float,
+        prediction_type: str,
+        text_q_margin: float,
+        text_action_mode: str,
+        predictor_step_num: int,
+        disable_state_predictor: bool,
+        detach_predictor: bool,
+        image_processor_type: str,
+        use_lora: bool,
+        vlm_model_id: str,
+        target_layer_idx: int,
+        max_new_tokens: int,
+        max_prompt_tokens: int,
+        pad_token_id: int,
+        expert_hidden_size: int,
+        state_expert_hidden_size: int,
+        state_mode: str,
+        num_state_queries: int,
+        critic_hidden_dim: int,
+        critic_block_num: int,
+        predictor_hidden_dim: int,
+        predictor_block_num: int,
+        sparsity: float,
     ) -> None:
         super().__init__()
-        self.gamma = args.gamma
-        self.num_bins = args.num_bins
-        self.seq_len = args.seq_len
-        self.horizon = args.horizon
+        self.gamma = gamma
+        self.num_bins = num_bins
+        self.seq_len = seq_len
+        self.horizon = horizon
         self.action_dim = action_space_shape[0]
         self.observation_space_shape = observation_space_shape
-        self.critic_loss_weight = args.critic_loss_weight
-        self.denoising_steps = args.denoising_steps
-        self.denoising_time = args.denoising_time
-        self.dacer_loss_weight = args.dacer_loss_weight
-        self.prediction_type = args.prediction_type
-        self.text_q_margin = args.text_q_margin
-        self.text_action_mode = args.text_action_mode
+        self.critic_loss_weight = critic_loss_weight
+        self.denoising_steps = denoising_steps
+        self.denoising_time = denoising_time
+        self.dacer_loss_weight = dacer_loss_weight
+        self.prediction_type = prediction_type
+        self.text_q_margin = text_q_margin
+        self.text_action_mode = text_action_mode
 
-        self.predictor_step_num = args.predictor_step_num
-        self.disable_state_predictor = args.disable_state_predictor
-        self.detach_predictor = args.detach_predictor
+        self.predictor_step_num = predictor_step_num
+        self.disable_state_predictor = disable_state_predictor
+        self.detach_predictor = detach_predictor
 
         # Image processor (for replay buffer obs_z encoding)
         self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=args.image_processor_type
+            observation_space_shape, processor_type=image_processor_type
         )
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
         # Load VLM
         device = "cuda"
-        self.use_lora = bool(args.use_lora)
+        self.use_lora = bool(use_lora)
         self.vlm_model, self.processor = load_model(
-            args.vlm_model_id,
+            vlm_model_id,
             use_lora=self.use_lora,
             device=device,
         )
         self.device = device
 
         # VLM config
-        self.is_qwen35 = is_qwen35(args.vlm_model_id)
+        self.is_qwen35 = is_qwen35(vlm_model_id)
         vlm_cfg = self.vlm_model.config.text_config
         vlm_hidden_size = vlm_cfg.hidden_size
         num_layers = vlm_cfg.num_hidden_layers
         self.num_layers = num_layers
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
-        self.target_layer_idx = args.target_layer_idx
-        initial_task_prompt = task_prompt if args.text_action_mode != "none" else ""
+        self.target_layer_idx = target_layer_idx
+        initial_task_prompt = task_prompt if text_action_mode != "none" else ""
         self.parse_action_text = parse_action_text
-        self.max_new_tokens = args.max_new_tokens
-        self.max_prompt_tokens = args.max_prompt_tokens
-        self.pad_token_id = args.pad_token_id
+        self.max_new_tokens = max_new_tokens
+        self.max_prompt_tokens = max_prompt_tokens
+        self.pad_token_id = pad_token_id
 
         # Determine which VLM layers have KV cache for cross-attention
         if self.is_qwen35:
@@ -98,8 +127,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         num_expert_layers = len(self.attn_layer_indices)
 
         # Shared rotary embedding from VLM
-        expert_hidden = args.expert_hidden_size
-        state_expert_hidden = args.state_expert_hidden_size
+        expert_hidden = expert_hidden_size
+        state_expert_hidden = state_expert_hidden_size
         # PEFT wraps the model with an extra .model level
         if self.use_lora:
             rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
@@ -107,16 +136,16 @@ class VLMActorCriticWithActionValue(nn.Module):
             rotary_emb = self.vlm_model.model.language_model.rotary_emb
 
         # State computation mode
-        self.state_mode = args.state_mode
-        self.num_state_queries = args.num_state_queries
+        self.state_mode = state_mode
+        self.num_state_queries = num_state_queries
 
         self.video_encoder = VideoEncoder()
 
         if self.state_mode == "expert":
             self.state_query_tokens = nn.Parameter(
-                torch.randn(1, args.num_state_queries, state_expert_hidden) * 0.02
+                torch.randn(1, num_state_queries, state_expert_hidden) * 0.02
             )
-            state_dim = args.num_state_queries * state_expert_hidden
+            state_dim = num_state_queries * state_expert_hidden
             # State Expert: separate instance for state extraction
             self.state_expert = ActionExpert(
                 num_layers=num_expert_layers,
@@ -156,19 +185,19 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.value_head = ActionValueHead(
             in_channels=state_dim,
             action_dim=self.action_dim,
-            horizon=args.horizon,
-            hidden_dim=args.critic_hidden_dim,
-            block_num=args.critic_block_num,
-            num_bins=args.num_bins,
-            sparsity=args.sparsity,
+            horizon=horizon,
+            hidden_dim=critic_hidden_dim,
+            block_num=critic_block_num,
+            num_bins=num_bins,
+            sparsity=sparsity,
         )
 
         self.prediction_head = StatePredictionHead(
             image_processor=self.image_processor,
             reward_processor=self.reward_processor,
             action_dim=self.action_dim,
-            predictor_hidden_dim=args.predictor_hidden_dim,
-            predictor_block_num=args.predictor_block_num,
+            predictor_hidden_dim=predictor_hidden_dim,
+            predictor_block_num=predictor_block_num,
         )
         # Project state output to match FluxDiT context_in_dim
         predictor_in_dim = state_expert_hidden if self.state_mode == "expert" else 4
@@ -179,7 +208,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.hl_gauss_loss = HLGaussLoss(
                 min_value=-self.value_range,
                 max_value=+self.value_range,
-                num_bins=args.num_bins,
+                num_bins=num_bins,
                 clamp_to_range=True,
             )
 

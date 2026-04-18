@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 import torch
 from hl_gauss_pytorch import HLGaussLoss
-from omegaconf import DictConfig
 from torch import nn
 from torch.nn import functional as F
 
@@ -20,75 +19,93 @@ from vla_streaming_rl.networks.value_head import (
 class ActorCriticWithStateValue(nn.Module):
     def __init__(
         self,
+        *,
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
-        args: DictConfig,
+        gamma: float,
+        clip_param_policy: float,
+        clip_param_value: float,
+        num_bins: int,
+        predictor_step_num: int,
+        critic_loss_weight: float,
+        separate_critic: bool,
+        image_processor_type: str,
+        encoder: str,
+        seq_len: int,
+        encoder_block_num: int,
+        temporal_model_type: str,
+        horizon: int,
+        critic_block_num: int,
+        policy_type: str,
+        predictor_hidden_dim: int,
+        predictor_block_num: int,
+        disable_state_predictor: bool,
     ) -> None:
         super().__init__()
-        self.gamma = args.gamma
-        self.clip_param_policy = args.clip_param_policy
-        self.clip_param_value = args.clip_param_value
+        self.gamma = gamma
+        self.clip_param_policy = clip_param_policy
+        self.clip_param_value = clip_param_value
         self.action_dim = action_space_shape[0]
-        self.num_bins = args.num_bins
+        self.num_bins = num_bins
         self.observation_space_shape = observation_space_shape
-        self.predictor_step_num = args.predictor_step_num
-        self.critic_loss_weight = args.critic_loss_weight
-        self.separate_critic = args.separate_critic
+        self.predictor_step_num = predictor_step_num
+        self.critic_loss_weight = critic_loss_weight
+        self.separate_critic = separate_critic
 
         self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=args.image_processor_type
+            observation_space_shape, processor_type=image_processor_type
         )
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
-        if args.encoder == "spatial_temporal":
+        if encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
                 image_processor=self.image_processor,
                 reward_processor=self.reward_processor,
-                seq_len=args.seq_len,
-                n_layer=args.encoder_block_num,
+                seq_len=seq_len,
+                n_layer=encoder_block_num,
                 action_dim=self.action_dim,
-                temporal_model_type=args.temporal_model_type,
+                temporal_model_type=temporal_model_type,
                 use_image_only=True,
             )
-        elif args.encoder == "temporal_only":
+        elif encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
                 image_processor=self.image_processor,
                 reward_processor=self.reward_processor,
-                seq_len=args.seq_len,
-                n_layer=args.encoder_block_num,
+                seq_len=seq_len,
+                n_layer=encoder_block_num,
                 action_dim=self.action_dim,
-                temporal_model_type=args.temporal_model_type,
+                temporal_model_type=temporal_model_type,
                 use_image_only=True,
             )
         else:
-            raise ValueError(f"Unknown encoder: {args.encoder=}")
+            raise ValueError(f"Unknown encoder: {encoder=}")
 
         hidden_dim = self.encoder.output_dim
-        self.horizon = args.horizon
+        self.horizon = horizon
 
         self.value_head = (
             SeparateCritic(
                 observation_space_shape,
-                args.image_processor_type,
+                image_processor_type,
                 hidden_dim,
-                args.critic_block_num,
-                args.num_bins,
+                critic_block_num,
+                num_bins,
             )
             if self.separate_critic
             else StateValueHead(
                 in_channels=hidden_dim,
                 hidden_dim=hidden_dim,
                 block_num=1,
-                num_bins=args.num_bins,
+                num_bins=num_bins,
                 sparsity=0.0,
             )
         )
 
-        if args.policy_type == "beta":
-            self.policy_head = BetaPolicy(hidden_dim, self.action_dim, args.horizon)
-        elif args.policy_type == "categorical":
-            self.policy_head = CategoricalPolicy(hidden_dim, self.action_dim, args.horizon)
+        if policy_type == "beta":
+            self.policy_head = BetaPolicy(hidden_dim, self.action_dim, horizon)
+        elif policy_type == "categorical":
+            self.policy_head = CategoricalPolicy(hidden_dim, self.action_dim, horizon)
         else:
             raise ValueError("Invalid policy type")
 
@@ -96,11 +113,11 @@ class ActorCriticWithStateValue(nn.Module):
             image_processor=self.image_processor,
             reward_processor=self.reward_processor,
             action_dim=self.action_dim,
-            predictor_hidden_dim=args.predictor_hidden_dim,
-            predictor_block_num=args.predictor_block_num,
+            predictor_hidden_dim=predictor_hidden_dim,
+            predictor_block_num=predictor_block_num,
         )
 
-        self.disable_state_predictor = args.disable_state_predictor
+        self.disable_state_predictor = disable_state_predictor
 
         self.apply(self._init_weights)
 

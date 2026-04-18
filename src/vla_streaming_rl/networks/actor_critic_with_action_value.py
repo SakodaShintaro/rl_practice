@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
-from omegaconf import DictConfig
 
 from vla_streaming_rl.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
 from vla_streaming_rl.networks.diffusion_utils import compute_actor_loss_with_dacer
@@ -17,108 +16,134 @@ from vla_streaming_rl.networks.value_head import ActionValueHead, maybe_update_h
 class ActorCriticWithActionValue(nn.Module):
     def __init__(
         self,
+        *,
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
-        args: DictConfig,
+        gamma: float,
+        num_bins: int,
+        sparsity: float,
+        seq_len: int,
+        dacer_loss_weight: float,
+        critic_loss_weight: float,
+        prediction_type: str,
+        predictor_step_num: int,
+        image_processor_type: str,
+        encoder: str,
+        encoder_block_num: int,
+        temporal_model_type: str,
+        horizon: int,
+        policy_type: str,
+        actor_hidden_dim: int,
+        actor_block_num: int,
+        denoising_time: float,
+        denoising_steps: int,
+        critic_hidden_dim: int,
+        critic_block_num: int,
+        predictor_hidden_dim: int,
+        predictor_block_num: int,
+        detach_actor: bool,
+        detach_critic: bool,
+        detach_predictor: bool,
+        disable_state_predictor: bool,
     ) -> None:
         super().__init__()
-        self.gamma = args.gamma
-        self.num_bins = args.num_bins
-        self.sparsity = args.sparsity
-        self.seq_len = args.seq_len
-        self.dacer_loss_weight = args.dacer_loss_weight
-        self.critic_loss_weight = args.critic_loss_weight
-        self.prediction_type = args.prediction_type
+        self.gamma = gamma
+        self.num_bins = num_bins
+        self.sparsity = sparsity
+        self.seq_len = seq_len
+        self.dacer_loss_weight = dacer_loss_weight
+        self.critic_loss_weight = critic_loss_weight
+        self.prediction_type = prediction_type
 
         self.action_dim = action_space_shape[0]
-        self.predictor_step_num = args.predictor_step_num
+        self.predictor_step_num = predictor_step_num
         self.observation_space_shape = observation_space_shape
 
         self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=args.image_processor_type
+            observation_space_shape, processor_type=image_processor_type
         )
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
-        if args.encoder == "spatial_temporal":
+        if encoder == "spatial_temporal":
             self.encoder = SpatialTemporalEncoder(
                 image_processor=self.image_processor,
                 reward_processor=self.reward_processor,
                 seq_len=self.seq_len,
-                n_layer=args.encoder_block_num,
+                n_layer=encoder_block_num,
                 action_dim=self.action_dim,
-                temporal_model_type=args.temporal_model_type,
+                temporal_model_type=temporal_model_type,
                 use_image_only=True,
             )
-        elif args.encoder == "temporal_only":
+        elif encoder == "temporal_only":
             self.encoder = TemporalOnlyEncoder(
                 image_processor=self.image_processor,
                 reward_processor=self.reward_processor,
                 seq_len=self.seq_len,
-                n_layer=args.encoder_block_num,
+                n_layer=encoder_block_num,
                 action_dim=self.action_dim,
-                temporal_model_type=args.temporal_model_type,
+                temporal_model_type=temporal_model_type,
                 use_image_only=False,
             )
         else:
-            raise ValueError(f"Unknown encoder: {args.encoder=}")
+            raise ValueError(f"Unknown encoder: {encoder=}")
 
-        self.horizon = args.horizon
-        self.policy_type = args.policy_type
+        self.horizon = horizon
+        self.policy_type = policy_type
         if self.policy_type == "diffusion":
             self.policy_head = DiffusionPolicy(
                 state_dim=self.encoder.output_dim,
                 action_dim=self.action_dim,
-                hidden_dim=args.actor_hidden_dim,
-                block_num=args.actor_block_num,
-                denoising_time=args.denoising_time,
-                sparsity=args.sparsity,
-                horizon=args.horizon,
-                denoising_steps=args.denoising_steps,
-                prediction_type=args.prediction_type,
+                hidden_dim=actor_hidden_dim,
+                block_num=actor_block_num,
+                denoising_time=denoising_time,
+                sparsity=sparsity,
+                horizon=horizon,
+                denoising_steps=denoising_steps,
+                prediction_type=prediction_type,
             )
         elif self.policy_type == "beta":
             self.policy_head = BetaPolicy(
                 hidden_dim=self.encoder.output_dim,
                 action_dim=self.action_dim,
-                horizon=args.horizon,
+                horizon=horizon,
             )
         elif self.policy_type == "cfgrl":
             self.policy_head = CFGDiffusionPolicy(
                 state_dim=self.encoder.output_dim,
                 action_dim=self.action_dim,
-                hidden_dim=args.actor_hidden_dim,
-                block_num=args.actor_block_num,
-                denoising_time=args.denoising_time,
-                sparsity=args.sparsity,
+                hidden_dim=actor_hidden_dim,
+                block_num=actor_block_num,
+                denoising_time=denoising_time,
+                sparsity=sparsity,
                 cfgrl_beta=1.5,
-                horizon=args.horizon,
-                denoising_steps=args.denoising_steps,
-                prediction_type=args.prediction_type,
+                horizon=horizon,
+                denoising_steps=denoising_steps,
+                prediction_type=prediction_type,
             )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=self.action_dim,
-            horizon=args.horizon,
-            hidden_dim=args.critic_hidden_dim,
-            block_num=args.critic_block_num,
+            horizon=horizon,
+            hidden_dim=critic_hidden_dim,
+            block_num=critic_block_num,
             num_bins=self.num_bins,
-            sparsity=args.sparsity,
+            sparsity=sparsity,
         )
         self.prediction_head = StatePredictionHead(
             image_processor=self.image_processor,
             reward_processor=self.reward_processor,
             action_dim=self.action_dim,
-            predictor_hidden_dim=args.predictor_hidden_dim,
-            predictor_block_num=args.predictor_block_num,
+            predictor_hidden_dim=predictor_hidden_dim,
+            predictor_block_num=predictor_block_num,
         )
 
-        self.detach_actor = args.detach_actor
-        self.detach_critic = args.detach_critic
-        self.detach_predictor = args.detach_predictor
+        self.detach_actor = detach_actor
+        self.detach_critic = detach_critic
+        self.detach_predictor = detach_predictor
         # CFGRL parameters
         self.condition_drop_prob = 0.1
-        self.disable_state_predictor = args.disable_state_predictor
+        self.disable_state_predictor = disable_state_predictor
 
         self.value_range = 1.0
         if self.num_bins > 1:
