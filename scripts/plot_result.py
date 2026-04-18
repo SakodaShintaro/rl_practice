@@ -22,11 +22,28 @@ def parse_args():
     return parser.parse_args()
 
 
+_TAB10 = plt.cm.tab10.colors
+
+# Order here determines the display order (top-to-bottom in the bar chart).
+# Colors are fixed per method so that the line plot and bar plot agree
+# regardless of ordering.
 METHODS = {
-    "OFF_POLICY_actor_critic_with_action_value_off_policy_bs16": "Off-policy bs16 (No VLM)",
-    "OFF_POLICY_vlm_actor_critic_with_action_value_off_policy_bs1": "Off-policy bs1 (VLM)",
-    "OFF_POLICY_vlm_actor_critic_with_action_value_off_policy_bs16": "Off-policy bs16 (VLM)",
-    "STREAMING_vlm_actor_critic_with_action_value_streaming_": "Streaming (VLM)",
+    "OFF_POLICY_actor_critic_with_action_value_off_policy_bs16": (
+        "Off-policy bs16 (No VLM)",
+        _TAB10[0],
+    ),
+    "OFF_POLICY_vlm_actor_critic_with_action_value_off_policy_bs16": (
+        "Off-policy bs16 (VLM)",
+        _TAB10[2],
+    ),
+    "STREAMING_vlm_actor_critic_with_action_value_streaming_": (
+        "Streaming (VLM)",
+        _TAB10[3],
+    ),
+    "OFF_POLICY_vlm_actor_critic_with_action_value_off_policy_bs1": (
+        "Off-policy bs1 (VLM)",
+        _TAB10[1],
+    ),
 }
 
 
@@ -56,18 +73,17 @@ def main():
 
     plt.rcParams.update(
         {
-            "font.size": 14,
-            "axes.labelsize": 16,
-            "xtick.labelsize": 13,
-            "ytick.labelsize": 13,
+            "font.size": 18,
+            "axes.labelsize": 20,
+            "xtick.labelsize": 17,
+            "ytick.labelsize": 17,
         }
     )
-    fig, ax = plt.subplots(figsize=(12, 6))
-    colors = plt.cm.tab10.colors
+    fig, ax = plt.subplots(figsize=(12, 7.5))
 
     label_positions = []  # (x_end, y_end, label, color)
 
-    for i, (dirname, label) in enumerate(METHODS.items()):
+    for dirname, (label, color) in METHODS.items():
         method_dir = args.data_dir / dirname
         if not method_dir.is_dir():
             print(f"Skipping missing method dir: {method_dir}")
@@ -77,20 +93,21 @@ def main():
             print(f"No trial files in: {method_dir}")
             continue
         grid, mean, std = aggregate(trials)
-        color = colors[i % len(colors)]
         ax.plot(grid, mean, color=color, linewidth=2)
         ax.fill_between(grid, mean - std, mean + std, color=color, alpha=0.2)
         label_positions.append((grid[-1], mean[-1], label, color))
 
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Moving Average Score")
+    ax.set_xticks([0, 50_000, 100_000, 150_000, 200_000])
+    ax.set_xticklabels(["0", "50k", "100k", "150k", "200k"])
     ax.grid(True, alpha=0.3)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
     # Inline text labels at the right end of each curve, instead of a legend box.
     # Nudge overlapping labels vertically so they remain readable.
-    x_max = max(p[0] for p in label_positions)
+    x_max = max(max(p[0] for p in label_positions), 200_000)
     ax.set_xlim(right=x_max)
     label_positions_sorted = sorted(label_positions, key=lambda p: p[1])
     y_lo, y_hi = ax.get_ylim()
@@ -109,7 +126,7 @@ def main():
             color=color,
             va="center",
             ha="left",
-            fontsize=13,
+            fontsize=20,
             fontweight="bold",
             clip_on=False,
         )
@@ -117,7 +134,44 @@ def main():
     # Make room on the right side for the inline labels.
     fig.subplots_adjust(right=0.72)
 
-    output = args.data_dir / "moving_average.pdf"
+    output = args.data_dir / "car_racing_moving_average.pdf"
+    fig.savefig(output, dpi=150, bbox_inches="tight")
+    print(f"Saved figure to: {output}")
+
+    plot_sps_bar(args.data_dir)
+
+
+def plot_sps_bar(data_dir: Path):
+    """Bar chart of the final SPS value from trial003 for each method."""
+    labels = []
+    values = []
+    bar_colors = []
+    for dirname, (label, color) in METHODS.items():
+        trial_file = data_dir / dirname / "log_episode_trial003.tsv"
+        if not trial_file.is_file():
+            print(f"Skipping missing trial003 file: {trial_file}")
+            continue
+        df = pd.read_csv(trial_file, sep="\t")
+        final_sps = df["SPS"].to_numpy()[-1]
+        labels.append(label)
+        values.append(final_sps)
+        bar_colors.append(color)
+
+    fig, ax = plt.subplots(figsize=(10, 7.5))
+    y = np.arange(len(labels))
+    ax.barh(y, values, color=bar_colors)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=20)
+    ax.invert_yaxis()  # top-to-bottom matches METHODS order
+    ax.set_xlabel("Step per Second (SPS)")
+    ax.grid(True, axis="x", alpha=0.3)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    for yi, v in zip(y, values):
+        ax.text(v, yi, f" {v:.1f}", ha="left", va="center", fontsize=17)
+
+    output = data_dir / "car_racing_sps.pdf"
     fig.savefig(output, dpi=150, bbox_inches="tight")
     print(f"Saved figure to: {output}")
 
