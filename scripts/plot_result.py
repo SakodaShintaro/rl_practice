@@ -163,7 +163,7 @@ def plot_sps_bar(data_dir: Path):
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=20)
     ax.invert_yaxis()  # top-to-bottom matches METHODS order
-    ax.set_xlabel("Step per Second (SPS)")
+    ax.set_xlabel("Frames per Second (FPS)")
     ax.grid(True, axis="x", alpha=0.3)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -171,7 +171,7 @@ def plot_sps_bar(data_dir: Path):
     for yi, v in zip(y, values):
         ax.text(v, yi, f" {v:.1f}", ha="left", va="center", fontsize=17)
 
-    output = data_dir / "car_racing_sps.pdf"
+    output = data_dir / "car_racing_fps.pdf"
     fig.savefig(output, dpi=150, bbox_inches="tight")
     print(f"Saved figure to: {output}")
 
