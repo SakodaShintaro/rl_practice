@@ -27,6 +27,7 @@ from omegaconf import DictConfig, OmegaConf
 from vla_streaming_rl.agents.off_policy import OffPolicyAgent
 from vla_streaming_rl.agents.on_policy import OnPolicyAgent
 from vla_streaming_rl.agents.streaming import StreamingAgent
+from vla_streaming_rl.networks.build import build_network
 from vla_streaming_rl.utils import concat_labeled_images, create_reward_image
 from vla_streaming_rl.wrappers import make_env
 
@@ -149,16 +150,20 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
     step_limit = args.step_limit
 
+    network = build_network(
+        args,
+        observation_space_shape=env.observation_space.shape,
+        action_space_shape=env.action_space.shape,
+        parse_action_text=parse_action_text,
+        task_prompt=task_prompt,
+    )
+
     if args.agent_type == "off_policy":
-        agent = OffPolicyAgent(
-            args, env.observation_space, env.action_space, parse_action_text, task_prompt
-        )
+        agent = OffPolicyAgent(args, env.observation_space, env.action_space, network)
     elif args.agent_type == "on_policy":
-        agent = OnPolicyAgent(args, env.observation_space, env.action_space)
+        agent = OnPolicyAgent(args, env.observation_space, env.action_space, network)
     elif args.agent_type == "streaming":
-        agent = StreamingAgent(
-            args, env.observation_space, env.action_space, parse_action_text, task_prompt
-        )
+        agent = StreamingAgent(args, env.observation_space, env.action_space, network)
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 

@@ -5,7 +5,6 @@ import torch
 from omegaconf import DictConfig
 from torch import nn, optim
 
-from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
 from vla_streaming_rl.networks.actor_critic_with_state_value import ActorCriticWithStateValue
 from vla_streaming_rl.replay_buffer import ReplayBuffer, ReplayBufferData
 from vla_streaming_rl.reward_processor import RewardProcessor
@@ -50,6 +49,7 @@ class OnPolicyAgent:
         args: DictConfig,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
+        network: nn.Module,
     ) -> None:
         self.on_policy_epoch = args.on_policy_epoch
         # action properties
@@ -68,7 +68,6 @@ class OnPolicyAgent:
         self.accumulation_steps = args.accumulation_steps
         self.device = torch.device("cuda")
         self.num_bins = args.num_bins
-        self.network_class = args.network_class
         self.max_grad_norm = args.max_grad_norm
         self.use_done = args.use_done
 
@@ -79,64 +78,8 @@ class OnPolicyAgent:
         self.reward_processor = RewardProcessor("scaling", 1.0)
         self.normalizing_by_return = args.normalizing_by_return
 
-        if self.network_class == "actor_critic_with_state_value":
-            self.network = ActorCriticWithStateValue(
-                observation_space_shape=observation_space.shape,
-                action_space_shape=action_space.shape,
-                gamma=args.gamma,
-                clip_param_policy=args.clip_param_policy,
-                clip_param_value=args.clip_param_value,
-                num_bins=args.num_bins,
-                predictor_step_num=args.predictor_step_num,
-                critic_loss_weight=args.critic_loss_weight,
-                separate_critic=args.separate_critic,
-                image_processor_type=args.image_processor_type,
-                encoder=args.encoder,
-                seq_len=args.seq_len,
-                encoder_block_num=args.encoder_block_num,
-                temporal_model_type=args.temporal_model_type,
-                horizon=args.horizon,
-                critic_block_num=args.critic_block_num,
-                policy_type=args.policy_type,
-                predictor_hidden_dim=args.predictor_hidden_dim,
-                predictor_block_num=args.predictor_block_num,
-                disable_state_predictor=args.disable_state_predictor,
-            ).to(self.device)
-            self.network = torch.compile(self.network)
-        elif self.network_class == "actor_critic_with_action_value":
-            self.network = ActorCriticWithActionValue(
-                observation_space_shape=observation_space.shape,
-                action_space_shape=action_space.shape,
-                gamma=args.gamma,
-                num_bins=args.num_bins,
-                sparsity=args.sparsity,
-                seq_len=args.seq_len,
-                dacer_loss_weight=args.dacer_loss_weight,
-                critic_loss_weight=args.critic_loss_weight,
-                prediction_type=args.prediction_type,
-                predictor_step_num=args.predictor_step_num,
-                image_processor_type=args.image_processor_type,
-                encoder=args.encoder,
-                encoder_block_num=args.encoder_block_num,
-                temporal_model_type=args.temporal_model_type,
-                horizon=args.horizon,
-                policy_type=args.policy_type,
-                actor_hidden_dim=args.actor_hidden_dim,
-                actor_block_num=args.actor_block_num,
-                denoising_time=args.denoising_time,
-                denoising_steps=args.denoising_steps,
-                critic_hidden_dim=args.critic_hidden_dim,
-                critic_block_num=args.critic_block_num,
-                predictor_hidden_dim=args.predictor_hidden_dim,
-                predictor_block_num=args.predictor_block_num,
-                detach_actor=args.detach_actor,
-                detach_critic=args.detach_critic,
-                detach_predictor=args.detach_predictor,
-                disable_state_predictor=args.disable_state_predictor,
-            ).to(self.device)
-            self.network = torch.compile(self.network)
-        else:
-            raise ValueError(f"Invalid network_class: {self.network_class}")
+        self._uses_state_value = isinstance(network, ActorCriticWithStateValue)
+        self.network = torch.compile(network.to(self.device))
         self.rnn_state = self.network.init_state().to(self.device)
         obs_z_shape = tuple(self.network.image_processor.output_shape)
 
@@ -373,16 +316,14 @@ class OnPolicyAgent:
                 curr_adv = adv[chunk_start_idx]
                 curr_target_v = target_v[chunk_start_idx]
 
-                if self.network_class == "actor_critic_with_state_value":
+                if self._uses_state_value:
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v, curr_adv
                     )
-                elif self.network_class == "actor_critic_with_action_value":
+                else:
                     loss, activations_dict, info_dict = self.network.compute_loss(
                         data, curr_target_v.squeeze(1)
                     )
-                else:
-                    raise ValueError(f"Invalid network_class: {self.network_class}")
 
                 sum_action_loss += info_dict.get("actor_loss", 0.0) * len(data.observations)
                 sum_value_loss += info_dict["critic_loss"] * len(data.observations)

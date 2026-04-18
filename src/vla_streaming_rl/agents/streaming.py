@@ -1,14 +1,10 @@
 # SPDX-License-Identifier: MIT
-from collections.abc import Callable
-
 import gymnasium as gym
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from torch import optim
+from torch import nn, optim
 
-from vla_streaming_rl.networks.actor_critic_with_action_value import ActorCriticWithActionValue
-from vla_streaming_rl.networks.actor_critic_with_state_value import ActorCriticWithStateValue
 from vla_streaming_rl.networks.vlm_actor_critic_with_action_value import (
     VLMActorCriticWithActionValue,
 )
@@ -23,8 +19,7 @@ class StreamingAgent:
         args: DictConfig,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
-        parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
-        task_prompt: str,
+        network: nn.Module,
     ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -53,99 +48,8 @@ class StreamingAgent:
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
         self.chunk_step = 0  # current step within chunk
 
-        if args.network_class == "actor_critic_with_action_value":
-            self.network = ActorCriticWithActionValue(
-                observation_space_shape=observation_space.shape,
-                action_space_shape=action_space.shape,
-                gamma=args.gamma,
-                num_bins=args.num_bins,
-                sparsity=args.sparsity,
-                seq_len=args.seq_len,
-                dacer_loss_weight=args.dacer_loss_weight,
-                critic_loss_weight=args.critic_loss_weight,
-                prediction_type=args.prediction_type,
-                predictor_step_num=args.predictor_step_num,
-                image_processor_type=args.image_processor_type,
-                encoder=args.encoder,
-                encoder_block_num=args.encoder_block_num,
-                temporal_model_type=args.temporal_model_type,
-                horizon=args.horizon,
-                policy_type=args.policy_type,
-                actor_hidden_dim=args.actor_hidden_dim,
-                actor_block_num=args.actor_block_num,
-                denoising_time=args.denoising_time,
-                denoising_steps=args.denoising_steps,
-                critic_hidden_dim=args.critic_hidden_dim,
-                critic_block_num=args.critic_block_num,
-                predictor_hidden_dim=args.predictor_hidden_dim,
-                predictor_block_num=args.predictor_block_num,
-                detach_actor=args.detach_actor,
-                detach_critic=args.detach_critic,
-                detach_predictor=args.detach_predictor,
-                disable_state_predictor=args.disable_state_predictor,
-            ).to(self.device)
-        elif args.network_class == "actor_critic_with_state_value":
-            self.network = ActorCriticWithStateValue(
-                observation_space_shape=observation_space.shape,
-                action_space_shape=action_space.shape,
-                gamma=args.gamma,
-                clip_param_policy=args.clip_param_policy,
-                clip_param_value=args.clip_param_value,
-                num_bins=args.num_bins,
-                predictor_step_num=args.predictor_step_num,
-                critic_loss_weight=args.critic_loss_weight,
-                separate_critic=args.separate_critic,
-                image_processor_type=args.image_processor_type,
-                encoder=args.encoder,
-                seq_len=args.seq_len,
-                encoder_block_num=args.encoder_block_num,
-                temporal_model_type=args.temporal_model_type,
-                horizon=args.horizon,
-                critic_block_num=args.critic_block_num,
-                policy_type=args.policy_type,
-                predictor_hidden_dim=args.predictor_hidden_dim,
-                predictor_block_num=args.predictor_block_num,
-                disable_state_predictor=args.disable_state_predictor,
-            ).to(self.device)
-        elif args.network_class == "vlm_actor_critic_with_action_value":
-            self.network = VLMActorCriticWithActionValue(
-                observation_space_shape=observation_space.shape,
-                action_space_shape=action_space.shape,
-                parse_action_text=parse_action_text,
-                task_prompt=task_prompt,
-                gamma=args.gamma,
-                num_bins=args.num_bins,
-                seq_len=args.seq_len,
-                horizon=args.horizon,
-                critic_loss_weight=args.critic_loss_weight,
-                denoising_steps=args.denoising_steps,
-                denoising_time=args.denoising_time,
-                dacer_loss_weight=args.dacer_loss_weight,
-                prediction_type=args.prediction_type,
-                text_q_margin=args.text_q_margin,
-                text_action_mode=args.text_action_mode,
-                predictor_step_num=args.predictor_step_num,
-                disable_state_predictor=args.disable_state_predictor,
-                detach_predictor=args.detach_predictor,
-                image_processor_type=args.image_processor_type,
-                use_lora=args.use_lora,
-                vlm_model_id=args.vlm_model_id,
-                target_layer_idx=args.target_layer_idx,
-                max_new_tokens=args.max_new_tokens,
-                max_prompt_tokens=args.max_prompt_tokens,
-                pad_token_id=args.pad_token_id,
-                expert_hidden_size=args.expert_hidden_size,
-                state_expert_hidden_size=args.state_expert_hidden_size,
-                state_mode=args.state_mode,
-                num_state_queries=args.num_state_queries,
-                critic_hidden_dim=args.critic_hidden_dim,
-                critic_block_num=args.critic_block_num,
-                predictor_hidden_dim=args.predictor_hidden_dim,
-                predictor_block_num=args.predictor_block_num,
-                sparsity=args.sparsity,
-            ).to(self.device)
-        else:
-            raise ValueError(f"Unknown network class: {args.network_class}")
+        self._is_vlm_network = isinstance(network, VLMActorCriticWithActionValue)
+        self.network = network.to(self.device)
         self.rnn_state = self.network.init_state().to(self.device)
 
         self.use_eligibility_trace = bool(args.use_eligibility_trace)
@@ -165,7 +69,7 @@ class StreamingAgent:
         else:
             self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.1)
 
-        if args.network_class != "vlm_actor_critic_with_action_value":
+        if not self._is_vlm_network:
             self.network = torch.compile(self.network)
 
         obs_z_shape = tuple(self.network.image_processor.output_shape)
@@ -183,7 +87,6 @@ class StreamingAgent:
             pad_token_id=args.pad_token_id,
         )
 
-        self.network_class = args.network_class
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_action_token_ids = []
         self._episode_reset = False
