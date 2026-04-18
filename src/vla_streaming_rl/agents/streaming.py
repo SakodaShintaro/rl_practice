@@ -2,7 +2,6 @@
 import gymnasium as gym
 import numpy as np
 import torch
-from omegaconf import DictConfig
 from torch import nn, optim
 
 from vla_streaming_rl.optimizers.adam_et import AdamET
@@ -13,10 +12,24 @@ from vla_streaming_rl.reward_processor import RewardProcessor
 class StreamingAgent:
     def __init__(
         self,
-        args: DictConfig,
+        *,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
         network: nn.Module,
+        normalizing_by_return: bool,
+        max_grad_norm: float,
+        use_done: bool,
+        accumulation_steps: int,
+        seq_len: int,
+        horizon: int,
+        use_eligibility_trace: bool,
+        learning_rate: float,
+        gamma: float,
+        et_lambda: float,
+        buffer_device: str,
+        max_new_tokens: int,
+        max_prompt_tokens: int,
+        pad_token_id: int,
     ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -30,16 +43,16 @@ class StreamingAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
         self.reward_processor = RewardProcessor("scaling", 1.0)
-        self.normalizing_by_return = args.normalizing_by_return
+        self.normalizing_by_return = normalizing_by_return
 
-        self.max_grad_norm = args.max_grad_norm
-        self.use_done = args.use_done
-        self.accumulation_steps = args.accumulation_steps
+        self.max_grad_norm = max_grad_norm
+        self.use_done = use_done
+        self.accumulation_steps = accumulation_steps
         self._accumulation_count = 0
 
         # Sequence observation management
-        self.seq_len = args.seq_len
-        self.horizon = args.horizon
+        self.seq_len = seq_len
+        self.horizon = horizon
 
         # Action chunking state
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
@@ -48,8 +61,7 @@ class StreamingAgent:
         self.network = network
         self.rnn_state = self.network.init_state().to(self.device)
 
-        self.use_eligibility_trace = bool(args.use_eligibility_trace)
-        lr = args.learning_rate
+        self.use_eligibility_trace = bool(use_eligibility_trace)
         self.critic_optimizer = None
         if self.use_eligibility_trace:
             critic_params = list(self.network.value_head.parameters())
@@ -57,13 +69,15 @@ class StreamingAgent:
             other_params = [p for p in self.network.parameters() if id(p) not in critic_param_ids]
             self.critic_optimizer = AdamET(
                 critic_params,
-                lr=lr,
-                gamma=args.gamma,
-                et_lambda=args.et_lambda,
+                lr=learning_rate,
+                gamma=gamma,
+                et_lambda=et_lambda,
             )
-            self.optimizer = optim.AdamW(other_params, lr=lr, weight_decay=0.1)
+            self.optimizer = optim.AdamW(other_params, lr=learning_rate, weight_decay=0.1)
         else:
-            self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.1)
+            self.optimizer = optim.AdamW(
+                self.network.parameters(), lr=learning_rate, weight_decay=0.1
+            )
 
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
@@ -74,10 +88,10 @@ class StreamingAgent:
             rnn_state_shape=self.rnn_state.squeeze(0).shape,
             action_shape=action_space.shape,
             output_device=self.device,
-            storage_device=torch.device(args.buffer_device),
-            max_new_tokens=args.max_new_tokens,
-            max_prompt_tokens=args.max_prompt_tokens,
-            pad_token_id=args.pad_token_id,
+            storage_device=torch.device(buffer_device),
+            max_new_tokens=max_new_tokens,
+            max_prompt_tokens=max_prompt_tokens,
+            pad_token_id=pad_token_id,
         )
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)

@@ -2,7 +2,6 @@
 import gymnasium as gym
 import numpy as np
 import torch
-from omegaconf import DictConfig
 from torch import nn, optim
 
 from vla_streaming_rl.replay_buffer import ReplayBuffer, ReplayBufferData
@@ -45,12 +44,29 @@ class SequentialBatchSampler:
 class OnPolicyAgent:
     def __init__(
         self,
-        args: DictConfig,
+        *,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
         network: nn.Module,
+        network_class: str,
+        on_policy_epoch: int,
+        gamma: float,
+        buffer_capacity: int,
+        seq_len: int,
+        horizon: int,
+        batch_size: int,
+        accumulation_steps: int,
+        num_bins: int,
+        max_grad_norm: float,
+        use_done: bool,
+        normalizing_by_return: bool,
+        max_new_tokens: int,
+        max_prompt_tokens: int,
+        pad_token_id: int,
+        buffer_device: str,
+        learning_rate: float,
     ) -> None:
-        self.on_policy_epoch = args.on_policy_epoch
+        self.on_policy_epoch = on_policy_epoch
         # action properties
         self.action_space = action_space
         self.action_dim = np.prod(action_space.shape)
@@ -59,31 +75,31 @@ class OnPolicyAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
 
-        self.gamma = args.gamma
-        self.buffer_capacity = args.buffer_capacity
-        self.seq_len = args.seq_len
-        self.horizon = args.horizon
-        self.batch_size = args.batch_size
-        self.accumulation_steps = args.accumulation_steps
+        self.gamma = gamma
+        self.buffer_capacity = buffer_capacity
+        self.seq_len = seq_len
+        self.horizon = horizon
+        self.batch_size = batch_size
+        self.accumulation_steps = accumulation_steps
         self.device = torch.device("cuda")
-        self.num_bins = args.num_bins
-        self.max_grad_norm = args.max_grad_norm
-        self.use_done = args.use_done
+        self.num_bins = num_bins
+        self.max_grad_norm = max_grad_norm
+        self.use_done = use_done
 
         # Action chunking state
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
         self.chunk_step = 0  # current step within chunk
 
         self.reward_processor = RewardProcessor("scaling", 1.0)
-        self.normalizing_by_return = args.normalizing_by_return
+        self.normalizing_by_return = normalizing_by_return
 
-        self._uses_state_value = args.network_class == "actor_critic_with_state_value"
+        self._uses_state_value = network_class == "actor_critic_with_state_value"
         self.network = network
         self.rnn_state = self.network.init_state().to(self.device)
         obs_z_shape = tuple(self.network.image_processor.output_shape)
 
-        self.max_new_tokens = args.max_new_tokens
-        self.pad_token_id = args.pad_token_id
+        self.max_new_tokens = max_new_tokens
+        self.pad_token_id = pad_token_id
 
         self.rb = ReplayBuffer(
             size=self.buffer_capacity,
@@ -93,14 +109,13 @@ class OnPolicyAgent:
             rnn_state_shape=self.rnn_state.squeeze(0).shape,
             action_shape=action_space.shape,
             output_device=self.device,
-            storage_device=torch.device(args.buffer_device),
+            storage_device=torch.device(buffer_device),
             max_new_tokens=self.max_new_tokens,
-            max_prompt_tokens=args.max_prompt_tokens,
+            max_prompt_tokens=max_prompt_tokens,
             pad_token_id=self.pad_token_id,
         )
 
-        lr = args.learning_rate
-        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.prev_logp = 0.0

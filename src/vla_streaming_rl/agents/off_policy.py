@@ -2,7 +2,6 @@
 import gymnasium as gym
 import numpy as np
 import torch
-from omegaconf import DictConfig
 from torch import nn, optim
 
 from vla_streaming_rl.replay_buffer import ReplayBuffer
@@ -12,10 +11,24 @@ from vla_streaming_rl.reward_processor import RewardProcessor
 class OffPolicyAgent:
     def __init__(
         self,
-        args: DictConfig,
+        *,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Box,
         network: nn.Module,
+        normalizing_by_return: bool,
+        learning_starts: int,
+        batch_size: int,
+        max_grad_norm: float,
+        use_done: bool,
+        accumulation_steps: int,
+        seq_len: int,
+        horizon: int,
+        learning_rate: float,
+        buffer_size: int,
+        buffer_device: str,
+        max_new_tokens: int,
+        max_prompt_tokens: int,
+        pad_token_id: int,
     ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -29,18 +42,18 @@ class OffPolicyAgent:
         self.action_scale = (action_space.high - action_space.low) / 2.0
         self.action_bias = (action_space.high + action_space.low) / 2.0
         self.reward_processor = RewardProcessor("scaling", 1.0)
-        self.normalizing_by_return = args.normalizing_by_return
+        self.normalizing_by_return = normalizing_by_return
 
-        self.learning_starts = args.learning_starts
-        self.batch_size = args.batch_size
-        self.max_grad_norm = args.max_grad_norm
-        self.use_done = args.use_done
-        self.accumulation_steps = args.accumulation_steps
+        self.learning_starts = learning_starts
+        self.batch_size = batch_size
+        self.max_grad_norm = max_grad_norm
+        self.use_done = use_done
+        self.accumulation_steps = accumulation_steps
         self._accumulation_count = 0
 
         # Sequence observation management
-        self.seq_len = args.seq_len
-        self.horizon = args.horizon
+        self.seq_len = seq_len
+        self.horizon = horizon
 
         # Action chunking state
         self.action_chunk = None  # (horizon, action_dim) - current action chunk
@@ -48,22 +61,21 @@ class OffPolicyAgent:
 
         self.network = network
         self.rnn_state = self.network.init_state().to(self.device)
-        lr = args.learning_rate
-        self.optimizer = optim.AdamW(self.network.parameters(), lr=lr, weight_decay=0.0)
+        self.optimizer = optim.AdamW(self.network.parameters(), lr=learning_rate, weight_decay=0.0)
 
         obs_z_shape = tuple(self.network.image_processor.output_shape)
         self.rb = ReplayBuffer(
-            size=args.buffer_size,
+            size=buffer_size,
             seq_len=self.seq_len + self.horizon,
             obs_shape=observation_space.shape,
             obs_z_shape=obs_z_shape,
             rnn_state_shape=self.rnn_state.squeeze(0).shape,
             action_shape=action_space.shape,
             output_device=self.device,
-            storage_device=torch.device(args.buffer_device),
-            max_new_tokens=args.max_new_tokens,
-            max_prompt_tokens=args.max_prompt_tokens,
-            pad_token_id=args.pad_token_id,
+            storage_device=torch.device(buffer_device),
+            max_new_tokens=max_new_tokens,
+            max_prompt_tokens=max_prompt_tokens,
+            pad_token_id=pad_token_id,
         )
 
         # Initialize gradient norm targets

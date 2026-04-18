@@ -162,11 +162,68 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     )
 
     if args.agent_type == "off_policy":
-        agent = OffPolicyAgent(args, env.observation_space, env.action_space, network)
+        agent = OffPolicyAgent(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            network=network,
+            normalizing_by_return=args.normalizing_by_return,
+            learning_starts=args.learning_starts,
+            batch_size=args.batch_size,
+            max_grad_norm=args.max_grad_norm,
+            use_done=args.use_done,
+            accumulation_steps=args.accumulation_steps,
+            seq_len=args.seq_len,
+            horizon=args.horizon,
+            learning_rate=args.learning_rate,
+            buffer_size=args.buffer_size,
+            buffer_device=args.buffer_device,
+            max_new_tokens=args.max_new_tokens,
+            max_prompt_tokens=args.max_prompt_tokens,
+            pad_token_id=args.pad_token_id,
+        )
     elif args.agent_type == "on_policy":
-        agent = OnPolicyAgent(args, env.observation_space, env.action_space, network)
+        agent = OnPolicyAgent(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            network=network,
+            network_class=args.network_class,
+            on_policy_epoch=args.on_policy_epoch,
+            gamma=args.gamma,
+            buffer_capacity=args.buffer_capacity,
+            seq_len=args.seq_len,
+            horizon=args.horizon,
+            batch_size=args.batch_size,
+            accumulation_steps=args.accumulation_steps,
+            num_bins=args.num_bins,
+            max_grad_norm=args.max_grad_norm,
+            use_done=args.use_done,
+            normalizing_by_return=args.normalizing_by_return,
+            max_new_tokens=args.max_new_tokens,
+            max_prompt_tokens=args.max_prompt_tokens,
+            pad_token_id=args.pad_token_id,
+            buffer_device=args.buffer_device,
+            learning_rate=args.learning_rate,
+        )
     elif args.agent_type == "streaming":
-        agent = StreamingAgent(args, env.observation_space, env.action_space, network)
+        agent = StreamingAgent(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            network=network,
+            normalizing_by_return=args.normalizing_by_return,
+            max_grad_norm=args.max_grad_norm,
+            use_done=args.use_done,
+            accumulation_steps=args.accumulation_steps,
+            seq_len=args.seq_len,
+            horizon=args.horizon,
+            use_eligibility_trace=args.use_eligibility_trace,
+            learning_rate=args.learning_rate,
+            gamma=args.gamma,
+            et_lambda=args.et_lambda,
+            buffer_device=args.buffer_device,
+            max_new_tokens=args.max_new_tokens,
+            max_prompt_tokens=args.max_prompt_tokens,
+            pad_token_id=args.pad_token_id,
+        )
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
