@@ -396,6 +396,15 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
 
         episode_id += 1
 
+    if result_dir is not None:
+        module = network._orig_mod if hasattr(network, "_orig_mod") else network
+        trainable_state = {
+            name: param.detach().cpu()
+            for name, param in module.named_parameters()
+            if param.requires_grad
+        }
+        torch.save(trainable_state, result_dir / "checkpoint.pt")
+
     env.close()
     if log_episode_file is not None:
         log_episode_file.close()
