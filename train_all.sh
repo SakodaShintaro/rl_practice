@@ -28,11 +28,11 @@ uv run python scripts/train.py \
   result_dir=$RESULT_DIR \
   wandb_group=$WANDB_GROUP
 
-# Off-policy, batch size 16, learning rate 1e-5
+# Off-policy, batch size 8, learning rate 1e-5
 uv run python scripts/train.py \
-  agent=vlm_off_policy_bs16 \
+  agent=vlm_off_policy_bs8 \
   env=car_racing \
-  exp_name=vlm_off_policy_bs16$suffix \
+  exp_name=vlm_off_policy_bs8$suffix \
   result_dir=$RESULT_DIR \
   wandb_group=$WANDB_GROUP
 
@@ -46,8 +46,8 @@ uv run python scripts/train.py \
 
 # Comparison
 uv run python scripts/train.py \
-  agent=cnn_off_policy_bs16 \
+  agent=cnn_off_policy_bs8 \
   env=car_racing \
-  exp_name=no_vlm_off_policy_bs16$suffix \
+  exp_name=no_vlm_off_policy_bs8$suffix \
   result_dir=$RESULT_DIR \
   wandb_group=$WANDB_GROUP

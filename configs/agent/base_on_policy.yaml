@@ -5,7 +5,7 @@ encoder: temporal_only
 temporal_model_type: identity
 image_processor_type: simple_cnn
 policy_type: beta
-batch_size: 16
+batch_size: 8
 learning_rate: 1e-5
 buffer_capacity: 2048
 on_policy_epoch: 10

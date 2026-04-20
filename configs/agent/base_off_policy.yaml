@@ -14,5 +14,5 @@ dacer_loss_weight: 0.05
 denoising_time: 0.9
 denoising_steps: 1
 prediction_type: data  # "velocity" or "data" (x-prediction)
-batch_size: 16
+batch_size: 8
 learning_rate: 1e-5

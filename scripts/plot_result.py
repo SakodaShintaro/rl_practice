@@ -28,12 +28,12 @@ _TAB10 = plt.cm.tab10.colors
 # Colors are fixed per method so that the line plot and bar plot agree
 # regardless of ordering.
 METHODS = {
-    "OFF_POLICY_actor_critic_with_action_value_off_policy_bs16": (
-        "Off-policy bs16 (No VLM)",
+    "OFF_POLICY_actor_critic_with_action_value_off_policy_bs8": (
+        "Off-policy bs8 (No VLM)",
         _TAB10[0],
     ),
-    "OFF_POLICY_vlm_actor_critic_with_action_value_off_policy_bs16": (
-        "Off-policy bs16 (VLM)",
+    "OFF_POLICY_vlm_actor_critic_with_action_value_off_policy_bs8": (
+        "Off-policy bs8 (VLM)",
         _TAB10[2],
     ),
     "STREAMING_vlm_actor_critic_with_action_value_streaming_": (

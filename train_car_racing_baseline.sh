@@ -5,6 +5,6 @@ suffix=${1:-""}
 cd $(dirname $0)
 
 uv run python scripts/train.py \
-  agent=cnn_off_policy_bs16 \
+  agent=cnn_off_policy_bs8 \
   env=car_racing \
   exp_name=baseline$suffix

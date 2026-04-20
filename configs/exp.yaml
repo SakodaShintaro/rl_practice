@@ -4,7 +4,7 @@ parameters:
   env:
     value: gui
   agent:
-    values: [cnn_off_policy_bs16, vlm_off_policy_bs16, vlm_off_policy_bs1, vlm_streaming]
+    values: [cnn_off_policy_bs8, vlm_off_policy_bs8, vlm_off_policy_bs1, vlm_streaming]
   seed:
     values: [0, 1, 2]
 command:

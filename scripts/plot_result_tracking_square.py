@@ -29,8 +29,8 @@ _TAB10 = plt.cm.tab10.colors
 # (wandb agent key, display label, color).
 # Same order and color mapping as plot_result.py's METHODS.
 METHODS = [
-    ("cnn_off_policy_bs16", "Off-policy bs16 (No VLM)", _TAB10[0]),
-    ("vlm_off_policy_bs16", "Off-policy bs16 (VLM)", _TAB10[2]),
+    ("cnn_off_policy_bs8", "Off-policy bs8 (No VLM)", _TAB10[0]),
+    ("vlm_off_policy_bs8", "Off-policy bs8 (VLM)", _TAB10[2]),
     ("vlm_streaming", "Streaming (VLM)", _TAB10[3]),
     ("vlm_off_policy_bs1", "Off-policy bs1 (VLM)", _TAB10[1]),
 ]
