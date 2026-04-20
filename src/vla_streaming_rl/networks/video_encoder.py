@@ -91,6 +91,7 @@ def _temporal_causal_attention(
 class VideoEncoder(nn.Module):
     """MEM-style video encoder that reuses Qwen3.5's ViT weights.
 
+    c.f. https://www.pi.website/research/memory
     - Runs patch_embed + pos_embed on all frames
     - Loops through ViT blocks; every 4th layer adds causal temporal attention
     - After all blocks, drops past frames and keeps only last-frame patches
