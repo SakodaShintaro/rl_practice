@@ -25,7 +25,6 @@ class ActorCriticWithActionValue(nn.Module):
         seq_len: int,
         dacer_loss_weight: float,
         critic_loss_weight: float,
-        prediction_type: str,
         predictor_step_num: int,
         image_processor_type: str,
         encoder: str,
@@ -53,7 +52,6 @@ class ActorCriticWithActionValue(nn.Module):
         self.seq_len = seq_len
         self.dacer_loss_weight = dacer_loss_weight
         self.critic_loss_weight = critic_loss_weight
-        self.prediction_type = prediction_type
 
         self.action_dim = action_space_shape[0]
         self.predictor_step_num = predictor_step_num
@@ -100,7 +98,6 @@ class ActorCriticWithActionValue(nn.Module):
                 sparsity=sparsity,
                 horizon=horizon,
                 denoising_steps=denoising_steps,
-                prediction_type=prediction_type,
             )
         elif self.policy_type == "beta":
             self.policy_head = BetaPolicy(
@@ -119,7 +116,6 @@ class ActorCriticWithActionValue(nn.Module):
                 cfgrl_beta=1.5,
                 horizon=horizon,
                 denoising_steps=denoising_steps,
-                prediction_type=prediction_type,
             )
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
@@ -447,7 +443,6 @@ class ActorCriticWithActionValue(nn.Module):
             self.num_bins,
             self.dacer_loss_weight,
             predict_fn,
-            self.prediction_type,
         )
 
         activations_dict = {
@@ -539,11 +534,7 @@ class ActorCriticWithActionValue(nn.Module):
         actor_output_dict = self.policy_head.forward(a_t, t.squeeze(1), curr_state, condition)
         pred = actor_output_dict["output"]
 
-        # Target depends on prediction_type
-        if self.prediction_type == "data":
-            target = action_flat
-        else:
-            target = action_flat - noise
+        target = action_flat
 
         actor_loss = F.mse_loss(pred, target)
 

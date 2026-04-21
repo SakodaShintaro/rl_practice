@@ -8,16 +8,12 @@ def euler_denoise(
     denoising_time: float,
     denoising_steps: int,
     predict_fn,
-    prediction_type: str,
 ) -> torch.Tensor:
     """Euler denoising via flow matching (forward: 0 -> denoising_time).
 
     Args:
-        predict_fn: callable(x_t, t) -> prediction.
-            If prediction_type="velocity", returns velocity v directly.
-            If prediction_type="data", returns clean data x_1.
-        prediction_type: "velocity" or "data" (x-prediction).
-            For "data", velocity is derived as v = (x_1_pred - x_t) / (1 - t).
+        predict_fn: callable(x_t, t) -> clean data x_1 (x-prediction).
+            Velocity is derived as v = (x_1_pred - x_t) / (1 - t).
 
     Returns:
         tanh(x_T), same shape as noise
@@ -28,11 +24,8 @@ def euler_denoise(
     for _ in range(denoising_steps):
         t = torch.full((noise.shape[0],), time_val, device=noise.device)
         pred = predict_fn(x_t, t)
-        if prediction_type == "data":
-            denom = max(1e-4, 1.0 - time_val)
-            v = (pred - x_t) / denom
-        else:
-            v = pred
+        denom = max(1e-4, 1.0 - time_val)
+        v = (pred - x_t) / denom
         x_t = x_t + dt * v
         time_val += dt
     return torch.tanh(x_t)
@@ -46,7 +39,6 @@ def compute_actor_loss_with_dacer(
     num_bins: int,
     dacer_loss_weight: float,
     predict_fn,
-    prediction_type: str,
 ) -> tuple[torch.Tensor, dict, dict]:
     """Advantage-based actor loss + DACER2 loss (https://arxiv.org/abs/2505.23426).
 
@@ -57,8 +49,7 @@ def compute_actor_loss_with_dacer(
         hl_gauss_loss: HL-Gauss loss (used when num_bins > 1)
         num_bins: number of distributional bins
         dacer_loss_weight: weight for DACER2 loss
-        predict_fn: callable(a_t: (B, H, A), t: (B,)) -> (B, H, A)
-        prediction_type: "velocity" or "data" (x-prediction)
+        predict_fn: callable(a_t: (B, H, A), t: (B,)) -> (B, H, A) returning clean x_1 (x-prediction)
 
     Returns:
         (total_loss, advantage_dict, info_dict)
@@ -111,11 +102,8 @@ def compute_actor_loss_with_dacer(
         v_target = (1 - t) / t * q_grad + 1 / t * actions
         v_target /= v_target.norm(dim=1, keepdim=True) + 1e-8
         v_target = w_t * v_target
-        if prediction_type == "data":
-            # Convert to x-space: x_1_target = a_t + (1 - t) * v_target
-            target = a_t + (1 - t) * v_target
-        else:
-            target = v_target
+        # Convert to x-space: x_1_target = a_t + (1 - t) * v_target
+        target = a_t + (1 - t) * v_target
 
     a_t_chunk = a_t.view(B, horizon, action_dim)
     pred_chunk = predict_fn(a_t_chunk, t.squeeze(1))

@@ -16,8 +16,6 @@ parameters:
     values: [0, 1]
   use_done:
     values: [0, 1]
-  prediction_type:
-    values: ["velocity", "data"]
   state_mode:
     values: ["expert", "projection"]
   target_layer_idx:

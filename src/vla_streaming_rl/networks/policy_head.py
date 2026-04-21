@@ -63,12 +63,10 @@ class DiffusionPolicy(nn.Module):
         sparsity: float,
         horizon: int,
         denoising_steps: int,
-        prediction_type: str,
     ) -> None:
         super().__init__()
         time_embedding_size = 256
         self.horizon = horizon
-        self.prediction_type = prediction_type
         total_action_dim = action_dim * horizon
         self.fc_in = nn.Linear(state_dim + total_action_dim + time_embedding_size, hidden_dim)
         self.fc_mid = nn.Sequential(*[SimbaBlock(hidden_dim) for _ in range(block_num)])
@@ -103,8 +101,7 @@ class DiffusionPolicy(nn.Module):
         result_dict["activation"] = x
 
         x = self.fc_out(x)
-        if self.prediction_type == "data":
-            x = torch.tanh(x)
+        x = torch.tanh(x)
         result_dict["output"] = x
         return result_dict
 
@@ -116,9 +113,7 @@ class DiffusionPolicy(nn.Module):
             x_flat = x_t.view(bs, -1)
             return self.forward(x_flat, t, x)["output"].view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_fn, self.prediction_type
-        )
+        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=x.device)
         return action, dummy_log_p
@@ -143,12 +138,10 @@ class CFGDiffusionPolicy(nn.Module):
         cfgrl_beta: float,
         horizon: int,
         denoising_steps: int,
-        prediction_type: str,
     ) -> None:
         super().__init__()
         self.cfgrl_beta = cfgrl_beta
         self.horizon = horizon
-        self.prediction_type = prediction_type
         time_embedding_size = 256
         condition_embedding_size = 64
         total_action_dim = action_dim * horizon
@@ -197,8 +190,7 @@ class CFGDiffusionPolicy(nn.Module):
         result_dict["activation"] = x
 
         x = self.fc_out(x)
-        if self.prediction_type == "data":
-            x = torch.tanh(x)
+        x = torch.tanh(x)
         result_dict["output"] = x
         return result_dict
 
@@ -224,9 +216,7 @@ class CFGDiffusionPolicy(nn.Module):
             out = (1 - self.cfgrl_beta) * out_unc + self.cfgrl_beta * out_pos
             return out.view(bs, self.horizon, self.action_dim)
 
-        action = euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_fn, self.prediction_type
-        )
+        action = euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_fn)
 
         dummy_log_p = torch.zeros((bs, 1), device=device)
         return action, dummy_log_p

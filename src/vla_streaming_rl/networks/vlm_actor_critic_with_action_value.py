@@ -42,7 +42,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         denoising_steps: int,
         denoising_time: float,
         dacer_loss_weight: float,
-        prediction_type: str,
         text_q_margin: float,
         text_action_mode: str,
         predictor_step_num: int,
@@ -76,7 +75,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.denoising_steps = denoising_steps
         self.denoising_time = denoising_time
         self.dacer_loss_weight = dacer_loss_weight
-        self.prediction_type = prediction_type
         self.text_q_margin = text_q_margin
         self.text_action_mode = text_action_mode
 
@@ -564,8 +562,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
         expert_out = self.action_expert(action_embs, vlm_kv_list, vlm_seq_len, adarms_cond)
         out = self.action_out_proj(expert_out.to(torch.float32))
-        if self.prediction_type == "data":
-            out = torch.tanh(out)
+        out = torch.tanh(out)
         return out
 
     def _generate_action(
@@ -579,9 +576,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         def predict_fn(x_t, t):
             return self._denoise(x_t, vlm_past_kv, t)
 
-        return euler_denoise(
-            noise, self.denoising_time, self.denoising_steps, predict_fn, self.prediction_type
-        )
+        return euler_denoise(noise, self.denoising_time, self.denoising_steps, predict_fn)
 
     def _generate_text_and_extend_kv(self, prompt: str, vlm_past_kv, max_new_tokens: int):
         """Generate text via manual forward loop (supports batched KV cache).
@@ -783,7 +778,6 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.num_bins,
             self.dacer_loss_weight,
             predict_fn,
-            self.prediction_type,
         )
 
         activations_dict = {"critic": advantage_dict["activation"]}
