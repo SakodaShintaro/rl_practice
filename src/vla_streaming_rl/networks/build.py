@@ -18,7 +18,6 @@ def build_network(
     observation_space_shape: tuple[int, ...],
     action_space_shape: tuple[int, ...],
     parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
-    task_prompt: str,
     device: torch.device,
     compile: bool,
 ) -> nn.Module:
@@ -80,7 +79,6 @@ def build_network(
             observation_space_shape=observation_space_shape,
             action_space_shape=action_space_shape,
             parse_action_text=parse_action_text,
-            task_prompt=task_prompt,
             gamma=args.gamma,
             num_bins=args.num_bins,
             seq_len=args.seq_len,
@@ -97,19 +95,14 @@ def build_network(
             image_processor_type=args.image_processor_type,
             use_lora=args.use_lora,
             vlm_model_id=args.vlm_model_id,
-            target_layer_idx=args.target_layer_idx,
             max_new_tokens=args.max_new_tokens,
             max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=args.pad_token_id,
             expert_hidden_size=args.expert_hidden_size,
-            state_expert_hidden_size=args.state_expert_hidden_size,
-            state_mode=args.state_mode,
-            num_state_queries=args.num_state_queries,
-            critic_hidden_dim=args.critic_hidden_dim,
+            actor_block_num=args.actor_block_num,
             critic_block_num=args.critic_block_num,
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
-            sparsity=args.sparsity,
         )
     else:
         raise ValueError(f"Unknown network class: {args.network_class}")

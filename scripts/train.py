@@ -147,7 +147,6 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     best_score = -float("inf")
     best_recent_average_score = -float("inf")
     obs, reset_info = env.reset(seed=seed)
-    task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
     step_limit = args.step_limit
 
     compile_network = args.network_class != "vlm_actor_critic_with_action_value"
@@ -156,7 +155,6 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
         observation_space_shape=env.observation_space.shape,
         action_space_shape=env.action_space.shape,
         parse_action_text=parse_action_text,
-        task_prompt=task_prompt,
         device=torch.device("cuda"),
         compile=compile_network,
     )
