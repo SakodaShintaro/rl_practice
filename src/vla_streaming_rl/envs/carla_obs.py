@@ -86,6 +86,7 @@ class RouteTracker:
         self.cfg = cfg
         self.current_index = 0
         self._min_distance = 0.0
+        self._segment_t = 0.0
 
     @classmethod
     def from_raw_waypoints(
@@ -113,9 +114,27 @@ class RouteTracker:
         self.current_index = closest_idx
         self._min_distance = min_dist
 
+        # Continuous sub-segment progress: project the vehicle onto the line
+        # from waypoints[current_index] to waypoints[current_index+1] and
+        # keep the clamped parametric position. Without this, route_completion
+        # only ticks when crossing a discrete waypoint — on coarse spacings
+        # (e.g. 10 m on long Town12 routes) the reward is 0 for many steps of
+        # actual forward motion.
+        if closest_idx + 1 < len(self.waypoints):
+            a = self.waypoints[closest_idx]
+            b = self.waypoints[closest_idx + 1]
+            ex, ey = b.x - a.x, b.y - a.y
+            vx, vy = vehicle_loc.x - a.x, vehicle_loc.y - a.y
+            seg_len_sq = ex * ex + ey * ey
+            t = (vx * ex + vy * ey) / max(seg_len_sq, 1e-9)
+            self._segment_t = max(0.0, min(1.0, t))
+        else:
+            self._segment_t = 0.0
+
     @property
     def route_completion(self) -> float:
-        return min(1.0, self.current_index / max(1, len(self.waypoints) - 1))
+        n = max(1, len(self.waypoints) - 1)
+        return min(1.0, (self.current_index + self._segment_t) / n)
 
     @property
     def min_distance_to_route(self) -> float:
