@@ -7,7 +7,7 @@ import carla
 import gymnasium as gym
 import numpy as np
 
-from vla_streaming_rl.envs.bench2drive_route import RouteInfo, parse_bench2drive_routes
+from vla_streaming_rl.envs.bench2drive_scenario_runtime import Bench2DriveRuntime
 from vla_streaming_rl.envs.carla_obs import (
     CARLAObsConfig,
     RouteTracker,
@@ -142,21 +142,16 @@ class CARLALeaderboardEnv(gym.Env):
         super().__init__()
         self.prompt = "Drive a car along a route in CARLA. Follow the planned route, obey traffic rules, and avoid collisions."
 
-        # Pre-load Bench2Drive routes if requested. All routes in the file
-        # must share a town because switching towns mid-training would force
-        # a ~30 s world reload on every reset.
-        self._xml_routes: list[RouteInfo] | None = None
+        # If a Bench2Drive route XML is given, the env runs the eval-equivalent
+        # RouteScenario (ego spawn, BackgroundActivity NPC traffic, scripted
+        # scenarios, parked vehicles) via Bench2DriveRuntime. All routes in
+        # the file must share a town — switching towns mid-training would
+        # force a ~30 s world reload on every reset.
+        self._route_xml = route_xml
+        self._route_id = route_id
+        self._tm_port = 8000
+        self.runtime: Bench2DriveRuntime | None = None
         town_name = "Town01"
-        if route_xml is not None:
-            routes = parse_bench2drive_routes(route_xml, route_id=route_id)
-            towns = {r.town for r in routes}
-            if len(towns) > 1:
-                raise ValueError(
-                    f"route XML mixes towns {sorted(towns)} — "
-                    "training env requires a single town per XML"
-                )
-            town_name = routes[0].town
-            self._xml_routes = routes
 
         # Observation / action contracts come from carla_obs (shared with the
         # Bench2Drive eval agent so training and eval stay bit-aligned).
@@ -170,6 +165,18 @@ class CARLALeaderboardEnv(gym.Env):
 
         self.client = carla.Client("localhost", 2000)
         self.client.set_timeout(120.0)
+
+        # Build the runtime first (parses the XML eagerly) so we can read the
+        # required town off it before deciding which world to load.
+        if route_xml is not None:
+            self.runtime = Bench2DriveRuntime(
+                client=self.client,
+                traffic_manager_port=self._tm_port,
+                route_xml=route_xml,
+                route_id=route_id,
+            )
+            town_name = self.runtime.town
+
         # reset_settings=False keeps the sync settings we apply right after.
         self.world = self.client.load_world(town_name, reset_settings=False)
 
@@ -180,8 +187,9 @@ class CARLALeaderboardEnv(gym.Env):
 
         # Traffic Manager also needs to be in sync mode; otherwise world.tick
         # can deadlock on maps with background traffic.
-        self.traffic_manager = self.client.get_trafficmanager()
+        self.traffic_manager = self.client.get_trafficmanager(self._tm_port)
         self.traffic_manager.set_synchronous_mode(True)
+        self.traffic_manager.set_hybrid_physics_mode(True)
 
         # Map and spawn points
         self.map = self.world.get_map()
@@ -231,7 +239,8 @@ class CARLALeaderboardEnv(gym.Env):
     ) -> tuple[np.ndarray, dict[str, any]]:
         super().reset(seed=seed)
 
-        # Delete existing vehicle and sensors
+        # Destroy our sensors before clearing the scenario — once their parent
+        # actor is gone, sensor.destroy() can throw on already-dead handles.
         if self.camera_sensor is not None:
             self.camera_sensor.destroy()
         if self.third_person_camera is not None:
@@ -240,38 +249,40 @@ class CARLALeaderboardEnv(gym.Env):
             self.collision_sensor.destroy()
         if self.lane_invasion_sensor is not None:
             self.lane_invasion_sensor.destroy()
-        if self.vehicle is not None:
-            self.vehicle.destroy()
 
-        # Sample a random route and build the tracker (interpolation is done inside).
-        raw_locations, start_pose = self._sample_route()
-        self.route_tracker = RouteTracker.from_raw_waypoints(raw_locations, self.obs_cfg)
+        if self.runtime is not None:
+            # The runtime owns the ego (RouteScenario spawns it) plus all NPCs
+            # and parked vehicles. Tear them down and let it spawn a fresh set.
+            self.runtime.cleanup()
+            self.vehicle, route_locations = self.runtime.reset(self.world)
+        else:
+            if self.vehicle is not None:
+                self.vehicle.destroy()
+            route_locations, start_pose = self._sample_random_route()
+            blueprint_library = self.world.get_blueprint_library()
+            # role_name='hero' is required on large maps (Town13 etc.); without
+            # it, attaching a camera to the vehicle crashes UE4 with SIGSEGV.
+            vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
+            vehicle_bp.set_attribute("role_name", "hero")
+            spawn_transform = carla.Transform(
+                carla.Location(
+                    x=start_pose.location.x,
+                    y=start_pose.location.y,
+                    z=start_pose.location.z + 0.5,
+                ),
+                start_pose.rotation,
+            )
+            while True:
+                try:
+                    self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
+                    break
+                except RuntimeError:
+                    time.sleep(0.1)
+                    continue
 
-        # Spawn vehicle (at route start point). role_name='hero' is required
-        # on large maps (Town13 etc.) — without it, attaching a camera sensor
-        # to the vehicle crashes UE4 with SIGSEGV (confirmed on Town13;
-        # Bench2Drive's RouteScenario always spawns ego with this flag).
+        self.route_tracker = RouteTracker.from_raw_waypoints(route_locations, self.obs_cfg)
+
         blueprint_library = self.world.get_blueprint_library()
-        vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
-        vehicle_bp.set_attribute("role_name", "hero")
-
-        # Build a fresh Transform — mutating start_pose.location.z directly
-        # would aliased-edit the source object.
-        spawn_transform = carla.Transform(
-            carla.Location(
-                x=start_pose.location.x,
-                y=start_pose.location.y,
-                z=start_pose.location.z + 0.5,
-            ),
-            start_pose.rotation,
-        )
-        while True:
-            try:
-                self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
-                break
-            except RuntimeError:
-                time.sleep(0.1)
-                continue
 
         # Camera sensor
         camera_bp = blueprint_library.find("sensor.camera.rgb")
@@ -343,6 +354,13 @@ class CARLALeaderboardEnv(gym.Env):
         self.vehicle.apply_control(control)
 
         self.world.tick()
+
+        # Tick the Bench2Drive scenario tree after the world advances so that
+        # NPC commands issued this tick land on the next world.tick (matches
+        # ScenarioManager._tick_scenario ordering).
+        if self.runtime is not None:
+            self.runtime.tick(self.world, self.episode_step)
+
         self._update_spectator()
 
         # Update route tracking
@@ -426,38 +444,25 @@ class CARLALeaderboardEnv(gym.Env):
             self.collision_sensor.destroy()
         if self.lane_invasion_sensor is not None:
             self.lane_invasion_sensor.destroy()
-        if self.vehicle is not None:
+
+        if self.runtime is not None:
+            # Tears down the ego, NPCs, scripted scenario actors, parked vehicles.
+            self.runtime.cleanup()
+        elif self.vehicle is not None:
             self.vehicle.destroy()
 
         if self.world is not None:
             settings = self.world.get_settings()
             settings.synchronous_mode = False
             self.world.apply_settings(settings)
+            self.traffic_manager.set_synchronous_mode(False)
 
-    def _sample_route(self) -> tuple[list[carla.Location], carla.Transform]:
-        """Sample a route and return ``(raw_waypoints, start_pose)``.
+    def _sample_random_route(self) -> tuple[list[carla.Location], carla.Transform]:
+        """Sample a random ~200 m route in the current map.
 
-        With a Bench2Drive XML loaded, a random route from the file is used
-        (no interpolation here — ``RouteTracker.from_raw_waypoints`` handles
-        that). Otherwise a random ~200 m route at 2 m spacing is sampled
-        from the current map.
+        Used only when no Bench2Drive XML is configured; the XML path goes
+        through ``Bench2DriveRuntime`` which spawns the ego itself.
         """
-        if self._xml_routes is not None:
-            route = self._xml_routes[np.random.randint(len(self._xml_routes))]
-            if route.weather is not None:
-                self.world.set_weather(route.weather)
-            # Project the first XML waypoint onto the road network — this
-            # mirrors Bench2Drive's RouteScenario, where the spawn pose is
-            # the first transform of GlobalRoutePlanner.trace_route(...) and
-            # therefore carries the road's yaw and elevation, not the raw
-            # XML values.
-            start_wp = self.map.get_waypoint(
-                route.waypoints[0],
-                project_to_road=True,
-                lane_type=carla.LaneType.Driving,
-            )
-            return list(route.waypoints), start_wp.transform
-
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
             project_to_road=True,
