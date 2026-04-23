@@ -255,10 +255,19 @@ class CARLALeaderboardEnv(gym.Env):
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
         vehicle_bp.set_attribute("role_name", "hero")
 
+        # Build a fresh Transform — assigning ``spawn_transform = start_pose``
+        # would alias the cached ``route.start_pose`` and the +0.5 offset
+        # would accumulate across resets.
+        spawn_transform = carla.Transform(
+            carla.Location(
+                x=start_pose.location.x,
+                y=start_pose.location.y,
+                z=start_pose.location.z + 0.5,
+            ),
+            start_pose.rotation,
+        )
         while True:
             try:
-                spawn_transform = start_pose
-                spawn_transform.location.z += 0.5
                 self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_transform)
                 break
             except RuntimeError:
