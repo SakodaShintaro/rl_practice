@@ -436,14 +436,9 @@ class CARLALeaderboardEnv(gym.Env):
         """
         if self._xml_routes is not None:
             route = self._xml_routes[np.random.randint(len(self._xml_routes))]
-            # Project the first waypoint onto the nearest driving lane to get
-            # a transform (XML waypoints carry no yaw).
-            start_wp = self.map.get_waypoint(
-                route.waypoints[0],
-                project_to_road=True,
-                lane_type=carla.LaneType.Driving,
-            )
-            return list(route.waypoints), start_wp.transform
+            if route.weather is not None:
+                self.world.set_weather(route.weather)
+            return list(route.waypoints), route.start_pose
 
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
