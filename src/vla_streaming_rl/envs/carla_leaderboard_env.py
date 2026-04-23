@@ -164,7 +164,9 @@ class CARLALeaderboardEnv(gym.Env):
         self.action_space = make_action_space()
 
         self.client = carla.Client("localhost", 2000)
-        self.client.set_timeout(120.0)
+        # Eval uses 300 s; large-map (Town12/13/15) actor spawns can blow
+        # past 120 s while tiles stream in.
+        self.client.set_timeout(300.0)
 
         # Build the runtime first (parses the XML eagerly) so we can read the
         # required town off it before deciding which world to load.
@@ -183,7 +185,13 @@ class CARLALeaderboardEnv(gym.Env):
         settings = self.world.get_settings()
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = DT
+        # Large Map streaming + actor activation distances are reset by
+        # load_world; mirror eval (leaderboard_evaluator._load_and_wait_for_world).
+        # No-op for small towns.
+        settings.tile_stream_distance = 650
+        settings.actor_active_distance = 650
         self.world.apply_settings(settings)
+        self.world.reset_all_traffic_lights()
 
         # Traffic Manager also needs to be in sync mode; otherwise world.tick
         # can deadlock on maps with background traffic.
@@ -359,7 +367,7 @@ class CARLALeaderboardEnv(gym.Env):
         # NPC commands issued this tick land on the next world.tick (matches
         # ScenarioManager._tick_scenario ordering).
         if self.runtime is not None:
-            self.runtime.tick(self.world, self.episode_step)
+            self.runtime.tick(self.world)
 
         self._update_spectator()
 

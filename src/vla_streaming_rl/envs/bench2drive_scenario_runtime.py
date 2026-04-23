@@ -8,6 +8,7 @@ manager — this runtime exposes a small ``reset``/``tick``/``cleanup``
 surface that the env can drive directly so NPC behavior matches eval.
 """
 import os
+import threading
 
 import carla
 import numpy as np
@@ -20,10 +21,11 @@ from srunner.scenariomanager.timer import GameTime
 class Bench2DriveRuntime:
     """Owns the per-episode ``RouteScenario`` lifecycle for one env."""
 
-    # Re-trigger build_scenarios + spawn_parked_vehicles every N ticks. Eval
-    # runs that loop every 1 s; matching it so newly-reachable scenarios
-    # actually fire while the ego drives.
-    BUILD_INTERVAL_TICKS = 20
+    # build_scenarios runs in a background thread (mirrors eval's
+    # build_scenarios_loop) so that a single scenario class init blocking on
+    # the CARLA RPC client_timeout (300 s on Town12 in practice) does not
+    # freeze env.step.
+    BUILD_LOOP_INTERVAL_S = 1.0
 
     def __init__(
         self,
@@ -57,6 +59,8 @@ class Bench2DriveRuntime:
         self.town: str = next(iter(towns))
 
         self.route_scenario: RouteScenario | None = None
+        self._build_thread: threading.Thread | None = None
+        self._build_stop = threading.Event()
 
     def reset(
         self, world: carla.World
@@ -64,10 +68,15 @@ class Bench2DriveRuntime:
         """Build a fresh ``RouteScenario`` for ``world`` and return ``(ego, route_locations)``."""
         config = self.configs[np.random.randint(len(self.configs))]
 
-        # CarlaDataProvider is a singleton reset by cleanup(); re-seed every episode.
-        CarlaDataProvider.set_client(self.client)
-        CarlaDataProvider.set_world(world)
-        CarlaDataProvider.set_traffic_manager_port(self.traffic_manager_port)
+        # set_world rebuilds the GlobalRoutePlanner from OpenDRIVE which
+        # takes ~30 s on Town12. cleanup() keeps _world/_map/_grp around so
+        # repeat resets on the same world skip this. Identity check (not
+        # "is None") so a different world (e.g. another env in the same
+        # process, or a town swap) still re-initializes correctly.
+        if CarlaDataProvider.get_world() is not world:
+            CarlaDataProvider.set_client(self.client)
+            CarlaDataProvider.set_world(world)
+            CarlaDataProvider.set_traffic_manager_port(self.traffic_manager_port)
         GameTime.restart()
 
         # RouteScenario __init__ spawns ego, sets weather, builds initial
@@ -78,10 +87,36 @@ class Bench2DriveRuntime:
         ego = self.route_scenario.ego_vehicles[0]
         self.route_scenario.spawn_parked_vehicles(ego)
 
+        # Background thread that periodically tries to start any scenario
+        # the ego is now close to. Mirrors ScenarioManager's
+        # build_scenarios_loop. A scenario class init that hits the
+        # 300 s CARLA RPC timeout (e.g. AccidentTwoWays on Town12) would
+        # otherwise stall env.step for the full timeout.
+        self._build_stop.clear()
+        self._build_thread = threading.Thread(
+            target=self._build_loop, args=(ego,), daemon=True
+        )
+        self._build_thread.start()
+
         route_locations = [t.location for (t, _) in self.route_scenario.route]
         return ego, route_locations
 
-    def tick(self, world: carla.World, episode_step: int) -> None:
+    def _build_loop(self, ego: carla.Vehicle) -> None:
+        """Background loop: try to start nearby scenarios + spawn parked cars."""
+        while not self._build_stop.is_set():
+            scenario = self.route_scenario  # snapshot in case cleanup nulls it
+            if scenario is None:
+                return
+            try:
+                scenario.build_scenarios(ego, debug=False)
+                scenario.spawn_parked_vehicles(ego)
+            except Exception:
+                # Per-scenario setup errors are already logged inside
+                # build_scenarios; swallow so the loop keeps running.
+                pass
+            self._build_stop.wait(self.BUILD_LOOP_INTERVAL_S)
+
+    def tick(self, world: carla.World) -> None:
         """Advance scenario state one tick. Call after ``world.tick()``."""
         if self.route_scenario is None:
             return
@@ -92,16 +127,61 @@ class Bench2DriveRuntime:
         GameTime.on_carla_tick(timestamp)
         CarlaDataProvider.on_carla_tick()
 
-        if episode_step % self.BUILD_INTERVAL_TICKS == 0:
-            ego = self.route_scenario.ego_vehicles[0]
-            self.route_scenario.build_scenarios(ego, debug=False)
-            self.route_scenario.spawn_parked_vehicles(ego)
-
+        # build_scenarios + spawn_parked_vehicles are done off-thread; here
+        # we only advance the behavior tree.
         self.route_scenario.scenario_tree.tick_once()
 
     def cleanup(self) -> None:
-        """Destroy all scenario-owned actors and reset CarlaDataProvider."""
+        """Destroy scenario-owned actors and clear per-episode CDP state.
+
+        Deliberately *not* using ``CarlaDataProvider.cleanup()`` because that
+        nulls ``_grp``/``_map``/``_world``, forcing a multi-second
+        ``GlobalRoutePlanner`` rebuild on the next ``set_world`` (very
+        expensive on Town12/13). Traffic lights and the road graph are tied
+        to the persistent map, so keeping them across episodes is safe.
+        """
+        # Stop the build loop. We only wait briefly: if it is mid-RPC
+        # (e.g. a scenario __init__ blocking on actor spawn that will hit
+        # the 300 s client_timeout) Python cannot interrupt it, so waiting
+        # longer just delays the next episode for no benefit. The old thread
+        # will keep running until its CARLA RPC returns, then exit on the
+        # stop_event check; while it lives, calls into destroyed actors emit
+        # harmless `get_location: ... not found!` warnings (build_scenarios
+        # sees None and skips that iteration).
+        if self._build_thread is not None:
+            self._build_stop.set()
+            self._build_thread.join(timeout=1.0)
+            self._build_thread = None
+
         if self.route_scenario is not None:
+            # Destroys other_actors (NPCs, scripted scenario actors) and the
+            # parked vehicles via __del__.
             self.route_scenario.remove_all_actors()
             self.route_scenario = None
-        CarlaDataProvider.cleanup()
+
+        cdp = CarlaDataProvider
+        # Destroy every actor CDP knows about (ego, scenario actors). Mirrors
+        # what cleanup() does, minus the global-state nuke.
+        destroy = carla.command.DestroyActor
+        batch = [
+            destroy(actor)
+            for actor in cdp._carla_actor_pool.values()
+            if actor is not None and actor.is_alive
+        ]
+        if cdp._client and batch:
+            try:
+                cdp._client.apply_batch_sync(batch)
+            except RuntimeError as e:
+                if "time-out" not in str(e):
+                    raise
+
+        # Per-episode bookkeeping reset (kept: _world/_map/_grp/_blueprint_library
+        # /_spawn_points/_client/_traffic_manager_port/_traffic_light_map).
+        cdp._carla_actor_pool = {}
+        cdp._actor_velocity_map.clear()
+        cdp._actor_location_map.clear()
+        cdp._actor_transform_map.clear()
+        cdp._spawn_index = 0
+        cdp._all_actors = None
+        cdp._ego_vehicle_route = None
+        cdp._runtime_init_flag = False
