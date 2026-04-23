@@ -69,18 +69,21 @@ def _parse_weather(route_node: ET.Element) -> carla.WeatherParameters | None:
 
 
 def parse_bench2drive_routes(
-    xml_path: str | Path, route_id: str | None
+    xml_path: str | Path, route_id: str | int | None
 ) -> list[RouteInfo]:
     """Return routes from a Bench2Drive-format XML.
 
     Pass ``route_id=None`` to return every route, or a specific id to
-    filter. Raises ``ValueError`` if no matching route is found.
+    filter. ``int`` is accepted because Hydra parses ``route_id=24841``
+    on the command line as int. Raises ``ValueError`` if no matching
+    route is found.
     """
+    target_id = None if route_id is None else str(route_id)
     tree = ET.parse(str(xml_path))
     routes: list[RouteInfo] = []
     for route in tree.getroot().findall("route"):
         rid = route.get("id")
-        if route_id is not None and rid != route_id:
+        if target_id is not None and rid != target_id:
             continue
         town = route.get("town")
         waypoints_node = route.find("waypoints")
