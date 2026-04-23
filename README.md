@@ -39,6 +39,16 @@ uv sync
 uv run huggingface-cli login
 ```
 
+### (Optional) Setup CARLA
+
+```bash
+# Download binary from the following URL and extract to $HOME
+https://github.com/carla-simulator/carla/releases
+
+# Install dependencies
+pip install ~/CARLA_0.9.16/PythonAPI/carla/dist/carla-0.9.16-cp310-cp310-manylinux_2_31_x86_64.whl
+```
+
 ## Usage
 
 ### Training
