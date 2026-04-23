@@ -54,7 +54,12 @@ def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
     return action_array, len(matches) > 0
 
 
-def make_env(env_id: str) -> gym.Env:
+def make_env(
+    env_id: str,
+    *,
+    carla_route_xml: str | None,
+    carla_route_id: str | None,
+) -> gym.Env:
     if env_id == "BabyAI-GoToLocal-v0":
         env = gym.make(env_id, render_mode="rgb_array", highlight=False)
         env = minigrid.wrappers.RGBImgObsWrapper(env, tile_size=32)
@@ -100,7 +105,10 @@ def make_env(env_id: str) -> gym.Env:
     elif env_id == "CARLA-Leaderboard-v0":
         from vla_streaming_rl.envs.carla_leaderboard_env import CARLALeaderboardEnv
 
-        env = CARLALeaderboardEnv()
+        env = CARLALeaderboardEnv(
+            route_xml=carla_route_xml,
+            route_id=carla_route_id,
+        )
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.eval_range = 100

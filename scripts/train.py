@@ -131,7 +131,11 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     log_episode_writer = None
 
     # env setup
-    env = make_env(args.env_id)
+    env = make_env(
+        args.env_id,
+        carla_route_xml=getattr(args, "carla_route_xml", None),
+        carla_route_id=getattr(args, "carla_route_id", None),
+    )
     env.unwrapped.max_step_count = args.max_step_count
     env.action_space.seed(seed)
 

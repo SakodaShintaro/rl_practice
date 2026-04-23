@@ -1,3 +1,13 @@
 # @package _global_
 env_id: CARLA-Leaderboard-v0
 step_limit: 400_000
+
+# Route source for the training env.
+# - carla_route_xml: if set, routes are loaded from this Bench2Drive-format
+#   XML (town is read from the XML). All routes in the file must share a
+#   single town. Leaving null falls back to sampling a random 200 m route
+#   in Town01 each episode.
+# - carla_route_id: optional, restrict to one specific route id from the
+#   XML. null means "pick a random route from the XML each episode".
+carla_route_xml: null
+carla_route_id: null

@@ -107,7 +107,7 @@ if __name__ == "__main__":
     video_dir.mkdir(parents=True, exist_ok=True)
 
     # env setup
-    env = make_env(args.env_id)
+    env = make_env(args.env_id, carla_route_xml=None, carla_route_id=None)
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 

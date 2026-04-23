@@ -7,6 +7,7 @@ import carla
 import gymnasium as gym
 import numpy as np
 
+from vla_streaming_rl.envs.bench2drive_route import RouteInfo, parse_bench2drive_routes
 from vla_streaming_rl.envs.carla_obs import (
     CARLAObsConfig,
     RouteTracker,
@@ -122,12 +123,43 @@ class CARLALeaderboardEnv(gym.Env):
     - Visualization of map + route + vehicle position
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        route_xml: str | None,
+        route_id: str | None,
+    ):
+        """Create the env.
+
+        Args:
+            route_xml: Path to a Bench2Drive route XML, or ``None`` to
+                sample a random 200 m route in Town01 each episode. If a
+                path is given, the town is read from the XML (all routes
+                must share one town).
+            route_id: Specific route id to pin to (only meaningful with
+                ``route_xml`` set). ``None`` means "pick a random route
+                from the XML each episode".
+        """
         super().__init__()
         self.prompt = "Drive a car along a route in CARLA. Follow the planned route, obey traffic rules, and avoid collisions."
 
-        # Observation / action contracts are defined in carla_obs (shared with the
-        # Bench2Drive evaluation agent so training-time and eval-time stay bit-aligned).
+        # Pre-load Bench2Drive routes if requested. All routes in the file
+        # must share a town because switching towns mid-training would force
+        # a ~30 s world reload on every reset.
+        self._xml_routes: list[RouteInfo] | None = None
+        town_name = "Town01"
+        if route_xml is not None:
+            routes = parse_bench2drive_routes(route_xml, route_id=route_id)
+            towns = {r.town for r in routes}
+            if len(towns) > 1:
+                raise ValueError(
+                    f"route XML mixes towns {sorted(towns)} — "
+                    "training env requires a single town per XML"
+                )
+            town_name = routes[0].town
+            self._xml_routes = routes
+
+        # Observation / action contracts come from carla_obs (shared with the
+        # Bench2Drive eval agent so training and eval stay bit-aligned).
         self.obs_cfg = CARLAObsConfig()
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
@@ -136,16 +168,20 @@ class CARLALeaderboardEnv(gym.Env):
         self.observation_space = make_obs_space(self.obs_cfg)
         self.action_space = make_action_space()
 
-        # CARLA connection
         self.client = carla.Client("localhost", 2000)
-        self.client.set_timeout(10.0)
-        self.world = self.client.load_world("Town01")
+        self.client.set_timeout(120.0)
+        # reset_settings=False keeps the sync settings we apply right after.
+        self.world = self.client.load_world(town_name, reset_settings=False)
 
-        # Synchronous mode settings
         settings = self.world.get_settings()
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = DT
         self.world.apply_settings(settings)
+
+        # Traffic Manager also needs to be in sync mode; otherwise world.tick
+        # can deadlock on maps with background traffic.
+        self.traffic_manager = self.client.get_trafficmanager()
+        self.traffic_manager.set_synchronous_mode(True)
 
         # Map and spawn points
         self.map = self.world.get_map()
@@ -211,9 +247,13 @@ class CARLALeaderboardEnv(gym.Env):
         raw_locations, start_pose = self._sample_route()
         self.route_tracker = RouteTracker.from_raw_waypoints(raw_locations, self.obs_cfg)
 
-        # Spawn vehicle (at route start point)
+        # Spawn vehicle (at route start point). role_name='hero' is required
+        # on large maps (Town13 etc.) — without it, attaching a camera sensor
+        # to the vehicle crashes UE4 with SIGSEGV (confirmed on Town13;
+        # Bench2Drive's RouteScenario always spawns ego with this flag).
         blueprint_library = self.world.get_blueprint_library()
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
+        vehicle_bp.set_attribute("role_name", "hero")
 
         while True:
             try:
@@ -387,11 +427,24 @@ class CARLALeaderboardEnv(gym.Env):
             self.world.apply_settings(settings)
 
     def _sample_route(self) -> tuple[list[carla.Location], carla.Transform]:
-        """Sample a random ~200 m route at 2 m spacing.
+        """Sample a route and return ``(raw_waypoints, start_pose)``.
 
-        Returns the raw waypoint locations and the start pose. Interpolation
-        to a fixed density happens inside ``RouteTracker.from_raw_waypoints``.
+        With a Bench2Drive XML loaded, a random route from the file is used
+        (no interpolation here — ``RouteTracker.from_raw_waypoints`` handles
+        that). Otherwise a random ~200 m route at 2 m spacing is sampled
+        from the current map.
         """
+        if self._xml_routes is not None:
+            route = self._xml_routes[np.random.randint(len(self._xml_routes))]
+            # Project the first waypoint onto the nearest driving lane to get
+            # a transform (XML waypoints carry no yaw).
+            start_wp = self.map.get_waypoint(
+                route.waypoints[0],
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
+            )
+            return list(route.waypoints), start_wp.transform
+
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
             project_to_road=True,
