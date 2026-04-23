@@ -259,7 +259,6 @@ def main():
         model_id,
         dtype=torch.bfloat16,
         _attn_implementation="flash_attention_2",
-        cache_dir="./cache",
         device_map=device,
     )
 

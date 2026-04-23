@@ -10,9 +10,7 @@ class ImageProcessor(nn.Module):
         self.observation_space_shape = observation_space_shape
         self.processor_type = processor_type
         if processor_type == "ae":
-            self.processor = AutoencoderTiny.from_pretrained(
-                "madebyollin/taesd", cache_dir="./cache"
-            )
+            self.processor = AutoencoderTiny.from_pretrained("madebyollin/taesd")
         elif processor_type == "simple_cnn":
             self.processor = nn.Sequential(
                 nn.Conv2d(observation_space_shape[0], 32, 8, 4),

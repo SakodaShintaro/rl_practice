@@ -180,10 +180,9 @@ def main():
         args.model_id,
         dtype=torch.bfloat16,
         attn_implementation="sdpa" if is_qwen35 else "flash_attention_2",
-        cache_dir="./cache",
         device_map=device,
     )
-    processor = AutoProcessor.from_pretrained(args.model_id, cache_dir="./cache")
+    processor = AutoProcessor.from_pretrained(args.model_id)
     visual = vlm_model.model.visual
 
     # Try importing VideoEncoder

@@ -40,7 +40,6 @@ def load_model(
         quantization_config=bnb_config,
         dtype=torch.bfloat16,
         attn_implementation=attn_impl,
-        cache_dir="./cache",
         device_map=device,
     )
     if use_lora:
@@ -69,7 +68,7 @@ def load_model(
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
 
-    processor = AutoProcessor.from_pretrained(model_id, cache_dir="./cache", device_map=device)
+    processor = AutoProcessor.from_pretrained(model_id, device_map=device)
 
     return model, processor
 
