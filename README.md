@@ -6,6 +6,21 @@ Reinforcement learning experiments with visual observations.
 
 NVIDIA GPU with driver is required for training.
 
+### Clone with submodules
+
+The CARLA training env depends on the [Bench2Drive](https://github.com/SakodaShintaro/Bench2Drive) submodule under `external/`.
+
+```bash
+# Fresh clone — pull submodules in one shot.
+git clone --recursive <repo-url>
+
+# Already cloned without --recursive — fetch submodules now.
+git submodule update --init --recursive
+
+# After pulling new commits that bumped the submodule pointer.
+git submodule update --recursive
+```
+
 ### Install uv
 
 ```bash
