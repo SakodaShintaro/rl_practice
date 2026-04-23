@@ -35,17 +35,7 @@ class RouteInfo:
     id: str
     town: str
     waypoints: list[carla.Location]
-    start_pose: carla.Transform  # trigger_point of the first ``<scenario>``
     weather: carla.WeatherParameters | None
-
-
-def _parse_start_pose(route_node: ET.Element) -> carla.Transform:
-    """Return the ego start pose from the first scenario's ``trigger_point``."""
-    tp = route_node.find("scenarios").find("scenario").find("trigger_point")
-    return carla.Transform(
-        carla.Location(x=float(tp.get("x")), y=float(tp.get("y")), z=float(tp.get("z"))),
-        carla.Rotation(yaw=float(tp.get("yaw"))),
-    )
 
 
 def _parse_weather(route_node: ET.Element) -> carla.WeatherParameters | None:
@@ -101,7 +91,6 @@ def parse_bench2drive_routes(
                     id=rid,
                     town=town,
                     waypoints=waypoints,
-                    start_pose=_parse_start_pose(route),
                     weather=_parse_weather(route),
                 )
             )

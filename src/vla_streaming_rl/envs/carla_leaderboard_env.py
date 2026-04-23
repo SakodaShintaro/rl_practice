@@ -255,9 +255,8 @@ class CARLALeaderboardEnv(gym.Env):
         vehicle_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
         vehicle_bp.set_attribute("role_name", "hero")
 
-        # Build a fresh Transform — assigning ``spawn_transform = start_pose``
-        # would alias the cached ``route.start_pose`` and the +0.5 offset
-        # would accumulate across resets.
+        # Build a fresh Transform — mutating start_pose.location.z directly
+        # would aliased-edit the source object.
         spawn_transform = carla.Transform(
             carla.Location(
                 x=start_pose.location.x,
@@ -447,7 +446,17 @@ class CARLALeaderboardEnv(gym.Env):
             route = self._xml_routes[np.random.randint(len(self._xml_routes))]
             if route.weather is not None:
                 self.world.set_weather(route.weather)
-            return list(route.waypoints), route.start_pose
+            # Project the first XML waypoint onto the road network — this
+            # mirrors Bench2Drive's RouteScenario, where the spawn pose is
+            # the first transform of GlobalRoutePlanner.trace_route(...) and
+            # therefore carries the road's yaw and elevation, not the raw
+            # XML values.
+            start_wp = self.map.get_waypoint(
+                route.waypoints[0],
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
+            )
+            return list(route.waypoints), start_wp.transform
 
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
