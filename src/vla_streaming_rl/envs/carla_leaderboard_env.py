@@ -4,11 +4,17 @@ import time
 from dataclasses import dataclass
 
 import carla
-import cv2
 import gymnasium as gym
 import numpy as np
-import scipy
 
+from vla_streaming_rl.envs.carla_obs import (
+    CARLAObsConfig,
+    RouteTracker,
+    action_to_vehicle_control,
+    compose_obs,
+    make_action_space,
+    make_obs_space,
+)
 from vla_streaming_rl.envs.vehicle_graph import overlay_vehicle_graphs
 
 # Comfort thresholds (from Alpamayo comfort_reward.py)
@@ -120,20 +126,15 @@ class CARLALeaderboardEnv(gym.Env):
         super().__init__()
         self.prompt = "Drive a car along a route in CARLA. Follow the planned route, obey traffic rules, and avoid collisions."
 
-        # Configuration values
-        self.image_size = (256, 256)  # (width, height)
+        # Observation / action contracts are defined in carla_obs (shared with the
+        # Bench2Drive evaluation agent so training-time and eval-time stay bit-aligned).
+        self.obs_cfg = CARLAObsConfig()
         self.max_episode_steps = 1000
         self.render_mode = "rgb_array"
         self.fps = 10  # Simulation FPS
 
-        # Gymnasium spaces
-        self.observation_space = gym.spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(3, self.image_size[1], self.image_size[0]),
-            dtype=np.float32,
-        )
-        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.observation_space = make_obs_space(self.obs_cfg)
+        self.action_space = make_action_space()
 
         # CARLA connection
         self.client = carla.Client("localhost", 2000)
@@ -162,12 +163,10 @@ class CARLALeaderboardEnv(gym.Env):
         self.third_person_image = None
         self.lane_invasion_history = []
 
-        # Route information
-        self.route_waypoints = []  # List[carla.Waypoint]
-        self.current_waypoint_index = 0
+        # Route tracker (initialized in reset)
+        self.route_tracker: RouteTracker | None = None
 
         # Leaderboard evaluation metrics
-        self.route_completion = 0.0  # 0.0 ~ 1.0
         self.infractions = {
             "collision_pedestrian": 0,
             "collision_vehicle": 0,
@@ -180,7 +179,6 @@ class CARLALeaderboardEnv(gym.Env):
         # Episode information
         self.episode_step = 0
         self.negative_reward_count = 0  # Count of consecutive negative rewards
-        self.min_distance_to_route = 0.0  # Minimum distance to route
 
         # Vehicle physics information
         self.vehicle_physics = VehiclePhysics.create()
@@ -209,8 +207,9 @@ class CARLALeaderboardEnv(gym.Env):
         if self.vehicle is not None:
             self.vehicle.destroy()
 
-        # Generate route
-        self.route_waypoints, start_pose = self._generate_route()
+        # Sample a random route and build the tracker (interpolation is done inside).
+        raw_locations, start_pose = self._sample_route()
+        self.route_tracker = RouteTracker.from_raw_waypoints(raw_locations, self.obs_cfg)
 
         # Spawn vehicle (at route start point)
         blueprint_library = self.world.get_blueprint_library()
@@ -228,10 +227,12 @@ class CARLALeaderboardEnv(gym.Env):
 
         # Camera sensor
         camera_bp = blueprint_library.find("sensor.camera.rgb")
-        camera_bp.set_attribute("image_size_x", str(self.image_size[0]))
-        camera_bp.set_attribute("image_size_y", str(self.image_size[1]))
-        camera_bp.set_attribute("fov", "110")
-        camera_transform = carla.Transform(carla.Location(x=1.5, z=2.4))
+        camera_bp.set_attribute("image_size_x", str(self.obs_cfg.image_size[0]))
+        camera_bp.set_attribute("image_size_y", str(self.obs_cfg.image_size[1]))
+        camera_bp.set_attribute("fov", str(self.obs_cfg.fov))
+        camera_transform = carla.Transform(
+            carla.Location(x=self.obs_cfg.camera_x, z=self.obs_cfg.camera_z)
+        )
         self.camera_sensor = self.world.spawn_actor(
             camera_bp, camera_transform, attach_to=self.vehicle
         )
@@ -264,14 +265,11 @@ class CARLALeaderboardEnv(gym.Env):
 
         # Initialization
         self.episode_step = 0
-        self.current_waypoint_index = 0
-        self.route_completion = 0.0
         self.lane_invasion_history = []
         self.infractions = {k: 0 for k in self.infractions}
         self.prev_driving_score = 0.0
         self.current_image = None
         self.negative_reward_count = 0
-        self.min_distance_to_route = 0.0
         self.vehicle_physics = VehiclePhysics.create()
         self.physics_history = []
 
@@ -289,10 +287,7 @@ class CARLALeaderboardEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # Apply action: action[0]=steer, action[1]=gas_or_brake (same as CarRacing)
         self.current_action = np.array(action, dtype=np.float32)
-        steer = float(np.clip(action[0], -1.0, 1.0))
-        gas_or_brake = float(np.clip(action[1], -1.0, 1.0))
-        throttle = max(gas_or_brake, 0.0)
-        brake = 0.0
+        steer, throttle, brake = action_to_vehicle_control(self.current_action)
 
         control = carla.VehicleControl(
             steer=steer, throttle=throttle, brake=brake, hand_brake=False, manual_gear_shift=False
@@ -303,7 +298,7 @@ class CARLALeaderboardEnv(gym.Env):
         self._update_spectator()
 
         # Update route tracking
-        self._update_route_progress()
+        self.route_tracker.update(self.vehicle.get_location())
 
         # Termination conditions
         has_collision = (
@@ -311,7 +306,7 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_vehicle"] > 0
             or self.infractions["collision_static"] > 0
         )
-        terminated = has_collision or self.route_completion >= 1.0
+        terminated = has_collision or self.route_tracker.route_completion >= 1.0
 
         # Calculate reward
         reward = self._compute_reward(has_collision)
@@ -325,30 +320,18 @@ class CARLALeaderboardEnv(gym.Env):
         truncated = (
             self.episode_step >= self.max_episode_steps
             or self.negative_reward_count >= 100
-            or self.min_distance_to_route >= 30.0
+            or self.route_tracker.min_distance_to_route >= 30.0
         )
 
         self.episode_step += 1
 
         assert self.current_image is not None
 
-        # Concatenate observation image and route image
-        camera_img = self.current_image.copy()  # (C, H, W)
-        route_img = self._generate_route_image(show_text=False)  # (H, W, 3)
-
-        # Resize route image to 1/4 size of camera image
-        route_h = self.image_size[1] // 4
-        route_w = self.image_size[0] // 4
-        route_img_resized = cv2.resize(route_img, (route_w, route_h))
-
-        # Convert camera image from (C, H, W) -> (H, W, C)
-        camera_img_hwc = (camera_img.transpose(1, 2, 0) * 255).astype(np.uint8)
-
-        # Place route image at bottom-right
-        camera_img_hwc[-route_h:, -route_w:] = route_img_resized
-
-        # Convert back (H, W, C) -> (C, H, W) and normalize
-        obs = camera_img_hwc.transpose(2, 0, 1).astype(np.float32) / 255.0
+        # Compose observation: camera RGB + route overlay in the bottom-right quarter.
+        camera_hwc_uint8 = (self.current_image.transpose(1, 2, 0) * 255).astype(np.uint8)
+        vehicle_yaw_rad = np.radians(self.vehicle.get_transform().rotation.yaw)
+        overlay = self.route_tracker.render_overlay(self.vehicle.get_location(), vehicle_yaw_rad)
+        obs = compose_obs(camera_hwc_uint8, overlay, self.obs_cfg)
 
         # Update various physics quantities
         self.vehicle_physics.update(self.vehicle, throttle, brake, steer)
@@ -360,7 +343,7 @@ class CARLALeaderboardEnv(gym.Env):
 
         info = {
             "task_prompt": self.prompt,
-            "route_completion": self.route_completion,
+            "route_completion": self.route_tracker.route_completion,
             "infractions": self.infractions.copy(),
             "velocity": self.vehicle_physics.velocity,
             "velocity_kph": self.vehicle_physics.velocity_kph,
@@ -374,85 +357,6 @@ class CARLALeaderboardEnv(gym.Env):
         }
 
         return obs, reward, terminated, truncated, info
-
-    def _generate_route_image(self, show_text: bool) -> np.ndarray:
-        """Generate route image (vehicle always centered and facing up)
-
-        Args:
-            show_text: If True, display information as text in top-left
-        """
-        map_size = 512
-        render_img = np.ones((map_size, map_size, 3), dtype=np.uint8) * 200
-
-        # Vehicle current position and orientation
-        vehicle_loc = self.vehicle.get_location()
-        vehicle_transform = self.vehicle.get_transform()
-        vehicle_yaw = np.radians(vehicle_transform.rotation.yaw)
-
-        # Draw route (convert to vehicle coordinate system and rotate)
-        for i in range(len(self.route_waypoints) - 1):
-            wp1 = self.route_waypoints[i]
-            wp2 = self.route_waypoints[i + 1]
-
-            # Convert world coordinates to vehicle coordinate system
-            x1, y1 = self._world_to_vehicle_coords(wp1, vehicle_loc, vehicle_yaw, map_size)
-            x2, y2 = self._world_to_vehicle_coords(wp2, vehicle_loc, vehicle_yaw, map_size)
-
-            # Draw route
-            color = (255, 0, 0) if i < self.current_waypoint_index else (100, 100, 255)
-            cv2.line(render_img, (x1, y1), (x2, y2), color, 20)
-
-        # Draw vehicle as upward-facing triangle at center
-        center_x, center_y = map_size // 2, map_size // 2
-        triangle_size = 15
-
-        # Upward-facing (yaw=0) triangle
-        front_x = center_x
-        front_y = center_y - triangle_size
-        left_x = int(center_x - triangle_size * 0.5)
-        left_y = int(center_y + triangle_size * 0.5)
-        right_x = int(center_x + triangle_size * 0.5)
-        right_y = int(center_y + triangle_size * 0.5)
-
-        triangle_pts = np.array(
-            [[front_x, front_y], [left_x, left_y], [right_x, right_y]], np.int32
-        )
-        cv2.fillPoly(render_img, [triangle_pts], (0, 255, 0))
-
-        # Display information as text in top-left (only when show_text is True)
-        if show_text:
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.5
-            font_thickness = 1
-            text_color = (0, 0, 0)
-            line_height = 20
-            x_offset = 10
-            y_offset = 20
-
-            texts = [
-                f"Route Completion: {self.route_completion * 100:.1f}%",
-                f"Velocity: {self.vehicle_physics.velocity_kph:.1f} km/h",
-                f"Acceleration: {self.vehicle_physics.acceleration:.2f} m/s^2",
-                f"Jerk: {self.vehicle_physics.jerk:.2f} m/s^3",
-                f"Angular Vel: {self.vehicle_physics.angular_velocity:.2f} rad/s",
-                f"Angular Accel: {self.vehicle_physics.angular_acceleration:.2f} rad/s^2",
-                f"Steer: {self.current_action[0]:+.3f}",
-                f"Gas/Brake: {self.current_action[1]:+.3f}",
-            ]
-
-            for i, text in enumerate(texts):
-                y_pos = y_offset + i * line_height
-                cv2.putText(
-                    render_img,
-                    text,
-                    (x_offset, y_pos),
-                    font,
-                    font_scale,
-                    text_color,
-                    font_thickness,
-                )
-
-        return render_img
 
     def render(self) -> np.ndarray | None:
         """Return third-person camera image with time-series graphs overlay."""
@@ -482,8 +386,12 @@ class CARLALeaderboardEnv(gym.Env):
             settings.synchronous_mode = False
             self.world.apply_settings(settings)
 
-    def _generate_route(self) -> list:
-        """Generate random route"""
+    def _sample_route(self) -> tuple[list[carla.Location], carla.Transform]:
+        """Sample a random ~200 m route at 2 m spacing.
+
+        Returns the raw waypoint locations and the start pose. Interpolation
+        to a fixed density happens inside ``RouteTracker.from_raw_waypoints``.
+        """
         start_wp = self.map.get_waypoint(
             np.random.choice(self.spawn_points).location,
             project_to_road=True,
@@ -509,46 +417,8 @@ class CARLALeaderboardEnv(gym.Env):
                 distance += prev_loc.distance(curr_loc)
 
         start_pose = route_waypoints[0].transform
-
-        # Interpolate to 1000 points (using scipy.interpolate)
-        num_interp_points = 1000
-        route_locations = np.array(
-            [
-                [wp.transform.location.x, wp.transform.location.y, wp.transform.location.z]
-                for wp in route_waypoints
-            ]
-        )
-        t_original = np.linspace(0, 1, len(route_locations))
-        t_interp = np.linspace(0, 1, num_interp_points)
-
-        interpolator = scipy.interpolate.interp1d(
-            t_original, route_locations, axis=0, kind="linear"
-        )
-        interpolated_locations = interpolator(t_interp)
-        interpolated_waypoints = []
-        for loc in interpolated_locations:
-            interpolated_waypoints.append(carla.Location(*loc))
-
-        return interpolated_waypoints, start_pose
-
-    def _update_route_progress(self):
-        """Update route progress"""
-        vehicle_loc = self.vehicle.get_location()
-
-        # Find closest waypoint (within a certain range from current position)
-        min_dist = float("inf")
-        closest_idx = self.current_waypoint_index
-
-        search_end = min(self.current_waypoint_index + 20, len(self.route_waypoints))
-        for i in range(self.current_waypoint_index, search_end):
-            dist = vehicle_loc.distance(self.route_waypoints[i])
-            if dist < min_dist:
-                min_dist = dist
-                closest_idx = i
-
-        self.current_waypoint_index = closest_idx
-        self.route_completion = min(1.0, closest_idx / max(1, len(self.route_waypoints) - 1))
-        self.min_distance_to_route = min_dist
+        raw_locations = [wp.transform.location for wp in route_waypoints]
+        return raw_locations, start_pose
 
     def _compute_reward(self, has_collision: bool) -> float:
         """
@@ -562,7 +432,7 @@ class CARLALeaderboardEnv(gym.Env):
             return -1.0
 
         # Route Completion (0.0 ~ 100.0)
-        route_completion_score = self.route_completion * 100.0
+        route_completion_score = self.route_tracker.route_completion * 100.0
 
         # Driving Score (no infraction penalty needed here since collision returns early)
         driving_score = route_completion_score
@@ -603,33 +473,6 @@ class CARLALeaderboardEnv(gym.Env):
             elif value < lo:
                 penalty += (lo - value) / abs(lo) + 1
         return -0.0 * penalty
-
-    def _world_to_vehicle_coords(
-        self,
-        world_loc: carla.Location,
-        vehicle_loc: carla.Location,
-        vehicle_yaw: float,
-        map_size: int,
-    ) -> tuple[int, int]:
-        """Convert world coordinates to vehicle coordinate system (vehicle centered facing up)"""
-        # Relative position from vehicle
-        dx = world_loc.x - vehicle_loc.x
-        dy = world_loc.y - vehicle_loc.y
-
-        # Rotate according to vehicle orientation (so vehicle faces up)
-        # Add 90 degree counter-clockwise rotation
-        adjusted_yaw = -vehicle_yaw + np.pi / 2
-        cos_yaw = np.cos(adjusted_yaw)
-        sin_yaw = np.sin(adjusted_yaw)
-        rotated_x = dx * cos_yaw - dy * sin_yaw
-        rotated_y = dx * sin_yaw + dy * cos_yaw
-
-        # Convert to pixel coordinates (flip left-right)
-        scale = 0.5  # meters/pixel
-        pixel_x = int(-rotated_x / scale + map_size // 2)
-        pixel_y = int(-rotated_y / scale + map_size // 2)
-
-        return pixel_x, pixel_y
 
     def _update_spectator(self):
         """Move spectator camera to follow the vehicle from behind and above."""
