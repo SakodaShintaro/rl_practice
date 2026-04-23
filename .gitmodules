@@ -1,0 +1,3 @@
+[submodule "external/Bench2Drive"]
+	path = external/Bench2Drive
+	url = https://github.com/SakodaShintaro/Bench2Drive.git
