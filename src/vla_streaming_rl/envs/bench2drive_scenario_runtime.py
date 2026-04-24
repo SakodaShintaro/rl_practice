@@ -154,6 +154,17 @@ class Bench2DriveRuntime:
             self._build_thread = None
 
         if self.route_scenario is not None:
+            # terminate() propagates INVALID status to every leaf in
+            # scenario_tree, which is what triggers CollisionTest /
+            # OutsideRouteLanesTest / ... terminate() and therefore
+            # sensor.stop() + sensor.destroy() on the per-criterion sensors.
+            # Without this, those sensors keep their port-2001 streaming
+            # sockets and listener threads open forever and every reset leaks.
+            try:
+                self.route_scenario.terminate()
+            except Exception:
+                pass
+
             # Destroys other_actors (NPCs, scripted scenario actors) and the
             # parked vehicles via __del__.
             self.route_scenario.remove_all_actors()
