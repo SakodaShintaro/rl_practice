@@ -249,14 +249,18 @@ class CARLALeaderboardEnv(gym.Env):
 
         # Destroy our sensors before clearing the scenario — once their parent
         # actor is gone, sensor.destroy() can throw on already-dead handles.
-        if self.camera_sensor is not None:
-            self.camera_sensor.destroy()
-        if self.third_person_camera is not None:
-            self.third_person_camera.destroy()
-        if self.collision_sensor is not None:
-            self.collision_sensor.destroy()
-        if self.lane_invasion_sensor is not None:
-            self.lane_invasion_sensor.destroy()
+        # stop() first is required: without it the streaming socket on port
+        # 2001 and its listener thread are not released, and the lambda
+        # closure (which holds self) is never GC'd — every reset would leak.
+        for sensor in (
+            self.camera_sensor,
+            self.third_person_camera,
+            self.collision_sensor,
+            self.lane_invasion_sensor,
+        ):
+            if sensor is not None:
+                sensor.stop()
+                sensor.destroy()
 
         if self.runtime is not None:
             # The runtime owns the ego (RouteScenario spawns it) plus all NPCs
@@ -444,14 +448,15 @@ class CARLALeaderboardEnv(gym.Env):
         return img
 
     def close(self):
-        if self.camera_sensor is not None:
-            self.camera_sensor.destroy()
-        if self.third_person_camera is not None:
-            self.third_person_camera.destroy()
-        if self.collision_sensor is not None:
-            self.collision_sensor.destroy()
-        if self.lane_invasion_sensor is not None:
-            self.lane_invasion_sensor.destroy()
+        for sensor in (
+            self.camera_sensor,
+            self.third_person_camera,
+            self.collision_sensor,
+            self.lane_invasion_sensor,
+        ):
+            if sensor is not None:
+                sensor.stop()
+                sensor.destroy()
 
         if self.runtime is not None:
             # Tears down the ego, NPCs, scripted scenario actors, parked vehicles.
