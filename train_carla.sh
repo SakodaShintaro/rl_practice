@@ -11,7 +11,15 @@ B2D_ROOT=$(pwd)/external/Bench2Drive
 export PYTHONPATH=${B2D_ROOT}/leaderboard:${B2D_ROOT}/scenario_runner:${CARLA_ROOT}/PythonAPI/carla:${PYTHONPATH:-}
 export SCENARIO_RUNNER_ROOT=${B2D_ROOT}/scenario_runner
 
-pgrep -f CarlaUE4 > /dev/null || setsid ${CARLA_ROOT}/CarlaUE4.sh -RenderOffScreen &
+# Refuse to start if CARLA is already running. Stale CARLA processes carry
+# over actor IDs / TM state / sensor stream sessions across runs, which
+# silently corrupts behavior — kill any existing CARLA manually before
+# running this script (e.g. `pkill -f CarlaUE4 && sleep 5`).
+if pgrep -f CarlaUE4 > /dev/null; then
+    echo "ERROR: CARLA is already running. Kill it first: pkill -f CarlaUE4 && sleep 5" >&2
+    exit 1
+fi
+setsid ${CARLA_ROOT}/CarlaUE4.sh -RenderOffScreen &
 
 uv run python scripts/train.py \
   agent=vlm_streaming \
