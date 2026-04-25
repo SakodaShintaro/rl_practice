@@ -153,6 +153,7 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     obs, reset_info = env.reset(seed=seed)
     task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
     step_limit = args.step_limit
+    checkpoint_interval = max(1, step_limit // 10)
 
     compile_network = args.network_class != "vlm_actor_critic_with_action_value"
     network = build_network(
@@ -308,6 +309,15 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
                 cv2.imshow(args.env_id, bgr_image)
                 cv2.waitKey(1)
 
+            if global_step % checkpoint_interval == 0 and result_dir is not None:
+                module = network._orig_mod if hasattr(network, "_orig_mod") else network
+                trainable_state = {
+                    name: param.detach().cpu()
+                    for name, param in module.named_parameters()
+                    if param.requires_grad
+                }
+                torch.save(trainable_state, result_dir / "checkpoint.pt")
+
             if terminated or truncated:
                 break
 
@@ -399,15 +409,6 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             )
 
         episode_id += 1
-
-    if result_dir is not None:
-        module = network._orig_mod if hasattr(network, "_orig_mod") else network
-        trainable_state = {
-            name: param.detach().cpu()
-            for name, param in module.named_parameters()
-            if param.requires_grad
-        }
-        torch.save(trainable_state, result_dir / "checkpoint.pt")
 
     env.close()
     if log_episode_file is not None:
