@@ -1,8 +1,6 @@
 #!/bin/bash
 set -eux
 
-trap 'kill 0' EXIT
-
 suffix=${1:-""}
 cd $(dirname $0)
 
@@ -20,6 +18,8 @@ if pgrep -f CarlaUE4 > /dev/null; then
     exit 1
 fi
 setsid ${CARLA_ROOT}/CarlaUE4.sh -RenderOffScreen &
+CARLA_PGID=$!
+trap 'kill -TERM -- -$CARLA_PGID 2>/dev/null; kill 0' EXIT
 
 uv run python scripts/train.py \
   agent=vlm_streaming \
