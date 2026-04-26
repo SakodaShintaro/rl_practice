@@ -268,7 +268,9 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             global_step += 1
 
             # step
+            env_step_start = time.time()
             obs, reward, terminated, truncated, env_info = env.step(action)
+            env_step_time_msec = (time.time() - env_step_start) * 1000
             task_prompt = env_info["task_prompt"] if args.use_prompt else ""
 
             # save action, reward, and observation
@@ -276,9 +278,11 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             reward_list.append(reward)
             obs_list.append(obs.copy())
 
+            agent_step_start = time.time()
             action, agent_info = agent.step(
                 global_step, obs, reward, terminated, truncated, task_prompt
             )
+            agent_step_time_msec = (time.time() - agent_step_start) * 1000
 
             # render
             obs_for_render = obs.copy().transpose(1, 2, 0)
@@ -293,6 +297,8 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
                 "elapsed_time_min": elapsed_time_min,
                 "SPS": global_step / elapsed_time_sec,
                 "reward": reward,
+                "env_step_msec": env_step_time_msec,
+                "agent_step_msec": agent_step_time_msec,
                 **log_agent_info,
             }
             data_dict["losses/pred_image_loss"] = np.mean(np.abs(pred_image - obs_for_render))
