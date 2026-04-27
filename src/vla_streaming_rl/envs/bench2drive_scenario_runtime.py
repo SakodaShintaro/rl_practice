@@ -130,6 +130,7 @@ class Bench2DriveRuntime:
         # build_scenarios + spawn_parked_vehicles are done off-thread; here
         # we only advance the behavior tree.
         self.route_scenario.scenario_tree.tick_once()
+        self.route_scenario.prune_completed_scenarios()
 
     def cleanup(self) -> None:
         """Destroy scenario-owned actors and clear per-episode CDP state.
