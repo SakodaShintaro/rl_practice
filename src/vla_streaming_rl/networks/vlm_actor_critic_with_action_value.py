@@ -15,6 +15,7 @@ from .reward_processor import RewardProcessor
 from .value_head import ActionValueHead, maybe_update_hl_gauss_range
 from .video_encoder import VideoEncoder
 from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
+from .vlm_input_cache import VLMInputCache
 
 
 class VLMActorCriticWithActionValue(nn.Module):
@@ -211,6 +212,22 @@ class VLMActorCriticWithActionValue(nn.Module):
             )
 
         self._dummy_state = torch.zeros(1, 1, 1)
+
+        # Pre-build VLM text inputs once. prepare_vlm_inputs allocates
+        # thousands of small Python objects per call; in long Bench2Drive
+        # routes the heap state churned by scenario runtime amplifies that
+        # allocation cost, so the call slows by ~8x over a single run.
+        # Prompt and image dimensions are fixed in our setup, so the
+        # text-side outputs (input_ids / attention_mask / image_grid_thw)
+        # are identical every call — cache them and only run image
+        # preprocessing per step.
+        self._input_cache = VLMInputCache(
+            processor=self.processor,
+            observation_shape=observation_space_shape,
+            task_prompt=task_prompt,
+            seq_len=seq_len,
+            device=torch.device(device),
+        )
 
     def init_state(self) -> torch.Tensor:
         return self._dummy_state.clone()
@@ -468,13 +485,12 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.forward(**forward_kwargs)
 
     def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
-        """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
-        inputs = prepare_vlm_inputs(
-            self.processor,
-            images,
-            task_prompts,
-            self.is_qwen35,
-        )
+        """Run VLM forward. Returns past_key_values (and projection state for projection mode).
+
+        ``task_prompts`` is accepted for API compatibility but ignored: the
+        prompt is fixed at construction time and baked into ``_input_cache``.
+        """
+        inputs = self._input_cache(images)
 
         inputs_embeds = self._build_inputs_embeds(inputs)
 
