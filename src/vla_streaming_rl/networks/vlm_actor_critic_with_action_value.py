@@ -213,18 +213,16 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         self._dummy_state = torch.zeros(1, 1, 1)
 
-        # Pre-build VLM text inputs once. prepare_vlm_inputs allocates
-        # thousands of small Python objects per call; in long Bench2Drive
-        # routes the heap state churned by scenario runtime amplifies that
-        # allocation cost, so the call slows by ~8x over a single run.
-        # Prompt and image dimensions are fixed in our setup, so the
-        # text-side outputs (input_ids / attention_mask / image_grid_thw)
-        # are identical every call — cache them and only run image
-        # preprocessing per step.
+        # prepare_vlm_inputs allocates thousands of small Python objects per
+        # call; in long Bench2Drive routes the heap state churned by scenario
+        # runtime amplifies that allocation cost, so the call slows by ~8x
+        # over a single run. VLMInputCache caches everything that depends
+        # only on image dimensions (image_grid_thw, chat template format) but
+        # tokenizes the prompt fresh every step so envs that vary their
+        # task prompt (TrackingSquare, future CoT, ...) keep working.
         self._input_cache = VLMInputCache(
             processor=self.processor,
             observation_shape=observation_space_shape,
-            task_prompt=task_prompt,
             seq_len=seq_len,
             device=torch.device(device),
         )
@@ -485,12 +483,8 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.forward(**forward_kwargs)
 
     def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
-        """Run VLM forward. Returns past_key_values (and projection state for projection mode).
-
-        ``task_prompts`` is accepted for API compatibility but ignored: the
-        prompt is fixed at construction time and baked into ``_input_cache``.
-        """
-        inputs = self._input_cache(images)
+        """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
+        inputs = self._input_cache(images, task_prompts)
 
         inputs_embeds = self._build_inputs_embeds(inputs)
 

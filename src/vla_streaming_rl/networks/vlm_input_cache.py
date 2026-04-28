@@ -1,18 +1,23 @@
 # SPDX-License-Identifier: MIT
-"""Build VLM model inputs without re-tokenizing every step.
+"""Build VLM model inputs while keeping the per-step text path light.
 
-The HF AutoProcessor.__call__ runs apply_chat_template + tokenizer +
-placeholder-replacement + BatchFeature construction every call, allocating
-thousands of small Python objects per step. In long Bench2Drive routes the
-heap state churned by scenario runtime amplifies that allocation cost
-(observed: 2 ms -> 17 ms over a single run on the same input shape).
+The HF AutoProcessor.__call__ rebuilds chat-template metadata + BatchFeature
+every call, allocating thousands of small Python objects per training step.
+In long Bench2Drive routes the heap state churned by scenario runtime
+amplifies that allocation cost (observed: 2 ms -> 17 ms over a single run on
+the same input shape).
 
-In our setup task prompt and image dimensions are fixed, so the text-side
-outputs are identical every call. Build them once at init and only run
-image preprocessing per call. The original `prepare_vlm_inputs` also
-roundtripped tensor -> CPU -> numpy -> PIL just so the HF processor could
-do PIL -> tensor; we skip that and pass tensors straight to the
-image_processor.
+We split the cost:
+    - Image side is cached aggressively: input dimensions are fixed, so
+      ``image_grid_thw`` is constant. Tensors go straight into the
+      image_processor (the original ``prepare_vlm_inputs`` did
+      tensor->CPU->numpy->PIL->tensor just so the processor could do
+      PIL->tensor again — pointless work).
+    - Text side runs the tokenizer fresh every step. The chat template is
+      cached at init with a sentinel for the prompt so per-step we only do
+      ``str.replace`` + tokenizer, skipping ``apply_chat_template`` and the
+      processor's image-placeholder expansion. This keeps Chain-of-Thought-
+      style varying prompts cheap.
 """
 from collections.abc import Sequence
 
@@ -21,26 +26,16 @@ from PIL import Image
 from transformers import AutoProcessor
 
 
+_PROMPT_SENTINEL = "<<<<TASK_PROMPT_SENTINEL>>>>"
+
+
 class VLMInputCache:
-    """Caches text-side outputs and computes pixel_values on the fly.
-
-    Output dict matches what the rest of the network consumes from
-    `prepare_vlm_inputs`:
-        - input_ids, attention_mask, image_grid_thw  (cached)
-        - all_pixel_values, all_image_grid_thw       (per-call, only the
-          first one actually depends on image content)
-        - seq_len                                    (constant)
-
-    `pixel_values` is intentionally omitted because nothing downstream
-    reads it (the visual encoder uses all_pixel_values; the language
-    forward uses inputs_embeds built externally from all_pixel_values).
-    """
+    """Caches image grid + chat template; tokenizes text per call."""
 
     def __init__(
         self,
         processor: AutoProcessor,
         observation_shape: Sequence[int],
-        task_prompt: str,
         seq_len: int,
         device: torch.device,
     ) -> None:
@@ -48,67 +43,96 @@ class VLMInputCache:
             raise ValueError(
                 f"observation_shape must be (C, H, W); got {tuple(observation_shape)}"
             )
+        self.tokenizer = processor.tokenizer
         self.image_processor = processor.image_processor
+        self.image_token = processor.image_token  # e.g. '<|image_pad|>'
         self.observation_shape = tuple(observation_shape)
         self.seq_len = seq_len
         self.device = device
 
-        _, H, W = self.observation_shape
-        dummy_pil = Image.new("RGB", (W, H))
+        # --- Image grid cache: feed a dummy through image_processor once to
+        #     pin down image_grid_thw. With fixed observation dims this is
+        #     constant and we can avoid recomputing it.
+        C, H, W = self.observation_shape
+        dummy_tensor = torch.zeros(C, H, W, dtype=torch.float32)
+        img_ref = self.image_processor(
+            images=[dummy_tensor], return_tensors="pt", do_rescale=False
+        )
+        single_grid = img_ref["image_grid_thw"].to(device)  # (1, 3)
+        self.cached_single_grid = single_grid
+        self.cached_all_image_grid_thw = single_grid.repeat(seq_len, 1)
+        merge_length = self.image_processor.merge_size ** 2
+        self.num_image_tokens = int(single_grid[0].prod().item() // merge_length)
 
-        content: list[dict] = []
-        if task_prompt:
-            content.append({"type": "text", "text": task_prompt})
-        content.append({"type": "image", "image": dummy_pil})
-        messages = [[{"role": "user", "content": content}]]
-
-        text = processor.apply_chat_template(
+        # --- Chat template cache: render the template once with a sentinel
+        #     in place of the prompt and the image placeholder pre-expanded
+        #     to ``num_image_tokens`` copies. Per call we only ``str.replace``
+        #     the sentinel and tokenize, which is far cheaper than
+        #     ``processor.__call__``.
+        dummy_pil = Image.new("RGB", (W, H))  # apply_chat_template just needs structure
+        messages = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _PROMPT_SENTINEL},
+                        {"type": "image", "image": dummy_pil},
+                    ],
+                }
+            ]
+        ]
+        templated = processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        ref = processor(
-            text=text, images=[dummy_pil], return_tensors="pt", padding=True
+        if isinstance(templated, list):
+            templated = templated[0]
+        # Pre-expand the image placeholder. Single image per message, fixed
+        # grid -> single replace covers it.
+        self.template_text: str = templated.replace(
+            self.image_token, self.image_token * self.num_image_tokens, 1
         )
 
-        self.cached_input_ids: torch.Tensor = ref["input_ids"].to(device)
-        self.cached_attention_mask: torch.Tensor = ref["attention_mask"].to(device)
-        # image_grid_thw: (1, 3) — fixed for fixed input dimensions
-        self.cached_image_grid_thw: torch.Tensor = ref["image_grid_thw"].to(device)
+    def __call__(self, images: torch.Tensor, task_prompts: list[str]) -> dict:
+        """Build VLM inputs.
 
-    def __call__(self, images: torch.Tensor) -> dict:
-        """images: (B, T, C, H, W) float in [0, 1]. Returns input dict."""
+        Args:
+            images: (B, T, C, H, W) float tensor in [0, 1].
+            task_prompts: list of length B; one prompt per batch element.
+        """
         if images.ndim != 5:
-            raise ValueError(f"expected (B, T, C, H, W); got shape {tuple(images.shape)}")
+            raise ValueError(f"expected (B, T, C, H, W); got {tuple(images.shape)}")
         B, T = images.shape[:2]
         if T != self.seq_len:
             raise ValueError(f"T mismatch: cache expects seq_len={self.seq_len}, got T={T}")
+        if len(task_prompts) != B:
+            raise ValueError(
+                f"task_prompts length {len(task_prompts)} != batch size {B}"
+            )
 
         device = images.device
 
-        # Pass tensors straight to image_processor — it accepts torch input
-        # without going through PIL. Input is in [0, 1] so we disable the
-        # processor's internal /255 rescale (image_mean/std are in [0, 1]
-        # scale and applied directly after).
+        # --- Text path: tokenize fresh, but skip chat-template + placeholder
+        #     expansion by reusing the pre-rendered template_text.
+        per_batch = [self.template_text.replace(_PROMPT_SENTINEL, p) for p in task_prompts]
+        text_inputs = self.tokenizer(per_batch, return_tensors="pt", padding=True)
+
+        # --- Image path: tensors straight into image_processor, no PIL.
         flat = images.reshape(B * T, *images.shape[2:])
-        proc_out = self.image_processor(
+        img_out = self.image_processor(
             images=[flat[i] for i in range(B * T)],
             return_tensors="pt",
             do_rescale=False,
         )
-
-        all_pixel_values = proc_out["pixel_values"].to(device).to(torch.bfloat16)
-        # Each frame has the same shape so every row of image_grid_thw is
-        # identical. Use the cached single-row value to avoid a fresh CPU
-        # tensor allocation per step.
-        all_image_grid_thw = self.cached_image_grid_thw.expand(B * T, -1)
-
-        input_ids = self.cached_input_ids.expand(B, -1)
-        attention_mask = self.cached_attention_mask.expand(B, -1)
-        image_grid_thw = self.cached_image_grid_thw.expand(B, -1)
+        all_pixel_values = img_out["pixel_values"].to(device).to(torch.bfloat16)
+        if B == 1:
+            all_image_grid_thw = self.cached_all_image_grid_thw
+        else:
+            all_image_grid_thw = self.cached_single_grid.expand(B * T, -1)
 
         return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "image_grid_thw": image_grid_thw,
+            "input_ids": text_inputs["input_ids"].to(device),
+            "attention_mask": text_inputs["attention_mask"].to(device),
+            "image_grid_thw": self.cached_single_grid.expand(B, -1),
             "all_pixel_values": all_pixel_values,
             "all_image_grid_thw": all_image_grid_thw,
             "seq_len": T,
