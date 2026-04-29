@@ -30,12 +30,22 @@ PANEL_FORMAT_HINT = (
     "where each <value> is a float in [-1, 1]."
 )
 
-RESPONSE_FORMAT_HINTS = {
+CONTINUOUS_FORMAT_HINTS = {
     "CarRacing-v3": CAR_RACING_FORMAT_HINT,
     "ColorPanel-v0": PANEL_FORMAT_HINT,
     "STL10Panel-v0": PANEL_FORMAT_HINT,
     "TrackingSquare-v0": PANEL_FORMAT_HINT,
 }
+
+
+def make_bin_format_hint(action_dim: int, n_bins: int) -> str:
+    neutral = n_bins // 2
+    return (
+        f"Respond with EXACTLY ONE LINE: {action_dim} integers separated by commas. "
+        f"Each integer is a bin index in [0, {n_bins - 1}], where 0 maps to value -1.0, "
+        f"{neutral} maps to 0.0, and {n_bins - 1} maps to +1.0. "
+        "Output ONLY the integers and nothing else."
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +68,14 @@ def parse_args() -> argparse.Namespace:
         help="Number of past (image, response) turns to feed back as in-context history (FIFO).",
     )
     parser.add_argument("--max_new_tokens", type=int, default=64)
+    parser.add_argument(
+        "--action_format",
+        type=str,
+        default="bin_index",
+        choices=["continuous", "bin_index"],
+        help="continuous: model outputs floats in [-1,1]; bin_index: model outputs integer bin indices in [0, n_bins).",
+    )
+    parser.add_argument("--n_bins", type=int, default=128)
 
     return parser.parse_args()
 
@@ -96,9 +114,9 @@ def run_episode(env, agent, render: bool):
 
         text = agent_info.get("text")
         if text is not None:
-            parse_ok = agent_info.get("parse_success", True)
+            parse_used = agent_info.get("parse_used", "strict")
             print(
-                f"  [step {step_count:4d}] reward={reward:+.3f} parse_ok={parse_ok} "
+                f"  [step {step_count:4d}] reward={reward:+.3f} parse={parse_used} "
                 f"text={text!r}"
             )
 
@@ -153,21 +171,29 @@ if __name__ == "__main__":
     initial_task_prompt = reset_info.get("task_prompt", "")
 
     # agent setup
+    action_dim = int(np.prod(env.action_space.shape))
     if args.agent_type == "random":
         agent = RandomAgent(env.action_space)
     elif args.agent_type == "vlm":
-        parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
-        assert parse_action_text is not None, (
-            f"VLM agent requires env.unwrapped.parse_action_text; not defined for {args.env_id}"
-        )
-        format_hint = RESPONSE_FORMAT_HINTS.get(args.env_id, "")
+        if args.action_format == "continuous":
+            parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
+            assert parse_action_text is not None, (
+                f"VLM agent in continuous mode requires env.unwrapped.parse_action_text; "
+                f"not defined for {args.env_id}"
+            )
+            format_hint = CONTINUOUS_FORMAT_HINTS.get(args.env_id, "")
+        else:
+            parse_action_text = None
+            format_hint = make_bin_format_hint(action_dim, args.n_bins)
         agent = ZeroShotVLMAgent(
             model_id=args.vlm_model_id,
             parse_action_text=parse_action_text,
-            action_dim=int(np.prod(env.action_space.shape)),
+            action_dim=action_dim,
             format_hint=format_hint,
             seq_len=args.seq_len,
             max_new_tokens=args.max_new_tokens,
+            action_format=args.action_format,
+            n_bins=args.n_bins,
         )
     else:
         raise ValueError(f"Unknown agent_type: {args.agent_type}")
@@ -175,6 +201,7 @@ if __name__ == "__main__":
     print(f"Running {args.num_episodes} episodes with {args.agent_type} agent...")
     if args.agent_type == "vlm":
         print(f"  model_id={args.vlm_model_id}")
+        print(f"  action_format={args.action_format}  n_bins={args.n_bins}")
         print(f"  seq_len={args.seq_len}  max_new_tokens={args.max_new_tokens}")
         print(f"  task_prompt={initial_task_prompt!r}")
 
@@ -240,6 +267,8 @@ if __name__ == "__main__":
         f.write(f"Agent type: {args.agent_type}\n")
         if args.agent_type == "vlm":
             f.write(f"VLM model: {args.vlm_model_id}\n")
+            f.write(f"action_format: {args.action_format}\n")
+            f.write(f"n_bins: {args.n_bins}\n")
             f.write(f"seq_len: {args.seq_len}\n")
             f.write(f"max_new_tokens: {args.max_new_tokens}\n")
         f.write(f"Number of episodes: {args.num_episodes}\n")
