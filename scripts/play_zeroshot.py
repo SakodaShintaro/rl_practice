@@ -12,10 +12,30 @@ import imageio
 import numpy as np
 import torch
 
+from vla_streaming_rl.agents.zeroshot_vlm import ZeroShotVLMAgent
 from vla_streaming_rl.utils import concat_images, convert_to_uint8
 from vla_streaming_rl.wrappers import make_env
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+CAR_RACING_FORMAT_HINT = (
+    "Respond with EXACTLY ONE LINE in this format and nothing else: "
+    "steer=<value>, accel=<value> "
+    "where each <value> is a float in [-1, 1]."
+)
+PANEL_FORMAT_HINT = (
+    "Respond with EXACTLY ONE LINE in this format and nothing else: "
+    "dx=<value>, dy=<value>, button=<value> "
+    "where each <value> is a float in [-1, 1]."
+)
+
+RESPONSE_FORMAT_HINTS = {
+    "CarRacing-v3": CAR_RACING_FORMAT_HINT,
+    "ColorPanel-v0": PANEL_FORMAT_HINT,
+    "STL10Panel-v0": PANEL_FORMAT_HINT,
+    "TrackingSquare-v0": PANEL_FORMAT_HINT,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,28 +44,41 @@ def parse_args() -> argparse.Namespace:
         "--env_id",
         type=str,
         default="CarRacing-v3",
-        choices=["CarRacing-v3"],
+        choices=["CarRacing-v3", "ColorPanel-v0", "STL10Panel-v0", "TrackingSquare-v0"],
     )
-    parser.add_argument("--agent_type", type=str, choices=["random"])
+    parser.add_argument("--agent_type", type=str, choices=["random", "vlm"], required=True)
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--render", type=int, default=1, choices=[0, 1])
     parser.add_argument("--num_episodes", type=int, default=10)
+    parser.add_argument("--vlm_model_id", type=str, default="Qwen/Qwen3.5-0.8B")
+    parser.add_argument(
+        "--seq_len",
+        type=int,
+        default=0,
+        help="Number of past (image, response) turns to feed back as in-context history (FIFO).",
+    )
+    parser.add_argument("--max_new_tokens", type=int, default=64)
 
     return parser.parse_args()
 
 
 class RandomAgent:
-    def __init__(self, action_space):
+    def __init__(self, action_space: gym.spaces.Box) -> None:
         self.action_space = action_space
 
-    def select_action(self, obs):
-        return self.action_space.sample()
+    def reset(self, task_prompt: str) -> None:
+        del task_prompt
+
+    def select_action(self, obs: np.ndarray, prev_reward: float) -> tuple[np.ndarray, dict]:
+        del obs, prev_reward
+        return self.action_space.sample(), {}
 
 
-def run_episode(env, agent, render=False):
-    obs, _ = env.reset()
+def run_episode(env, agent, render: bool):
+    obs, reset_info = env.reset()
+    agent.reset(reset_info.get("task_prompt", ""))
 
-    total_reward = 0
+    total_reward = 0.0
     step_count = 0
     bgr_image_list = []
 
@@ -54,23 +87,27 @@ def run_episode(env, agent, render=False):
     prev_reward = 0.0
 
     while True:
-        action = agent.select_action(obs, prev_reward)
+        action, agent_info = agent.select_action(obs, prev_reward)
         obs, reward, termination, truncation, env_info = env.step(action)
 
         prev_reward = reward
-
         total_reward += reward
         step_count += 1
+
+        text = agent_info.get("text")
+        if text is not None:
+            parse_ok = agent_info.get("parse_success", True)
+            print(
+                f"  [step {step_count:4d}] reward={reward:+.3f} parse_ok={parse_ok} "
+                f"text={text!r}"
+            )
 
         obs_for_render = convert_to_uint8(obs.copy().transpose(1, 2, 0))
         bgr_image = concat_images([env.render(), obs_for_render])
         bgr_image_list.append(bgr_image)
 
         if render:
-            bgr_image = concat_images(
-                [env.render(), convert_to_uint8(obs.copy().transpose(1, 2, 0))]
-            )
-            cv2.imshow("CarRacing", bgr_image)
+            cv2.imshow(env.spec.id if env.spec is not None else "play", bgr_image)
             cv2.waitKey(1)
 
         if termination or truncation:
@@ -111,10 +148,35 @@ if __name__ == "__main__":
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 
+    # Prime the env once so we can construct the agent with the initial task prompt.
+    obs, reset_info = env.reset(seed=seed)
+    initial_task_prompt = reset_info.get("task_prompt", "")
+
     # agent setup
-    agent = RandomAgent(env.action_space)
+    if args.agent_type == "random":
+        agent = RandomAgent(env.action_space)
+    elif args.agent_type == "vlm":
+        parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
+        assert parse_action_text is not None, (
+            f"VLM agent requires env.unwrapped.parse_action_text; not defined for {args.env_id}"
+        )
+        format_hint = RESPONSE_FORMAT_HINTS.get(args.env_id, "")
+        agent = ZeroShotVLMAgent(
+            model_id=args.vlm_model_id,
+            parse_action_text=parse_action_text,
+            action_dim=int(np.prod(env.action_space.shape)),
+            format_hint=format_hint,
+            seq_len=args.seq_len,
+            max_new_tokens=args.max_new_tokens,
+        )
+    else:
+        raise ValueError(f"Unknown agent_type: {args.agent_type}")
 
     print(f"Running {args.num_episodes} episodes with {args.agent_type} agent...")
+    if args.agent_type == "vlm":
+        print(f"  model_id={args.vlm_model_id}")
+        print(f"  seq_len={args.seq_len}  max_new_tokens={args.max_new_tokens}")
+        print(f"  task_prompt={initial_task_prompt!r}")
 
     episode_rewards = []
     episode_lengths = []
@@ -140,18 +202,6 @@ if __name__ == "__main__":
         if episode_reward > best_reward:
             best_reward = episode_reward
             best_video = bgr_image_list
-
-        # Log episode data
-        data_dict = {
-            "episode": episode + 1,
-            "global_step": global_step,
-            "episodic_return": episode_reward,
-            "episodic_length": episode_length,
-            "average_return": np.mean(episode_rewards),
-            "best_return": best_reward,
-            "sps": sps,
-            "elapsed_time": elapsed_time,
-        }
 
         print(
             f"Episode {episode + 1:2d}: Reward = {episode_reward:7.2f}, Length = {episode_length:3d}, "
@@ -185,20 +235,13 @@ if __name__ == "__main__":
     print(f"Total time: {elapsed_time:.1f} seconds")
     print(f"Steps per second: {final_sps:.1f}")
 
-    # Final statistics
-    final_stats = {
-        "final/average_return": avg_reward,
-        "final/std_return": std_reward,
-        "final/best_return": best_reward,
-        "final/average_length": avg_length,
-        "final/global_step": global_step,
-        "final/total_time": elapsed_time,
-        "final/sps": final_sps,
-    }
-
     # Save results to file
     with open(result_dir / "results.txt", "w") as f:
         f.write(f"Agent type: {args.agent_type}\n")
+        if args.agent_type == "vlm":
+            f.write(f"VLM model: {args.vlm_model_id}\n")
+            f.write(f"seq_len: {args.seq_len}\n")
+            f.write(f"max_new_tokens: {args.max_new_tokens}\n")
         f.write(f"Number of episodes: {args.num_episodes}\n")
         f.write(f"Average reward: {avg_reward:.2f} ± {std_reward:.2f}\n")
         f.write(f"Best reward: {best_reward:.2f}\n")
