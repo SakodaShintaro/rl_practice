@@ -19,32 +19,40 @@ from vla_streaming_rl.wrappers import make_env
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-CAR_RACING_FORMAT_HINT = (
-    "Respond with EXACTLY ONE LINE in this format and nothing else: "
-    "steer=<value>, accel=<value> "
-    "where each <value> is a float in [-1, 1]."
+CAR_RACING_ACTION_SPEC = (
+    "steer=<value>, accel=<value> where each <value> is a float in [-1, 1]"
 )
-PANEL_FORMAT_HINT = (
-    "Respond with EXACTLY ONE LINE in this format and nothing else: "
-    "dx=<value>, dy=<value>, button=<value> "
-    "where each <value> is a float in [-1, 1]."
+PANEL_ACTION_SPEC = (
+    "dx=<value>, dy=<value>, button=<value> where each <value> is a float in [-1, 1]"
 )
 
-CONTINUOUS_FORMAT_HINTS = {
-    "CarRacing-v3": CAR_RACING_FORMAT_HINT,
-    "ColorPanel-v0": PANEL_FORMAT_HINT,
-    "STL10Panel-v0": PANEL_FORMAT_HINT,
-    "TrackingSquare-v0": PANEL_FORMAT_HINT,
+CONTINUOUS_ACTION_SPECS = {
+    "CarRacing-v3": CAR_RACING_ACTION_SPEC,
+    "ColorPanel-v0": PANEL_ACTION_SPEC,
+    "STL10Panel-v0": PANEL_ACTION_SPEC,
+    "TrackingSquare-v0": PANEL_ACTION_SPEC,
 }
 
 
-def make_bin_format_hint(action_dim: int, n_bins: int) -> str:
+def make_bin_action_spec(action_dim: int, n_bins: int) -> str:
     neutral = n_bins // 2
     return (
-        f"Respond with EXACTLY ONE LINE: {action_dim} integers separated by commas. "
-        f"Each integer is a bin index in [0, {n_bins - 1}], where 0 maps to value -1.0, "
-        f"{neutral} maps to 0.0, and {n_bins - 1} maps to +1.0. "
-        "Output ONLY the integers and nothing else."
+        f"{action_dim} integers separated by commas, each a bin index in "
+        f"[0, {n_bins - 1}] where 0 maps to -1.0, {neutral} to 0.0, and {n_bins - 1} to +1.0"
+    )
+
+
+def wrap_format_hint(action_spec: str, use_thinking: bool) -> str:
+    if use_thinking:
+        return (
+            "Reason briefly inside <think>...</think> tags about the current image and "
+            "the previous reward (if shown), then close the tag. Immediately after the "
+            f"closing </think>, output the action: {action_spec}. The text after "
+            "</think> must contain ONLY the action — no commentary, no labels."
+        )
+    return (
+        f"Respond with EXACTLY ONE LINE: {action_spec}. Output ONLY the action and "
+        "nothing else."
     )
 
 
@@ -75,7 +83,16 @@ def parse_args() -> argparse.Namespace:
         choices=["continuous", "bin_index"],
         help="continuous: model outputs floats in [-1,1]; bin_index: model outputs integer bin indices in [0, n_bins).",
     )
-    parser.add_argument("--n_bins", type=int, default=128)
+    parser.add_argument("--n_bins", type=int, default=32)
+    parser.add_argument(
+        "--use_thinking",
+        action="store_true",
+        help=(
+            "Wrap reasoning in <think>...</think> and parse the action from after the "
+            "closing tag. The thinking budget is auto-derived from --max_new_tokens "
+            "by reserving enough tokens for the action and the forced </think> closure."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -181,10 +198,11 @@ if __name__ == "__main__":
                 f"VLM agent in continuous mode requires env.unwrapped.parse_action_text; "
                 f"not defined for {args.env_id}"
             )
-            format_hint = CONTINUOUS_FORMAT_HINTS.get(args.env_id, "")
+            action_spec = CONTINUOUS_ACTION_SPECS.get(args.env_id, "")
         else:
             parse_action_text = None
-            format_hint = make_bin_format_hint(action_dim, args.n_bins)
+            action_spec = make_bin_action_spec(action_dim, args.n_bins)
+        format_hint = wrap_format_hint(action_spec, use_thinking=args.use_thinking)
         agent = ZeroShotVLMAgent(
             model_id=args.vlm_model_id,
             parse_action_text=parse_action_text,
@@ -194,6 +212,7 @@ if __name__ == "__main__":
             max_new_tokens=args.max_new_tokens,
             action_format=args.action_format,
             n_bins=args.n_bins,
+            use_thinking=args.use_thinking,
         )
     else:
         raise ValueError(f"Unknown agent_type: {args.agent_type}")
@@ -203,6 +222,7 @@ if __name__ == "__main__":
         print(f"  model_id={args.vlm_model_id}")
         print(f"  action_format={args.action_format}  n_bins={args.n_bins}")
         print(f"  seq_len={args.seq_len}  max_new_tokens={args.max_new_tokens}")
+        print(f"  use_thinking={args.use_thinking}")
         print(f"  task_prompt={initial_task_prompt!r}")
 
     episode_rewards = []
@@ -271,6 +291,7 @@ if __name__ == "__main__":
             f.write(f"n_bins: {args.n_bins}\n")
             f.write(f"seq_len: {args.seq_len}\n")
             f.write(f"max_new_tokens: {args.max_new_tokens}\n")
+            f.write(f"use_thinking: {args.use_thinking}\n")
         f.write(f"Number of episodes: {args.num_episodes}\n")
         f.write(f"Average reward: {avg_reward:.2f} ± {std_reward:.2f}\n")
         f.write(f"Best reward: {best_reward:.2f}\n")
