@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import carla
 import gymnasium as gym
 import numpy as np
+from srunner.scenariomanager.traffic_events import TrafficEventType
 
 from vla_streaming_rl.envs.bench2drive_scenario_runtime import Bench2DriveRuntime
 from vla_streaming_rl.envs.carla_obs import (
@@ -29,6 +30,24 @@ COMFORT_MAX_ABS_YAW_RATE = 0.95  # [rad/s]
 COMFORT_MAX_ABS_YAW_ACCEL = 1.93  # [rad/s^2]
 
 DT = 0.1  # [s] (10 FPS)
+
+# Bench2Drive scoring (mirrors statistics_manager.py PENALTY_VALUE_DICT/PENALTY_PERC_DICT).
+# score_composed = score_route(0-100) * Π(score_penalty in (0,1])
+B2D_PENALTY_VALUE_DICT = {
+    TrafficEventType.COLLISION_PEDESTRIAN: 0.5,
+    TrafficEventType.COLLISION_VEHICLE: 0.6,
+    TrafficEventType.COLLISION_STATIC: 0.65,
+    TrafficEventType.TRAFFIC_LIGHT_INFRACTION: 0.7,
+    TrafficEventType.STOP_INFRACTION: 0.8,
+    TrafficEventType.SCENARIO_TIMEOUT: 0.7,
+    TrafficEventType.YIELD_TO_EMERGENCY_VEHICLE: 0.7,
+}
+# OUTSIDE_ROUTE_LANES_INFRACTION uses penalty_value=0, type='increases' →
+# score_penalty *= (1 - off_route_pct/100); 70% off-route ≈ 0.3 multiplier.
+B2D_PENALTY_PERC_DICT = {
+    TrafficEventType.OUTSIDE_ROUTE_LANES_INFRACTION: (0.0, "increases"),
+    TrafficEventType.MIN_SPEED_INFRACTION: (0.7, "unused"),
+}
 
 
 @dataclass
@@ -227,6 +246,10 @@ class CARLALeaderboardEnv(gym.Env):
             "lane_invasion": 0,
         }
         self.prev_driving_score = 0.0
+        self._latest_score_route = 0.0
+        self._latest_score_penalty = 1.0
+        self._latest_driving_score = 0.0
+        self._latest_off_route_pct = 0.0
 
         # Episode information
         self.episode_step = 0
@@ -339,6 +362,10 @@ class CARLALeaderboardEnv(gym.Env):
         self.lane_invasion_history = []
         self.infractions = {k: 0 for k in self.infractions}
         self.prev_driving_score = 0.0
+        self._latest_score_route = 0.0
+        self._latest_score_penalty = 1.0
+        self._latest_driving_score = 0.0
+        self._latest_off_route_pct = 0.0
         self.current_image = None
         self.negative_reward_count = 0
         self.vehicle_physics = VehiclePhysics.create()
@@ -384,10 +411,23 @@ class CARLALeaderboardEnv(gym.Env):
             or self.infractions["collision_vehicle"] > 0
             or self.infractions["collision_static"] > 0
         )
-        terminated = has_collision or self.route_tracker.route_completion >= 1.0
 
-        # Calculate reward
+        # Calculate reward (also updates self._latest_off_route_pct from criteria).
         reward = self._compute_reward(has_collision)
+
+        # Heavy off-route → terminate. Bench2Drive's score_composed at >=30%
+        # off-route is already <70 of route_completion; continuing wastes
+        # rollout steps with no recovery in practice. Overwrite the reward to
+        # the same -1 floor a collision delivers (delta-based reward at the
+        # crossing step is otherwise tiny and not a clear terminal signal).
+        heavy_off_route = self._latest_off_route_pct >= 30.0
+        if heavy_off_route or has_collision:
+            reward = -1.0
+        terminated = (
+            has_collision
+            or self.route_tracker.route_completion >= 1.0
+            or heavy_off_route
+        )
 
         # Negative reward count
         if reward < 0:
@@ -422,6 +462,9 @@ class CARLALeaderboardEnv(gym.Env):
         info = {
             "task_prompt": self.prompt,
             "route_completion": self.route_tracker.route_completion,
+            "driving_score": self._latest_driving_score,
+            "score_route": self._latest_score_route,
+            "score_penalty": self._latest_score_penalty,
             "infractions": self.infractions.copy(),
             "velocity": self.vehicle_physics.velocity,
             "velocity_kph": self.vehicle_physics.velocity_kph,
@@ -506,34 +549,82 @@ class CARLALeaderboardEnv(gym.Env):
 
     def _compute_reward(self, has_collision: bool) -> float:
         """
-        Reward calculation combining route progress, collision penalty, and comfort.
+        Reward = step delta of Bench2Drive ``score_composed`` (range ~[0, 100]).
 
-        - Collision: -1.0 (terminal)
-        - Route progress: delta of driving score
-        - Comfort: penalty for exceeding acceleration/jerk/yaw thresholds
+        ``score_composed = score_route(0-100) * Π(penalty_factor in (0,1])`` —
+        any infraction (collision, off-route, red light, stop, ...) drops the
+        score multiplicatively, so the delta is naturally negative on the step
+        the infraction fires. Matches what eval reports in ``eval.json``.
         """
-        if has_collision:
-            return -1.0
+        score_route, score_penalty = self._score_components()
+        new_score = max(score_route * score_penalty, 0.0)
 
-        # Route Completion (0.0 ~ 100.0)
-        route_completion_score = self.route_tracker.route_completion * 100.0
+        # Cache for info dict.
+        self._latest_score_route = score_route
+        self._latest_score_penalty = score_penalty
+        self._latest_driving_score = new_score
 
-        # Driving Score (no infraction penalty needed here since collision returns early)
-        driving_score = route_completion_score
+        reward = new_score - self.prev_driving_score
+        self.prev_driving_score = new_score
 
-        # Reward is the difference from previous
-        reward = driving_score - self.prev_driving_score
-        self.prev_driving_score = driving_score
-
-        # Give -0.1 if reward is 0.0 (no progress)
+        # Discourage stalling: when nothing happens (no progress, no infraction).
         if reward == 0.0:
             reward = -0.1
 
-        # Comfort penalty: count how many comfort metrics are out of bounds
-        comfort_penalty = self._compute_comfort_penalty()
-        reward += comfort_penalty
+        reward += self._compute_comfort_penalty()
+        # Clip the negative side so a single large drop (e.g. instant ×0.5
+        # multiplier on a high score) cannot dominate the gradient. Positive
+        # spikes are left intact.
+        return max(reward, -1.0)
 
-        return reward
+    def _score_components(self) -> tuple[float, float]:
+        """Return ``(score_route, score_penalty)`` matching Bench2Drive eval.
+
+        Runtime mode reads the same ``RouteScenario`` criteria that
+        ``statistics_manager.compute_route_statistics`` reads at end-of-episode.
+        Random-route mode falls back to a coarse, sensor-based approximation
+        (collisions only — no waypoint-aware off-route check).
+        """
+        if self.runtime is not None and self.runtime.route_scenario is not None:
+            return self._score_from_criteria()
+        return self._score_from_sensors()
+
+    def _score_from_criteria(self) -> tuple[float, float]:
+        score_route = 0.0
+        score_penalty = 1.0
+        off_route_pct = 0.0
+        for criterion in self.runtime.route_scenario.get_criteria():
+            for event in criterion.events:
+                event_type = event.get_type()
+                if event_type in B2D_PENALTY_VALUE_DICT:
+                    score_penalty *= B2D_PENALTY_VALUE_DICT[event_type]
+                elif event_type in B2D_PENALTY_PERC_DICT:
+                    pv, pt = B2D_PENALTY_PERC_DICT[event_type]
+                    if pt == "increases":
+                        pct = event.get_dict()["percentage"]
+                        score_penalty *= 1 - (1 - pv) * pct / 100.0
+                    elif pt == "decreases":
+                        pct = event.get_dict()["percentage"]
+                        score_penalty *= 1 - (1 - pv) * (1 - pct / 100.0)
+                    # "unused" → no-op (matches statistics_manager).
+                    if event_type == TrafficEventType.OUTSIDE_ROUTE_LANES_INFRACTION:
+                        off_route_pct = event.get_dict()["percentage"]
+                elif event_type == TrafficEventType.ROUTE_COMPLETION:
+                    score_route = event.get_dict()["route_completed"]
+        self._latest_off_route_pct = off_route_pct
+        return score_route, score_penalty
+
+    def _score_from_sensors(self) -> tuple[float, float]:
+        """Coarse fallback for random-route mode (no RouteScenario criteria)."""
+        score_route = self.route_tracker.route_completion * 100.0
+        score_penalty = (
+            0.5 ** self.infractions["collision_pedestrian"]
+            * 0.6 ** self.infractions["collision_vehicle"]
+            * 0.65 ** self.infractions["collision_static"]
+        )
+        # No criterion-equivalent off-route check in random-route mode.
+        self._latest_off_route_pct = 0.0
+        return score_route, score_penalty
 
     def _compute_comfort_penalty(self) -> float:
         """

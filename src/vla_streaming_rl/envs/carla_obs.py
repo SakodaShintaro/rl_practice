@@ -18,7 +18,9 @@ import scipy.interpolate
 
 @dataclass(frozen=True)
 class CARLAObsConfig:
-    image_size: tuple[int, int] = (256, 256)  # (width, height)
+    # image_size: tuple[int, int] = (256, 256)  # (width, height)
+    # image_size: tuple[int, int] = (832, 480)  # (width, height) aligned to Wan 2.1
+    image_size: tuple[int, int] = (416, 240)  # (width, height) aligned to Wan 2.1, half
     fov: float = 110.0
     camera_x: float = 1.5
     camera_z: float = 2.4
