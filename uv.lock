@@ -10,7 +10,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-25T09:20:05.768575433Z"
+exclude-newer = "2026-03-25T10:45:59.256702095Z"
 exclude-newer-span = "P40D"
 
 [options.exclude-newer-package]
@@ -190,6 +190,14 @@ wheels = [
     { url = "https://pypi.flatt.tech/files/packages/f5/87/c5fc979827d555ab9b9803d7f0b043b5a6108f8de8c7184be385b24fd3c0/Box2D-2.3.10-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:6b0d1cb60b917297b0c9d770b3a7f152aa112f7d0f2a4c1634c5cc060f898c4f", size = 4423303, upload-time = "2024-11-29T18:02:28.32Z" },
     { url = "https://pypi.flatt.tech/files/packages/d4/a8/8ac50aafca7e5e466d712dd24e7dc1337935eb4661560294f115333bfc18/Box2D-2.3.10-cp312-cp312-win32.whl", hash = "sha256:b8d3d237de7caf729268687e3e7b0f8c13d509a67b6bb693d314f440c963f006", size = 1193198, upload-time = "2024-11-29T18:02:31.009Z" },
     { url = "https://pypi.flatt.tech/files/packages/f5/48/a3fde47fa3c2f5e32873e4cebc5ed5f663f434698dca1f0197c674e2f66c/Box2D-2.3.10-cp312-cp312-win_amd64.whl", hash = "sha256:ff9f434b61d2d9bf5c274aaa81a11ecd717441f64491bc22fda8151f3c35d78c", size = 1312692, upload-time = "2024-11-29T18:02:50.602Z" },
+]
+
+[[package]]
+name = "carla"
+version = "0.9.16"
+source = { path = "/home/sakoda/CARLA_0.9.16/PythonAPI/carla/dist/carla-0.9.16-cp312-cp312-manylinux_2_31_x86_64.whl" }
+wheels = [
+    { filename = "carla-0.9.16-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:c497edf1b8747194c55b4a24b65b5010d91a4c03baf72c06d11e7cff2b961528" },
 ]
 
 [[package]]
@@ -2476,6 +2484,7 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "bitsandbytes" },
+    { name = "carla" },
     { name = "causal-conv1d" },
     { name = "dictor" },
     { name = "diffusers" },
@@ -2530,6 +2539,7 @@ dependencies = [
 requires-dist = [
     { name = "accelerate" },
     { name = "bitsandbytes" },
+    { name = "carla", path = "/home/sakoda/CARLA_0.9.16/PythonAPI/carla/dist/carla-0.9.16-cp312-cp312-manylinux_2_31_x86_64.whl" },
     { name = "causal-conv1d", url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.0/causal_conv1d-1.6.0+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
     { name = "dictor", specifier = ">=0.1.12" },
     { name = "diffusers" },
