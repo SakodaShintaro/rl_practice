@@ -7,6 +7,29 @@ from huggingface_hub import hf_hub_download
 _WRAP_PREFIXES = ("_fsdp_wrapped_module.", "_checkpoint_wrapped_module.", "_orig_mod.")
 
 
+class CachedTextEncoder(torch.nn.Module):
+    """Stand-in for WanTextEncoder when the caption is fixed for the whole run.
+
+    Run the real text encoder once, register its output as buffers, then
+    discard the encoder weights. Subsequent forward(prompts) calls ignore
+    `prompts` and return the cached embeddings.
+    """
+
+    def __init__(self, cached: dict, device: torch.device) -> None:
+        super().__init__()
+        for k, v in cached.items():
+            self.register_buffer(f"_cached_{k}", v.detach().to(device=device))
+        self._cached_keys = list(cached.keys())
+        self._device = device
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    def forward(self, text_prompts):
+        return {k: getattr(self, f"_cached_{k}") for k in self._cached_keys}
+
+
 def resolve_checkpoint_path(spec: str) -> str:
     """Resolve --checkpoint_path / generator_ckpt. Supports a local path or `hf:repo_id:filename`."""
     if spec.startswith("hf:"):

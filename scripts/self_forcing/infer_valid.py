@@ -48,6 +48,7 @@ from tqdm import tqdm
 
 from vla_streaming_rl.self_forcing.model.inference_model import CausalInferencePipeline
 from vla_streaming_rl.self_forcing.utils.misc import (
+    CachedTextEncoder,
     load_generator_state_dict,
     resolve_checkpoint_path,
     set_seed,
@@ -111,24 +112,6 @@ def parse_args() -> argparse.Namespace:
     if args.checkpoint_path is None and args.out_root is None:
         parser.error("--out_root is required when --checkpoint_path is not given.")
     return args
-
-
-class _CachedTextEncoder(torch.nn.Module):
-    """Stand-in for WanTextEncoder when the caption is fixed for the whole run."""
-
-    def __init__(self, cached: dict, device: torch.device) -> None:
-        super().__init__()
-        for k, v in cached.items():
-            self.register_buffer(f"_cached_{k}", v.detach().to(device=device))
-        self._cached_keys = list(cached.keys())
-        self._device = device
-
-    @property
-    def device(self) -> torch.device:
-        return self._device
-
-    def forward(self, text_prompts):
-        return {k: getattr(self, f"_cached_{k}") for k in self._cached_keys}
 
 
 def _decode_latent_to_uint8(pipeline, latents_thwc: torch.Tensor) -> torch.Tensor:
@@ -278,7 +261,7 @@ def main() -> None:
     fixed_caption = config.b2d_caption
     pipeline.text_encoder.to(device=device)
     cached_text = pipeline.text_encoder([fixed_caption])
-    pipeline.text_encoder = _CachedTextEncoder(cached_text, device=device)
+    pipeline.text_encoder = CachedTextEncoder(cached_text, device=device)
     torch.cuda.empty_cache()
 
     # Discover valid episodes with precomputed latents
