@@ -113,14 +113,15 @@ def concat_labeled_images(
     observation: np.ndarray,
     prediction: np.ndarray,
     reward: np.ndarray,
+    goal: np.ndarray,
 ) -> np.ndarray:
     """
     Create a combined image from multiple images (returns in RGB format).
     Convert all images to uint8 and add labels.
     """
     # Define images and label names as arrays
-    images = [environment, observation, prediction, reward]
-    labels = ["environment", "observation", "prediction", "reward"]
+    images = [environment, observation, prediction, reward, goal]
+    labels = ["environment", "observation", "prediction", "reward", "goal"]
 
     # Batch process uint8 conversion and label addition
     labeled_images = [

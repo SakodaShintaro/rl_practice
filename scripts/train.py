@@ -28,6 +28,7 @@ from vla_streaming_rl.agents.off_policy import OffPolicyAgent
 from vla_streaming_rl.agents.on_policy import OnPolicyAgent
 from vla_streaming_rl.agents.streaming import StreamingAgent
 from vla_streaming_rl.networks.build import build_network
+from vla_streaming_rl.self_forcing.goal_predictor import WorldModelGoalPredictor
 from vla_streaming_rl.utils import concat_labeled_images, create_reward_image
 from vla_streaming_rl.wrappers import make_env
 
@@ -210,6 +211,15 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             learning_rate=args.learning_rate,
         )
     elif args.agent_type == "streaming":
+        goal_predictor = WorldModelGoalPredictor(
+            enabled=bool(args.self_forcing.enabled),
+            config_path=args.self_forcing.config_path,
+            checkpoint_path=args.self_forcing.checkpoint_path,
+            device=torch.device("cuda"),
+            num_context_blocks=int(args.self_forcing.num_context_blocks),
+            predict_interval=int(args.self_forcing.predict_interval),
+        )
+
         agent = StreamingAgent(
             observation_space=env.observation_space,
             action_space=env.action_space,
@@ -228,6 +238,7 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             max_new_tokens=args.max_new_tokens,
             max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=args.pad_token_id,
+            goal_predictor=goal_predictor,
         )
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
@@ -252,6 +263,7 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             obs_for_render,
             np.zeros_like(obs_for_render),
             reward_image,
+            np.zeros_like(obs_for_render),
         )
         bgr_image_list = [cv2.cvtColor(initial_rgb_image, cv2.COLOR_RGB2BGR)]
 
@@ -306,8 +318,19 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             wandb.log(data_dict)
 
             reward_image = create_reward_image(pred_reward, reward)
+            goal_image_full = agent_info.get("goal_image", None)
+            if goal_image_full is None:
+                goal_for_render = np.zeros_like(obs_for_render)
+            else:
+                # Predictor returns (fpb*4, 480, 832, 3) uint8; show the last
+                # frame (~1.2s ahead) downsampled to the obs render resolution.
+                goal_for_render = cv2.resize(
+                    goal_image_full[-1],
+                    (obs_for_render.shape[1], obs_for_render.shape[0]),
+                    interpolation=cv2.INTER_LINEAR,
+                )
             rgb_image = concat_labeled_images(
-                env.render(), obs_for_render, pred_image, reward_image
+                env.render(), obs_for_render, pred_image, reward_image, goal_for_render
             )
             bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
             bgr_image_list.append(bgr_image)

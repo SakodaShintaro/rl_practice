@@ -8,3 +8,10 @@ batch_size: 1
 learning_rate: 2e-6
 use_eligibility_trace: 1
 et_lambda: 0.5
+
+self_forcing:
+  enabled: false
+  config_path: configs/self_forcing/b2d_finetune.yaml
+  checkpoint_path: null
+  num_context_blocks: 1
+  predict_interval: 4

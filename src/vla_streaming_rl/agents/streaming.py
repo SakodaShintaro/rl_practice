@@ -7,6 +7,7 @@ from torch import nn, optim
 from vla_streaming_rl.optimizers.adam_et import AdamET
 from vla_streaming_rl.replay_buffer import ReplayBuffer
 from vla_streaming_rl.reward_processor import RewardProcessor
+from vla_streaming_rl.self_forcing.goal_predictor import WorldModelGoalPredictor
 
 
 class StreamingAgent:
@@ -30,6 +31,7 @@ class StreamingAgent:
         max_new_tokens: int,
         max_prompt_tokens: int,
         pad_token_id: int,
+        goal_predictor: WorldModelGoalPredictor,
     ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -98,6 +100,8 @@ class StreamingAgent:
         self.prev_action_token_ids = []
         self._episode_reset = False
 
+        self.goal_predictor = goal_predictor
+
     def _prepare_step(
         self,
         obs: np.ndarray,
@@ -107,11 +111,13 @@ class StreamingAgent:
         info_dict: dict,
         task_prompt: str,
     ) -> None:
-        if terminated or truncated:
+        episode_done = terminated or truncated
+        if episode_done:
             self.action_chunk = None
             self.chunk_step = 0
             self.prev_action_token_ids = []
             self._episode_reset = self.use_done
+            self.goal_predictor.reset()
 
         action_norm = np.linalg.norm(self.prev_action)
         if not self.normalizing_by_return:
@@ -129,7 +135,7 @@ class StreamingAgent:
             obs_tensor,
             obs_z,
             reward,
-            (terminated or truncated) if self.use_done else False,
+            episode_done if self.use_done else False,
             self.rnn_state.squeeze(0),
             torch.from_numpy(normalized_action).to(self.device),
             0.0,
@@ -137,6 +143,11 @@ class StreamingAgent:
             self.prev_action_token_ids,
             task_prompt_token_ids,
         )
+
+        if episode_done:
+            info_dict["goal_image"] = self.goal_predictor.get_latest()
+        else:
+            info_dict["goal_image"] = self.goal_predictor.step(obs)
 
     def _use_action_chunk(self, info_dict: dict) -> np.ndarray:
         action = self.action_chunk[self.chunk_step]
