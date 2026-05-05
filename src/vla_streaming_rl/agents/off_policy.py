@@ -6,6 +6,7 @@ from torch import nn, optim
 
 from vla_streaming_rl.replay_buffer import ReplayBuffer
 from vla_streaming_rl.reward_processor import RewardProcessor
+from vla_streaming_rl.self_forcing.goal_predictor import WorldModelGoalPredictor
 
 
 class OffPolicyAgent:
@@ -29,6 +30,7 @@ class OffPolicyAgent:
         max_new_tokens: int,
         max_prompt_tokens: int,
         pad_token_id: int,
+        goal_predictor: WorldModelGoalPredictor,
     ) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -82,6 +84,8 @@ class OffPolicyAgent:
 
         self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
 
+        self.goal_predictor = goal_predictor
+
     @torch.inference_mode()
     def select_action(
         self,
@@ -124,6 +128,10 @@ class OffPolicyAgent:
             [],
             task_prompt_token_ids,
         )
+
+        info_dict["goal_image"] = self.goal_predictor.step(obs)
+        if terminated or truncated:
+            self.goal_predictor.reset()
 
         # Use cached action from chunk if available (except during random exploration)
         if (

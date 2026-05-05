@@ -117,7 +117,6 @@ class StreamingAgent:
             self.chunk_step = 0
             self.prev_action_token_ids = []
             self._episode_reset = self.use_done
-            self.goal_predictor.reset()
 
         action_norm = np.linalg.norm(self.prev_action)
         if not self.normalizing_by_return:
@@ -144,10 +143,9 @@ class StreamingAgent:
             task_prompt_token_ids,
         )
 
+        info_dict["goal_image"] = self.goal_predictor.step(obs)
         if episode_done:
-            info_dict["goal_image"] = self.goal_predictor.get_latest()
-        else:
-            info_dict["goal_image"] = self.goal_predictor.step(obs)
+            self.goal_predictor.reset()
 
     def _use_action_chunk(self, info_dict: dict) -> np.ndarray:
         action = self.action_chunk[self.chunk_step]

@@ -6,6 +6,7 @@ from torch import nn, optim
 
 from vla_streaming_rl.replay_buffer import ReplayBuffer, ReplayBufferData
 from vla_streaming_rl.reward_processor import RewardProcessor
+from vla_streaming_rl.self_forcing.goal_predictor import WorldModelGoalPredictor
 
 
 class SequentialBatchSampler:
@@ -65,6 +66,7 @@ class OnPolicyAgent:
         pad_token_id: int,
         buffer_device: str,
         learning_rate: float,
+        goal_predictor: WorldModelGoalPredictor,
     ) -> None:
         self.on_policy_epoch = on_policy_epoch
         # action properties
@@ -123,6 +125,8 @@ class OnPolicyAgent:
         self.prev_action_token_ids: list[int] = []
         self.prev_parse_success = True
 
+        self.goal_predictor = goal_predictor
+
     @torch.inference_mode()
     def select_action(
         self,
@@ -165,6 +169,10 @@ class OnPolicyAgent:
             self.prev_action_token_ids,
             task_prompt_token_ids,
         )
+
+        info_dict["goal_image"] = self.goal_predictor.step(obs)
+        if terminated or truncated:
+            self.goal_predictor.reset()
 
         # Use cached action from chunk if available
         if self.action_chunk is not None and self.chunk_step < self.horizon:
