@@ -47,6 +47,9 @@ timestep_shift: 5.0
 # --- dataset ---
 # b2d_root is set per-machine via `--b2d_root` on the scripts/train.py CLI (not stored here).
 b2d_caption: ""   # fixed empty caption (no CFG, no per-clip conditioning)
+# Drop the leading frames per episode: in Bench2Drive the first few rgb_front
+# frames show other vehicles falling/spawning into the scene from above.
+b2d_skip_head_frames: 5
 
 # --- inference ---
 # WorldModelGoalPredictor reads this. Lookahead = num_frame_per_block*4 + 1 - predict_interval

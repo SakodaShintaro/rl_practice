@@ -49,9 +49,10 @@ def encode_episode(
     device: torch.device,
     target_h: int,
     target_w: int,
+    skip_head_frames: int,
 ) -> torch.Tensor | None:
     rgb_dir = episode_dir / "camera" / "rgb_front"
-    frame_paths = sorted(rgb_dir.glob("*.jpg"))
+    frame_paths = sorted(rgb_dir.glob("*.jpg"))[skip_head_frames:]
     if not frame_paths:
         return None
 
@@ -86,6 +87,7 @@ def main() -> None:
     config = OmegaConf.load(args.config_path)
     target_h = int(config.pixel_height)
     target_w = int(config.pixel_width)
+    skip_head_frames = int(config.b2d_skip_head_frames)
 
     device = torch.device("cuda")
     splits_path = args.src / "splits.json"
@@ -108,7 +110,12 @@ def main() -> None:
             t0 = time.time()
             try:
                 latent = encode_episode(
-                    vae, args.src / ep, device=device, target_h=target_h, target_w=target_w
+                    vae,
+                    args.src / ep,
+                    device=device,
+                    target_h=target_h,
+                    target_w=target_w,
+                    skip_head_frames=skip_head_frames,
                 )
             except Exception as e:
                 print(f"{ep}: ERROR {type(e).__name__}: {e}")
