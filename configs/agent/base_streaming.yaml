@@ -14,5 +14,3 @@ self_forcing:
   config_path: configs/self_forcing/b2d_finetune.yaml
   checkpoint_path: null
   num_context_blocks: 1
-  seconds_ahead: 1.0
-  predict_interval: 4

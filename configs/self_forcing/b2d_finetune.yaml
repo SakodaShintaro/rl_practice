@@ -48,6 +48,11 @@ timestep_shift: 5.0
 # b2d_root is set per-machine via `--b2d_root` on the scripts/train.py CLI (not stored here).
 b2d_caption: ""   # fixed empty caption (no CFG, no per-clip conditioning)
 
+# --- inference ---
+# WorldModelGoalPredictor reads this. Lookahead = num_frame_per_block*4 + 1 - predict_interval
+# (e.g. 12 -> 1 frame ahead; 6 -> 7 frames ahead; 1 -> 12 frames ahead).
+predict_interval: 12
+
 # --- optimizer (LoRA-friendly LR; bump higher than full fine-tune since adapter init is identity) ---
 seed: 0
 lr: 1.0e-4

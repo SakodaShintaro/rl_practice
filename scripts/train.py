@@ -173,8 +173,6 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
         checkpoint_path=args.self_forcing.checkpoint_path,
         device=torch.device("cuda"),
         num_context_blocks=int(args.self_forcing.num_context_blocks),
-        seconds_ahead=float(args.self_forcing.seconds_ahead),
-        predict_interval=int(args.self_forcing.predict_interval),
     )
 
     if args.agent_type == "off_policy":

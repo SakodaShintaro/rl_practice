@@ -2,9 +2,10 @@
 
 For each valid episode we replay the front-camera jpgs one frame at a time
 through ``WorldModelGoalPredictor.step(obs)`` and record the goal frame the
-predictor returns. The goal at step ``t`` is the model's prediction of the
-world ``--seconds_ahead`` seconds in the future, so we score it against the
-real jpg ``delta = round(seconds_ahead * fps)`` frames later (PSNR).
+predictor returns. The lookahead is fixed by the predictor:
+``delta = block_pix + 1 - predict_interval`` pixel frames into the future
+(block_pix = fpb*4 = 12). We score the predicted goal at step ``t`` against
+the real jpg ``delta`` frames later (PSNR).
 
 Run:
   uv run python scripts/self_forcing/infer_valid.py \
@@ -72,18 +73,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="K: how many fpb-latent blocks of past pixels to use as context.",
-    )
-    parser.add_argument(
-        "--seconds_ahead",
-        type=float,
-        default=1.0,
-        help="How many seconds in the future the goal frame should represent.",
-    )
-    parser.add_argument(
-        "--predict_interval",
-        type=int,
-        default=1,
-        help="Run the model every N env steps (1 = dense eval, slow).",
     )
     parser.add_argument(
         "--max_frames",
@@ -156,11 +145,10 @@ def main() -> None:
         checkpoint_path=args.checkpoint_path,
         device=device,
         num_context_blocks=args.num_context_blocks,
-        seconds_ahead=args.seconds_ahead,
-        predict_interval=args.predict_interval,
     )
-
-    delta = round(args.seconds_ahead * args.fps)  # pixel-frame offset between obs and its goal target
+    predict_interval = predictor.predict_interval
+    block_pix = predictor.block_pix
+    delta = block_pix + 1 - predict_interval  # constant lookahead the predictor delivers
 
     b2d_root = Path(args.b2d_root)
     splits = json.load(open(b2d_root / "splits.json"))
@@ -187,8 +175,8 @@ def main() -> None:
             goal = predictor.step(obs)  # (H, W, 3) uint8
             pred_frames.append(goal)
 
-        # Pair pred[t] with real[t + delta]; the first ctx_pix_needed-1 steps
-        # have no real prediction yet so PSNR there is just black-vs-real.
+        # Pair pred[t] with real[t + delta]; the first few steps have no real
+        # prediction yet so PSNR there is just black-vs-real.
         psnrs: list[float] = []
         compare_frames: list[np.ndarray] = []
         for t in range(T - delta):
@@ -196,8 +184,18 @@ def main() -> None:
             ref = real_uint8[t + delta].numpy()
             psnr = _per_frame_psnr(pred, ref)
             psnrs.append(psnr)
+            # cycle_step = how many env steps have passed since the most recent
+            # inference fired. goal_frame_idx = which frame of the cached
+            # block this is (block_pix - N + cycle_step). target_offset is
+            # frames-into-future from the prediction time.
+            cycle_step = t % predict_interval
+            goal_frame_idx = (block_pix - predict_interval) + cycle_step
+            target_offset = goal_frame_idx + 1
             label_real = f"real t+{delta}"
-            label_pred = f"pred (from step {t})  PSNR {psnr:.1f}dB"
+            label_pred = (
+                f"pred {cycle_step}f ago, +{target_offset}f from pred  "
+                f"PSNR {psnr:.1f}dB"
+            )
             row = np.concatenate(
                 [_annotate(ref, label_real), _annotate(pred, label_pred)], axis=1
             )
@@ -239,8 +237,7 @@ def main() -> None:
             {
                 "checkpoint_path": args.checkpoint_path,
                 "num_context_blocks": args.num_context_blocks,
-                "seconds_ahead": args.seconds_ahead,
-                "predict_interval": args.predict_interval,
+                "predict_interval": predict_interval,
                 "delta_frames": delta,
                 "fps": args.fps,
                 "seed": args.seed,

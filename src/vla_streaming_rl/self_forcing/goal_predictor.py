@@ -2,13 +2,23 @@
 """Action-independent goal-image predictor backed by the trained Self-Forcing
 world model.
 
+External interface:
+- ``__init__(...)``: configure
+- ``step(obs)`` -> goal frame for this step
+- ``reset()``: drop rolling state (e.g. on episode boundary)
+
+Everything else is private.
+
 Internally we keep a rolling buffer of finalized **latents** (length = K_lat),
 not pixel frames, and the Wan VAE encoder's causal feat_map cache is persisted
 across calls. Each ``step(obs)`` accumulates pixels into the in-flight latent
 position and only invokes the encoder when a full latent's worth of pixels is
 ready (1 pixel for the seed, then 4 pixels per subsequent latent). DiT
 inference fires every ``predict_interval`` env steps once the latent buffer is
-full.
+full; the resulting (fpb*4)-frame predicted block is cached and the goal frame
+returned by ``step`` advances through the block over the next predict_interval
+calls so the displayed lookahead stays constant at
+(block_pix + 1 - predict_interval) frames.
 
 When ``enabled=False``, the heavy world-model pipeline is not loaded and every
 ``step`` call returns a pre-allocated black image.
@@ -29,7 +39,6 @@ from vla_streaming_rl.self_forcing.utils.misc import (
 
 _INFERENCE_KEY_ORDER = ("generator_ema", "generator", "model")
 _WAN_H, _WAN_W = 480, 832  # Wan T2V-1.3B native resolution
-_WAN_FPS = 10  # Bench2Drive sampling rate; one predicted latent covers 4 pixel frames
 
 
 class WorldModelGoalPredictor:
@@ -41,12 +50,9 @@ class WorldModelGoalPredictor:
         checkpoint_path: str | None,
         device: torch.device,
         num_context_blocks: int,
-        seconds_ahead: float,
-        predict_interval: int,
     ) -> None:
         self._enabled = bool(enabled)
         self._device = device
-        self._predict_interval = int(predict_interval)
 
         config = OmegaConf.load(config_path)
         self._fpb = int(config.num_frame_per_block)
@@ -54,18 +60,26 @@ class WorldModelGoalPredictor:
         self._K_lat = int(num_context_blocks) * self._fpb
         self._target_h = _WAN_H
         self._target_w = _WAN_W
+        # block_pix and predict_interval are read-only public attributes so
+        # callers (infer_valid.py, render code) can derive lookahead/cycle
+        # info without duplicating the formula.
+        self.block_pix = self._fpb * 4
+        self.predict_interval = int(config.predict_interval)
 
-        # Map seconds_ahead onto a single frame index in the predicted block.
-        block_pix = self._fpb * 4  # =12 for fpb=3
-        self._goal_frame_idx = max(
-            0, min(round(seconds_ahead * _WAN_FPS) - 1, block_pix - 1)
-        )
+        if not (1 <= self.predict_interval <= self.block_pix):
+            raise ValueError(
+                f"predict_interval must be in [1, {self.block_pix}] (block size); "
+                f"got {self.predict_interval}"
+            )
 
         self._step_counter: int = 0
         self._pix_acc: list[torch.Tensor] = []  # pixels for the in-flight latent
         self._latent_buffer: list[torch.Tensor] = []  # finalized latents, len <= K_lat
         self._seed_done: bool = False
-        self._latest = np.zeros((self._target_h, self._target_w, 3), dtype=np.uint8)
+        # Full predicted block; black until first inference completes.
+        self._latest_block = np.zeros(
+            (self.block_pix, self._target_h, self._target_w, 3), dtype=np.uint8
+        )
 
         self._pipeline: CausalInferencePipeline | None = None
         self._vae_enc_cache: list | None = None
@@ -79,34 +93,40 @@ class WorldModelGoalPredictor:
         self._pix_acc.clear()
         self._latent_buffer.clear()
         self._seed_done = False
-        self._latest = np.zeros_like(self._latest)
+        self._latest_block = np.zeros_like(self._latest_block)
         if self._enabled:
             self._vae_enc_cache = self._pipeline.vae.model.make_encoder_cache()
 
     @torch.inference_mode()
     def step(self, obs: np.ndarray) -> np.ndarray:
-        """Push one observation frame and return the current goal frame.
+        """Push one observation frame and return the goal frame for this step.
+
+        The goal is the model's prediction of the world
+        (block_pix + 1 - predict_interval) pixel frames into the future. With
+        block_pix=12: predict_interval=1 → 12 frames lookahead;
+        predict_interval=6 → 7 frames lookahead; predict_interval=12 → 1 frame
+        lookahead.
 
         Args:
             obs: (3, H, W) float in [0, 1] — the current env observation.
 
         Returns:
             (H, W, 3) uint8 RGB image at Wan native resolution. Black until the
-            latent buffer first fills and the model produces a real prediction;
-            or always black when ``enabled=False``.
+            latent buffer first fills; or always black when ``enabled=False``.
         """
-        if not self._enabled:
-            return self._latest
+        if self._enabled:
+            self._push(obs)
+            if (
+                len(self._latent_buffer) >= self._K_lat
+                and self._step_counter % self.predict_interval == 0
+            ):
+                self._latest_block = self._run_inference()
 
-        self._push(obs)
-        if (
-            len(self._latent_buffer) >= self._K_lat
-            and self._step_counter % self._predict_interval == 0
-        ):
-            block = self._run_inference()  # (fpb*4, H, W, 3) uint8
-            self._latest = block[self._goal_frame_idx]
+        cycle_step = self._step_counter % self.predict_interval
+        goal_frame_idx = (self.block_pix - self.predict_interval) + cycle_step
+        goal = self._latest_block[goal_frame_idx]
         self._step_counter += 1
-        return self._latest
+        return goal
 
     def _build_pipeline(
         self, config, checkpoint_path: str | None
@@ -202,10 +222,8 @@ class WorldModelGoalPredictor:
             text_prompts=[self._fixed_caption],
             initial_latent=ctx_latent,
         )
-        # Decode (ctx + pred) together so the predicted frames see the same VAE
-        # cache prefix used at inference time.
         decode_seq = torch.cat([ctx_latent, all_lat[:, -self._fpb :]], dim=1)
         video = self._pipeline.vae.decode_to_pixel(decode_seq)
         video = (video * 0.5 + 0.5).clamp(0, 1)
         out = (video[0].permute(0, 2, 3, 1).cpu().float() * 255).clamp(0, 255).to(torch.uint8)
-        return out.numpy()[-self._fpb * 4 :]
+        return out.numpy()[-self.block_pix :]
