@@ -1,0 +1,12 @@
+# @package _global_
+defaults:
+  - base_network
+  - base_off_policy
+  - base_on_policy
+  - base_streaming
+  - base_cnn
+  - base_vlm
+  - _self_
+
+agent_type: streaming
+network_class: actor_critic_with_action_value
