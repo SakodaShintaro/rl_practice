@@ -36,7 +36,6 @@ from tqdm import tqdm
 from vla_streaming_rl.self_forcing.goal_predictor import WorldModelGoalPredictor
 from vla_streaming_rl.self_forcing.utils.misc import set_seed
 
-_WAN_H, _WAN_W = 480, 832
 _WAN_FPS = 10
 
 
@@ -90,7 +89,9 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def _load_real_frames(episode_dir: Path, max_frames: int | None) -> torch.Tensor:
+def _load_real_frames(
+    episode_dir: Path, max_frames: int | None, target_h: int, target_w: int
+) -> torch.Tensor:
     """Load and resize episode jpgs. Returns (T, H, W, 3) uint8."""
     rgb_dir = episode_dir / "camera" / "rgb_front"
     paths = sorted(rgb_dir.glob("*.jpg"))
@@ -98,7 +99,7 @@ def _load_real_frames(episode_dir: Path, max_frames: int | None) -> torch.Tensor
         paths = paths[:max_frames]
     if not paths:
         raise RuntimeError(f"no jpgs found in {rgb_dir}")
-    resize = transforms.Resize((_WAN_H, _WAN_W))
+    resize = transforms.Resize((target_h, target_w))
     frames = []
     for p in paths:
         img = resize(Image.open(p).convert("RGB"))
@@ -161,7 +162,9 @@ def main() -> None:
     ep_pbar = tqdm(episodes, desc="episodes", unit="ep")
     for i, ep in enumerate(ep_pbar):
         ep_pbar.set_postfix_str(ep, refresh=False)
-        real_uint8 = _load_real_frames(b2d_root / ep, args.max_frames)  # (T, H, W, 3) uint8
+        real_uint8 = _load_real_frames(
+            b2d_root / ep, args.max_frames, predictor.target_h, predictor.target_w
+        )  # (T, H, W, 3) uint8
         T = real_uint8.shape[0]
         if T <= delta:
             tqdm.write(f"[{i + 1}/{len(episodes)}] {ep}: SKIP (T={T} <= delta={delta})")

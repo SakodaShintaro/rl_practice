@@ -58,8 +58,8 @@ class WorldModelGoalPredictor:
         self._fpb = int(config.num_frame_per_block)
         self._fixed_caption = config.b2d_caption
         self._K_lat = int(num_context_blocks) * self._fpb
-        self._target_h = _WAN_H
-        self._target_w = _WAN_W
+        self.target_h = _WAN_H
+        self.target_w = _WAN_W
         # block_pix and predict_interval are read-only public attributes so
         # callers (infer_valid.py, render code) can derive lookahead/cycle
         # info without duplicating the formula.
@@ -78,7 +78,7 @@ class WorldModelGoalPredictor:
         self._seed_done: bool = False
         # Full predicted block; black until first inference completes.
         self._latest_block = np.zeros(
-            (self.block_pix, self._target_h, self._target_w, 3), dtype=np.uint8
+            (self.block_pix, self.target_h, self.target_w, 3), dtype=np.uint8
         )
 
         self._pipeline: CausalInferencePipeline | None = None
@@ -178,10 +178,10 @@ class WorldModelGoalPredictor:
 
     def _push(self, obs: np.ndarray) -> None:
         t = torch.from_numpy(obs).to(device=self._device, dtype=torch.float32)
-        if t.shape[1:] != (self._target_h, self._target_w):
+        if t.shape[1:] != (self.target_h, self.target_w):
             t = F.interpolate(
                 t.unsqueeze(0),
-                size=(self._target_h, self._target_w),
+                size=(self.target_h, self.target_w),
                 mode="bilinear",
                 align_corners=False,
             ).squeeze(0)
