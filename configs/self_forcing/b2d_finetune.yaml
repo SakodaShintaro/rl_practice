@@ -33,13 +33,13 @@ max_steps: 10
 mixed_precision: true
 context_noise: 0   # noise level for KV-cache context refresh in CausalInferencePipeline
 
-# --- model shape ---
-image_or_video_shape:
-- 1
-- 21
-- 16
-- 60
-- 104
+# --- model shape (single source of truth for spatial resolution) ---
+# pixel_height / pixel_width are the camera input resolution to the Wan VAE.
+# Latent dims are pixel/8; image_or_video_shape is derived in code from these
+# plus num_frames and the constant 16 latent channels.
+pixel_height: 240
+pixel_width: 416
+num_frames: 21          # latents per training clip (former image_or_video_shape[1])
 num_frame_per_block: 3
 gradient_checkpointing: true
 timestep_shift: 5.0

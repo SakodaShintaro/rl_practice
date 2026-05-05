@@ -38,7 +38,6 @@ from vla_streaming_rl.self_forcing.utils.misc import (
 )
 
 _INFERENCE_KEY_ORDER = ("generator_ema", "generator", "model")
-_WAN_H, _WAN_W = 480, 832  # Wan T2V-1.3B native resolution
 
 
 class WorldModelGoalPredictor:
@@ -58,8 +57,8 @@ class WorldModelGoalPredictor:
         self._fpb = int(config.num_frame_per_block)
         self._fixed_caption = config.b2d_caption
         self._K_lat = int(num_context_blocks) * self._fpb
-        self.target_h = _WAN_H
-        self.target_w = _WAN_W
+        self.target_h = int(config.pixel_height)
+        self.target_w = int(config.pixel_width)
         # block_pix and predict_interval are read-only public attributes so
         # callers (infer_valid.py, render code) can derive lookahead/cycle
         # info without duplicating the formula.
@@ -133,10 +132,13 @@ class WorldModelGoalPredictor:
     ) -> CausalInferencePipeline:
         from peft import LoraConfig, get_peft_model
 
+        # Wan VAE downsamples 8x spatially, so latent dims = pixel dims / 8.
         pipeline = CausalInferencePipeline(
             timestep_shift=config.timestep_shift,
             num_frame_per_block=self._fpb,
             context_noise=config.context_noise,
+            latent_height=self.target_h // 8,
+            latent_width=self.target_w // 8,
         )
         base_ckpt_path = resolve_checkpoint_path(config.generator_ckpt)
         pipeline.generator.load_state_dict(

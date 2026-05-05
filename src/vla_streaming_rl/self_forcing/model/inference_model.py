@@ -16,6 +16,8 @@ class CausalInferencePipeline(torch.nn.Module):
         timestep_shift: float,
         num_frame_per_block: int,
         context_noise: int,
+        latent_height: int,
+        latent_width: int,
     ):
         super().__init__()
         # Step 1: Initialize all models
@@ -32,14 +34,22 @@ class CausalInferencePipeline(torch.nn.Module):
         self.denoising_step_list = timesteps[1000 - steps]
 
         self.num_transformer_blocks = 30
-        self.frame_seq_length = 1560
+        # Tokens per latent frame after DiT patching. Must match the actual
+        # input resolution; a stale value silently degrades quality by leaving
+        # zero-padded gaps in the KV cache that dilute attention softmax.
+        ps = self.generator.model.patch_size  # (t, h, w), e.g. (1, 2, 2)
+        self.frame_seq_length = (latent_height * latent_width) // (ps[1] * ps[2])
 
         self.kv_cache = None
         self.context_noise = context_noise
         self.num_frame_per_block = num_frame_per_block
         self.local_attn_size = self.generator.model.local_attn_size
 
-        print(f"KV inference with {self.num_frame_per_block} frames per block")
+        print(
+            f"KV inference with {self.num_frame_per_block} frames per block, "
+            f"frame_seq_length={self.frame_seq_length} "
+            f"(latent {latent_height}x{latent_width}, patch {ps})"
+        )
 
         if self.num_frame_per_block > 1:
             self.generator.model.num_frame_per_block = self.num_frame_per_block
@@ -64,6 +74,15 @@ class CausalInferencePipeline(torch.nn.Module):
         batch_size, num_frames, num_channels, height, width = noise.shape
         assert num_frames % self.num_frame_per_block == 0
         num_blocks = num_frames // self.num_frame_per_block
+
+        ps = self.generator.model.patch_size
+        expected_seq_len = (height * width) // (ps[1] * ps[2])
+        assert expected_seq_len == self.frame_seq_length, (
+            f"noise latent {height}x{width} implies frame_seq_length="
+            f"{expected_seq_len}, but pipeline was built with "
+            f"{self.frame_seq_length}. Rebuild the pipeline with matching "
+            f"latent_height/latent_width."
+        )
         num_input_frames = initial_latent.shape[1]
         assert num_input_frames % self.num_frame_per_block == 0
         num_input_blocks = num_input_frames // self.num_frame_per_block

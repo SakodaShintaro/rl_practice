@@ -149,11 +149,21 @@ class Trainer:
             weight_decay=config.weight_decay,
         )
 
+        # Latent dims = pixel dims / 8 (Wan VAE downsample). Channel count is
+        # the Wan VAE's fixed z_dim (16). Batch dim is set per-iteration.
+        self.image_or_video_shape = [
+            1,
+            int(config.num_frames),
+            16,
+            int(config.pixel_height) // 8,
+            int(config.pixel_width) // 8,
+        ]
+
         # Step 3: Initialize the dataloader
         dataset = Bench2DriveLatentDataset(
             b2d_root=b2d_root,
             split="train",
-            num_frames=config.image_or_video_shape[1],
+            num_frames=int(config.num_frames),
             fixed_caption=config.b2d_caption,
         )
         dataloader = torch.utils.data.DataLoader(
@@ -175,7 +185,7 @@ class Trainer:
             valid_dataset = Bench2DriveLatentDataset(
                 b2d_root=b2d_root,
                 split="valid",
-                num_frames=config.image_or_video_shape[1],
+                num_frames=int(config.num_frames),
                 fixed_caption=config.b2d_caption,
             )
             self.valid_dataloader = torch.utils.data.DataLoader(
@@ -233,7 +243,7 @@ class Trainer:
         clean_latent = batch["ode_latent"][:, -1].to(device=self.device, dtype=self.dtype)
 
         batch_size = len(text_prompts)
-        image_or_video_shape = list(self.config.image_or_video_shape)
+        image_or_video_shape = list(self.image_or_video_shape)
         image_or_video_shape[0] = batch_size
 
         # Step 2: Extract the conditional info
@@ -304,7 +314,7 @@ class Trainer:
         torch.cuda.manual_seed(self.config.seed + 1)
 
         losses: list[torch.Tensor] = []
-        image_or_video_shape = list(self.config.image_or_video_shape)
+        image_or_video_shape = list(self.image_or_video_shape)
         try:
             for i, batch in enumerate(self.valid_dataloader):
                 if i >= self.valid_batches:

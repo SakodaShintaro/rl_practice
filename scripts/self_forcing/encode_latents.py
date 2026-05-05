@@ -5,7 +5,8 @@ Inputs/outputs are anchored under --src:
   latents : <src>/latents/{train,valid}/<episode>.pt
 
 Run:
-  uv run python scripts/encode_latents.py --src /path/to/bench2drive
+  uv run python scripts/encode_latents.py --src /path/to/bench2drive \
+      --config_path configs/self_forcing/b2d_finetune.yaml
 Existing .pt files are skipped so it is safe to interrupt and resume.
 """
 
@@ -17,17 +18,22 @@ import time
 from pathlib import Path
 
 import torch
+from omegaconf import OmegaConf
 from PIL import Image
 from torchvision import transforms
 
 from vla_streaming_rl.self_forcing.utils.wan_wrapper import WanVAEWrapper
 
-TARGET_H, TARGET_W = 480, 832  # Wan T2V-1.3B expected resolution
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", type=Path, required=True)
+    parser.add_argument(
+        "--config_path",
+        type=Path,
+        required=True,
+        help="b2d_finetune-style config providing pixel_height / pixel_width.",
+    )
     parser.add_argument(
         "--split",
         choices=("train", "valid", "all"),
@@ -38,7 +44,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def encode_episode(
-    vae: WanVAEWrapper, episode_dir: Path, device: torch.device
+    vae: WanVAEWrapper,
+    episode_dir: Path,
+    device: torch.device,
+    target_h: int,
+    target_w: int,
 ) -> torch.Tensor | None:
     rgb_dir = episode_dir / "camera" / "rgb_front"
     frame_paths = sorted(rgb_dir.glob("*.jpg"))
@@ -47,7 +57,7 @@ def encode_episode(
 
     transform = transforms.Compose(
         [
-            transforms.Resize((TARGET_H, TARGET_W)),
+            transforms.Resize((target_h, target_w)),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),  # [0,1] -> [-1,1]
         ]
@@ -66,12 +76,16 @@ def encode_episode(
         pixels = pixels[:, :, :T_eff]
 
     with torch.no_grad():
-        latent = vae.encode_to_latent(pixels)  # (1, T_lat, 16, 60, 104) float32
-    return latent.squeeze(0).to(torch.bfloat16).cpu().contiguous()  # (T_lat, 16, 60, 104)
+        latent = vae.encode_to_latent(pixels)  # (1, T_lat, 16, H/8, W/8) float32
+    return latent.squeeze(0).to(torch.bfloat16).cpu().contiguous()
 
 
 def main() -> None:
     args = parse_args()
+
+    config = OmegaConf.load(args.config_path)
+    target_h = int(config.pixel_height)
+    target_w = int(config.pixel_width)
 
     device = torch.device("cuda")
     splits_path = args.src / "splits.json"
@@ -80,7 +94,7 @@ def main() -> None:
     if args.split != "all":
         splits = {args.split: splits[args.split]}
 
-    print(f"loading VAE on {device}")
+    print(f"loading VAE on {device}; target resolution {target_h}x{target_w}")
     vae = WanVAEWrapper().to(device=device, dtype=torch.bfloat16).eval()
 
     for split_name, episodes in splits.items():
@@ -93,7 +107,9 @@ def main() -> None:
                 continue
             t0 = time.time()
             try:
-                latent = encode_episode(vae, args.src / ep, device=device)
+                latent = encode_episode(
+                    vae, args.src / ep, device=device, target_h=target_h, target_w=target_w
+                )
             except Exception as e:
                 print(f"{ep}: ERROR {type(e).__name__}: {e}")
                 continue
