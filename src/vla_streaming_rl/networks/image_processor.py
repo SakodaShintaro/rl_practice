@@ -13,15 +13,6 @@ class ImageProcessor(nn.Module):
         self.processor_type = processor_type
         if processor_type == "ae":
             self.processor = AutoencoderTiny.from_pretrained("madebyollin/taesd")
-        elif processor_type == "simple_cnn":
-            self.processor = nn.Sequential(
-                nn.Conv2d(observation_space_shape[0], 32, 8, 4),
-                nn.ReLU(),
-                nn.Conv2d(32, 64, 4, 2, 0),
-                nn.ReLU(),
-                nn.Conv2d(64, 64, 3, 1, 0),
-                nn.ReLU(),
-            )
         elif processor_type == "wan_vae":
             self.processor = WanVAEWrapper().eval().requires_grad_(False)
         self.output_shape = self._get_conv_output_shape(observation_space_shape)
@@ -30,8 +21,6 @@ class ImageProcessor(nn.Module):
         x = torch.zeros(1, *shape)
         if self.processor_type == "ae":
             x = self.processor.encode(x).latents
-        elif self.processor_type == "simple_cnn":
-            x = self.processor(x)
         elif self.processor_type == "wan_vae":
             x = self._wan_encode(x)
         return list(x.size())[1:]
@@ -39,8 +28,6 @@ class ImageProcessor(nn.Module):
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if self.processor_type == "ae":
             x = self.processor.encode(x).latents
-        elif self.processor_type == "simple_cnn":
-            x = self.processor(x)
         elif self.processor_type == "wan_vae":
             x = self._wan_encode(x)
         return x
@@ -49,8 +36,6 @@ class ImageProcessor(nn.Module):
         if self.processor_type == "ae":
             x = x.view(x.size(0), *self.output_shape)
             x = self.processor.decode(x).sample
-        elif self.processor_type == "simple_cnn":
-            x = torch.zeros(x.size(0), *self.observation_space_shape, device=x.device)
         elif self.processor_type == "wan_vae":
             x = x.view(x.size(0), *self.output_shape)
             x = self._wan_decode(x)
