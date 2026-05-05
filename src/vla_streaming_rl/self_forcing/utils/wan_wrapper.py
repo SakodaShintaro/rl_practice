@@ -118,7 +118,12 @@ class WanVAEWrapper(torch.nn.Module):
         # pixel: [batch_size, num_channels, num_frames, height, width]
         scale = self._scale(pixel.device, pixel.dtype)
         output = torch.stack(
-            [self.model.encode(u.unsqueeze(0), scale).float().squeeze(0) for u in pixel],
+            [
+                self.model.encode(u.unsqueeze(0), scale, cache=self.model.make_encoder_cache())
+                .float()
+                .squeeze(0)
+                for u in pixel
+            ],
             dim=0,
         )
         # [B, C, T, H, W] -> [B, T, C, H, W]

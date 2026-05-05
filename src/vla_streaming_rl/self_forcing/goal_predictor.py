@@ -2,17 +2,16 @@
 """Action-independent goal-image predictor backed by the trained Self-Forcing
 world model.
 
-External interface:
-- ``__init__(...)``: configure
-- ``step(obs)`` -> goal frame for this step
-- ``reset()``: drop rolling buffer state (e.g. on episode boundary)
-
-Everything else is private.
+Internally we keep a rolling buffer of finalized **latents** (length = K_lat),
+not pixel frames, and the Wan VAE encoder's causal feat_map cache is persisted
+across calls. Each ``step(obs)`` accumulates pixels into the in-flight latent
+position and only invokes the encoder when a full latent's worth of pixels is
+ready (1 pixel for the seed, then 4 pixels per subsequent latent). DiT
+inference fires every ``predict_interval`` env steps once the latent buffer is
+full.
 
 When ``enabled=False``, the heavy world-model pipeline is not loaded and every
-``step`` call returns a pre-allocated black image, so callers can use the
-predictor unconditionally without branching on whether the world model is
-configured.
+``step`` call returns a pre-allocated black image.
 """
 from __future__ import annotations
 
@@ -52,9 +51,7 @@ class WorldModelGoalPredictor:
         config = OmegaConf.load(config_path)
         self._fpb = int(config.num_frame_per_block)
         self._fixed_caption = config.b2d_caption
-        K_lat = int(num_context_blocks) * self._fpb
-        # Causal Wan VAE: first latent <- 1 pixel; later latents <- 4 pixels each.
-        self._ctx_pix_needed = 1 + (K_lat - 1) * 4
+        self._K_lat = int(num_context_blocks) * self._fpb
         self._target_h = _WAN_H
         self._target_w = _WAN_W
 
@@ -65,18 +62,26 @@ class WorldModelGoalPredictor:
         )
 
         self._step_counter: int = 0
-        self._buffer: list[torch.Tensor] = []
+        self._pix_acc: list[torch.Tensor] = []  # pixels for the in-flight latent
+        self._latent_buffer: list[torch.Tensor] = []  # finalized latents, len <= K_lat
+        self._seed_done: bool = False
         self._latest = np.zeros((self._target_h, self._target_w, 3), dtype=np.uint8)
 
         self._pipeline: CausalInferencePipeline | None = None
+        self._vae_enc_cache: list | None = None
         if self._enabled:
             self._pipeline = self._build_pipeline(config, checkpoint_path)
+            self._vae_enc_cache = self._pipeline.vae.model.make_encoder_cache()
 
     def reset(self) -> None:
-        """Drop the rolling pixel buffer and step counter (e.g. on episode end)."""
+        """Drop the rolling state (e.g. on episode end)."""
         self._step_counter = 0
-        self._buffer.clear()
+        self._pix_acc.clear()
+        self._latent_buffer.clear()
+        self._seed_done = False
         self._latest = np.zeros_like(self._latest)
+        if self._enabled:
+            self._vae_enc_cache = self._pipeline.vae.model.make_encoder_cache()
 
     @torch.inference_mode()
     def step(self, obs: np.ndarray) -> np.ndarray:
@@ -87,15 +92,15 @@ class WorldModelGoalPredictor:
 
         Returns:
             (H, W, 3) uint8 RGB image at Wan native resolution. Black until the
-            buffer first fills and the model produces a real prediction; or
-            always black when ``enabled=False``.
+            latent buffer first fills and the model produces a real prediction;
+            or always black when ``enabled=False``.
         """
         if not self._enabled:
             return self._latest
 
         self._push(obs)
         if (
-            len(self._buffer) >= self._ctx_pix_needed
+            len(self._latent_buffer) >= self._K_lat
             and self._step_counter % self._predict_interval == 0
         ):
             block = self._run_inference()  # (fpb*4, H, W, 3) uint8
@@ -161,15 +166,32 @@ class WorldModelGoalPredictor:
                 align_corners=False,
             ).squeeze(0)
         t = (t * 2.0 - 1.0).to(dtype=torch.bfloat16)
-        self._buffer.append(t)
-        if len(self._buffer) > self._ctx_pix_needed:
-            del self._buffer[: len(self._buffer) - self._ctx_pix_needed]
+        self._pix_acc.append(t)
+
+        # Seed call: 1 pixel -> 1 latent (Wan VAE special case).
+        # Subsequent calls: 4 pixels -> 1 latent.
+        threshold = 1 if not self._seed_done else 4
+        if len(self._pix_acc) >= threshold:
+            self._encode_chunk()
+
+    @torch.inference_mode()
+    def _encode_chunk(self) -> None:
+        pix = torch.stack(self._pix_acc, dim=1).unsqueeze(0)  # (1, C, T, H, W)
+        scale = self._pipeline.vae._scale(pix.device, pix.dtype)
+        mu = self._pipeline.vae.model.encode(pix, scale, cache=self._vae_enc_cache)
+        # mu: (1, 16, T_lat, H_lat, W_lat); permute to (1, T_lat, 16, H_lat, W_lat).
+        mu = mu.permute(0, 2, 1, 3, 4).to(dtype=torch.bfloat16)
+        for t_idx in range(mu.shape[1]):
+            self._latent_buffer.append(mu[:, t_idx : t_idx + 1].contiguous())
+        if len(self._latent_buffer) > self._K_lat:
+            del self._latent_buffer[: len(self._latent_buffer) - self._K_lat]
+        self._pix_acc.clear()
+        self._seed_done = True
 
     @torch.inference_mode()
     def _run_inference(self) -> np.ndarray:
-        ctx_pix = torch.stack(self._buffer[-self._ctx_pix_needed :], dim=1).unsqueeze(0)
-        ctx_latent = self._pipeline.vae.encode_to_latent(ctx_pix).to(dtype=torch.bfloat16)
-        self._pipeline.vae.model.clear_cache()
+        ctx_latent = torch.cat(self._latent_buffer[-self._K_lat :], dim=1)
+        # (1, K_lat, 16, H_lat, W_lat)
         noise = torch.randn(
             (1, self._fpb, 16, ctx_latent.shape[-2], ctx_latent.shape[-1]),
             device=self._device,
@@ -185,6 +207,5 @@ class WorldModelGoalPredictor:
         decode_seq = torch.cat([ctx_latent, all_lat[:, -self._fpb :]], dim=1)
         video = self._pipeline.vae.decode_to_pixel(decode_seq)
         video = (video * 0.5 + 0.5).clamp(0, 1)
-        self._pipeline.vae.model.clear_cache()
         out = (video[0].permute(0, 2, 3, 1).cpu().float() * 255).clamp(0, 255).to(torch.uint8)
         return out.numpy()[-self._fpb * 4 :]
