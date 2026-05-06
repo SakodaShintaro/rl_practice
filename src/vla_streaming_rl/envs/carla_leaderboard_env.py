@@ -254,6 +254,9 @@ class CARLALeaderboardEnv(gym.Env):
         # Episode information
         self.episode_step = 0
         self.negative_reward_count = 0  # Count of consecutive negative rewards
+        # Random-route mode (no Bench2Drive XML) lacks OutsideRouteLanesTest, so
+        # we use the lane invasion sensor as a strict off-lane terminator.
+        self._solid_lane_crossed = False
 
         # Vehicle physics information
         self.vehicle_physics = VehiclePhysics.create()
@@ -378,6 +381,13 @@ class CARLALeaderboardEnv(gym.Env):
                 break
             time.sleep(0.1)
 
+        # The lane invasion sensor can fire spuriously on the spawn tick when
+        # the ego is placed near a marking; clear here so only agent-driven
+        # crossings count.
+        self._solid_lane_crossed = False
+        self.lane_invasion_history = []
+        self.infractions["lane_invasion"] = 0
+
         self._update_spectator()
 
         return self.current_image.copy(), {"task_prompt": self.prompt}
@@ -421,12 +431,16 @@ class CARLALeaderboardEnv(gym.Env):
         # the same -1 floor a collision delivers (delta-based reward at the
         # crossing step is otherwise tiny and not a clear terminal signal).
         heavy_off_route = self._latest_off_route_pct >= 30.0
-        if heavy_off_route or has_collision:
+        # Random-route mode has no OutsideRouteLanesTest; fall back to the
+        # lane invasion sensor for solid-marking / curb crossings.
+        solid_lane_termination = self.runtime is None and self._solid_lane_crossed
+        if heavy_off_route or has_collision or solid_lane_termination:
             reward = -1.0
         terminated = (
             has_collision
             or self.route_tracker.route_completion >= 1.0
             or heavy_off_route
+            or solid_lane_termination
         )
 
         # Negative reward count
@@ -435,10 +449,14 @@ class CARLALeaderboardEnv(gym.Env):
         else:
             self.negative_reward_count = 0
 
+        # In random-route mode we sample a single-lane corridor, so 30 m of
+        # lateral drift means the ego is well outside any reasonable road
+        # surface — tighten to one lane-width worth of slack.
+        deviation_threshold = 30.0 if self.runtime is not None else 4.0
         truncated = (
             self.episode_step >= self.max_episode_steps
             or self.negative_reward_count >= 100
-            or self.route_tracker.min_distance_to_route >= 30.0
+            or self.route_tracker.min_distance_to_route >= deviation_threshold
         )
 
         self.episode_step += 1
@@ -687,3 +705,17 @@ class CARLALeaderboardEnv(gym.Env):
     def _on_lane_invasion(self, event):
         self.lane_invasion_history.append(event)
         self.infractions["lane_invasion"] += 1
+        # Crossing a solid marking or mounting a curb means the ego left its
+        # lane in a way real driving wouldn't recover from. Broken markings
+        # (lane changes / overtakes) are excluded so legitimate maneuvers
+        # don't terminate. Only consumed in random-route mode; XML mode
+        # uses OutsideRouteLanesTest instead.
+        terminal_types = {
+            carla.LaneMarkingType.Solid,
+            carla.LaneMarkingType.SolidSolid,
+            carla.LaneMarkingType.SolidBroken,
+            carla.LaneMarkingType.BrokenSolid,
+            carla.LaneMarkingType.Curb,
+        }
+        if any(m.type in terminal_types for m in event.crossed_lane_markings):
+            self._solid_lane_crossed = True
