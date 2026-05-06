@@ -49,6 +49,25 @@ https://github.com/carla-simulator/carla/releases
 pip install ~/CARLA_0.9.16/PythonAPI/carla/dist/carla-0.9.16-cp310-cp310-manylinux_2_31_x86_64.whl
 ```
 
+### (Optional) Setup Animal-AI
+
+Animal-AI v5 does not auto-download the Unity binary, so place it manually.
+
+```bash
+# Download Linux.zip from the Animal-AI releases page:
+#   https://github.com/Kinds-of-Intelligence-CFI/animal-ai/releases
+# (verified with v4.3.0 Linux build)
+
+mkdir -p ~/animalai_env
+unzip Linux.zip -d ~/animalai_env/
+chmod +x ~/animalai_env/Linux/animalAI.x86_64
+```
+
+The training script (`train_animalai.sh`) expects the binary at
+`~/animalai_env/Linux/animalAI.x86_64`. The arena (task) is selected via
+`configs/env/animalai.yaml` (`env_factory.arena_yaml`); `null` falls back
+to the `GoodGoal_Random.yml` bundled inside the `animalai` package.
+
 ## Usage
 
 ### Training

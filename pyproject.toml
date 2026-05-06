@@ -62,6 +62,9 @@ dependencies = [
     "tqdm",
     # CARLA (path resolved via tool.uv.sources below)
     "carla",
+    "animalai==5.0.1",
+    "mlagents-envs==1.0.0",
+    "protobuf==3.20.3",
 ]
 
 [build-system]
@@ -75,6 +78,13 @@ packages = ["src/vla_streaming_rl"]
 exclude-newer = "40 days"
 exclude-newer-package = { torch = false, torchvision = false }
 index-url = "https://pypi.org/simple"
+override-dependencies = [
+    "protobuf==3.20.3",
+    "numpy>=1.26.4",
+    "grpcio>=1.60",
+    "pettingzoo>=1.24",
+    "gym>=0.26",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

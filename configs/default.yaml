@@ -12,6 +12,7 @@ hydra:
 
 exp_name: default
 result_dir: results
+env_factory: null
 trial_num: 1
 seed: -1
 render: 1

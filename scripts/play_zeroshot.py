@@ -19,9 +19,7 @@ from vla_streaming_rl.wrappers import make_env
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-CAR_RACING_ACTION_SPEC = (
-    "steer=<value>, accel=<value> where each <value> is a float in [-1, 1]"
-)
+CAR_RACING_ACTION_SPEC = "steer=<value>, accel=<value> where each <value> is a float in [-1, 1]"
 PANEL_ACTION_SPEC = (
     "dx=<value>, dy=<value>, button=<value> where each <value> is a float in [-1, 1]"
 )
@@ -50,10 +48,7 @@ def wrap_format_hint(action_spec: str, use_thinking: bool) -> str:
             f"closing </think>, output the action: {action_spec}. The text after "
             "</think> must contain ONLY the action — no commentary, no labels."
         )
-    return (
-        f"Respond with EXACTLY ONE LINE: {action_spec}. Output ONLY the action and "
-        "nothing else."
-    )
+    return f"Respond with EXACTLY ONE LINE: {action_spec}. Output ONLY the action and nothing else."
 
 
 def parse_args() -> argparse.Namespace:
@@ -132,10 +127,7 @@ def run_episode(env, agent, render: bool):
         text = agent_info.get("text")
         if text is not None:
             parse_used = agent_info.get("parse_used", "strict")
-            print(
-                f"  [step {step_count:4d}] reward={reward:+.3f} parse={parse_used} "
-                f"text={text!r}"
-            )
+            print(f"  [step {step_count:4d}] reward={reward:+.3f} parse={parse_used} text={text!r}")
 
         obs_for_render = convert_to_uint8(obs.copy().transpose(1, 2, 0))
         bgr_image = concat_images([env.render(), obs_for_render])
@@ -179,7 +171,7 @@ if __name__ == "__main__":
     video_dir.mkdir(parents=True, exist_ok=True)
 
     # env setup
-    env = make_env(args.env_id, carla_route_xml=None, carla_route_id=None)
+    env = make_env(args.env_id, None)
     env.action_space.seed(seed)
     assert isinstance(env.action_space, gym.spaces.Box), "only continuous action space is supported"
 

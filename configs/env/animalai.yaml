@@ -1,0 +1,12 @@
+# @package _global_
+env_id: AnimalAI-v0
+step_limit: 100_000
+
+env_factory:
+  _target_: vla_streaming_rl.wrappers.make_animalai_env
+  # Path to a custom arena YAML. null falls back to GoodGoal_Random.yml bundled
+  # inside the animalai package.
+  arena_yaml: null
+  # Task description for the VLM agent. Must match the actual arena contents.
+  # Default text describes GoodGoal_Random.yml (single goal sphere, no obstacles).
+  prompt: Find and reach the goal sphere placed at a random location in the arena.
