@@ -80,7 +80,7 @@ if __name__ == "__main__":
     observation_space_shape = (3, 96, 96)
     seq_len = images_sequence.shape[0]
 
-    image_processor = ImageProcessor(observation_space_shape, processor_type="ae")
+    image_processor = ImageProcessor(observation_space_shape)
     image_processor = image_processor.to(device)
 
     hidden_image_dim = image_processor.output_shape[0]

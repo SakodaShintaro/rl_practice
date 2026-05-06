@@ -161,13 +161,12 @@ class SeparateCritic(nn.Module):
     def __init__(
         self,
         observation_space_shape: tuple[int],
-        processor_type: str,
         hidden_dim: int,
         block_num: int,
         num_bins: int,
     ) -> None:
         super().__init__()
-        self.image_processor = ImageProcessor(observation_space_shape, processor_type)
+        self.image_processor = ImageProcessor(observation_space_shape)
         output_shape = self.image_processor.output_shape
         flat_dim = output_shape[0] * output_shape[1] * output_shape[2]
 

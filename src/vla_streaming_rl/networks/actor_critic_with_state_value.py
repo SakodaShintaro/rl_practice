@@ -29,7 +29,6 @@ class ActorCriticWithStateValue(nn.Module):
         predictor_step_num: int,
         critic_loss_weight: float,
         separate_critic: bool,
-        image_processor_type: str,
         encoder: str,
         seq_len: int,
         encoder_block_num: int,
@@ -52,9 +51,7 @@ class ActorCriticWithStateValue(nn.Module):
         self.critic_loss_weight = critic_loss_weight
         self.separate_critic = separate_critic
 
-        self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=image_processor_type
-        )
+        self.image_processor = ImageProcessor(observation_space_shape)
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 
@@ -87,7 +84,6 @@ class ActorCriticWithStateValue(nn.Module):
         self.value_head = (
             SeparateCritic(
                 observation_space_shape,
-                image_processor_type,
                 hidden_dim,
                 critic_block_num,
                 num_bins,

@@ -26,7 +26,6 @@ class ActorCriticWithActionValue(nn.Module):
         dacer_loss_weight: float,
         critic_loss_weight: float,
         predictor_step_num: int,
-        image_processor_type: str,
         encoder: str,
         encoder_block_num: int,
         temporal_model_type: str,
@@ -57,9 +56,7 @@ class ActorCriticWithActionValue(nn.Module):
         self.predictor_step_num = predictor_step_num
         self.observation_space_shape = observation_space_shape
 
-        self.image_processor = ImageProcessor(
-            observation_space_shape, processor_type=image_processor_type
-        )
+        self.image_processor = ImageProcessor(observation_space_shape)
         hidden_image_dim = self.image_processor.output_shape[0]
         self.reward_processor = RewardProcessor(embed_dim=hidden_image_dim)
 

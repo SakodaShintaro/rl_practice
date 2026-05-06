@@ -3,7 +3,6 @@ agent_type: on_policy
 network_class: actor_critic_with_state_value
 encoder: temporal_only
 temporal_model_type: identity
-image_processor_type: wan_vae
 policy_type: beta
 batch_size: 16
 learning_rate: 1e-5

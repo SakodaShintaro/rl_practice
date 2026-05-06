@@ -2,7 +2,6 @@
 agent_type: streaming
 encoder: spatial_temporal
 temporal_model_type: transformer
-image_processor_type: ae
 policy_type: diffusion
 batch_size: 1
 learning_rate: 2e-6

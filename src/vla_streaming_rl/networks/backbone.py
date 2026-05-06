@@ -49,7 +49,6 @@ class SpatialTemporalEncoder(nn.Module):
 
         self.image_processor = image_processor
         self.reward_processor = reward_processor
-        self.freeze_image_processor = image_processor.processor_type == "ae"
 
         # image_processor outputs [B, C, H, W] -> treat as [B, H * W, C] (H * W tokens, C channels each)
         self.hidden_image_dim = self.image_processor.output_shape[0]
@@ -112,15 +111,11 @@ class SpatialTemporalEncoder(nn.Module):
         # External format [B, space_len, state_size, n_layer] -> Internal format [1, B*space_len, state_size, n_layer]
         rnn_state_internal = rnn_state.reshape(1, B * self.space_len, -1, self.n_layer)
 
-        # Use pre-encoded obs_z if using ae, otherwise encode from images
-        if self.freeze_image_processor:
-            all_latents = obs_z  # [B, T, C', H', W']
-        else:
-            # Reshape to process all frames: (B*T, C, H, W)
-            all_frames = images.reshape(-1, *images.shape[2:])
-            # Encode all frames at once
-            all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
-            all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
+        # Reshape to process all frames: (B*T, C, H, W)
+        all_frames = images.reshape(-1, *images.shape[2:])
+        # Encode all frames at once
+        all_latents = self.image_processor.encode(all_frames)  # [B*T, C', H', W']
+        all_latents = all_latents.reshape(B, T, *all_latents.shape[1:])  # [B, T, C', H', W']
         image_embed = all_latents.flatten(3).transpose(2, 3)  # [B, T, S(=H'*W'), C']
 
         # [B, T, action_dim] -> [B, T, action_dim, C']
@@ -185,7 +180,6 @@ class TemporalOnlyEncoder(nn.Module):
 
         self.n_layer = n_layer
         self.temporal_model_type = temporal_model_type
-        self.freeze_image_processor = image_processor.processor_type == "ae"
         self.use_image_only = use_image_only
 
         # Image processor
@@ -243,13 +237,9 @@ class TemporalOnlyEncoder(nn.Module):
         """
         B, T = images.shape[:2]
 
-        # Use pre-encoded obs_z if using ae, otherwise encode from images
-        if self.freeze_image_processor:
-            image_features = obs_z.reshape(B * T, *obs_z.shape[2:])  # (B*T, C', H', W')
-        else:
-            # Process images
-            all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
-            image_features = self.image_processor.encode(all_frames)
+        # Process images
+        all_frames = images.reshape(B * T, *images.shape[2:])  # (B*T, C, H, W)
+        image_features = self.image_processor.encode(all_frames)
 
         # Flatten and linear projection
         h = image_features.flatten(start_dim=1)  # (B*T, feature_dim)
