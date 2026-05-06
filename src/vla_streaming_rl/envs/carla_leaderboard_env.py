@@ -170,7 +170,7 @@ class CARLALeaderboardEnv(gym.Env):
         self._route_id = route_id
         self._tm_port = 8000
         self.runtime: Bench2DriveRuntime | None = None
-        town_name = "Town01"
+        town_name = "Town12"
 
         # Observation / action contracts come from carla_obs (shared with the
         # Bench2Drive eval agent so training and eval stay bit-aligned).
