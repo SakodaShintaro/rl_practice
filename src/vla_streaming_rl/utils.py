@@ -128,6 +128,11 @@ def concat_labeled_images(
         add_text_label_on_top(convert_to_uint8(img), label) for img, label in zip(images, labels)
     ]
 
+    # concat prediction and goal
+    pred_goal_concat = cv2.vconcat([labeled_images[2], labeled_images[4]])
+    labeled_images[2] = pred_goal_concat
+    del labeled_images[4]
+
     # Concatenate all images
     final_image_bgr = concat_images(labeled_images)
     final_image_rgb = cv2.cvtColor(final_image_bgr, cv2.COLOR_BGR2RGB)
