@@ -109,7 +109,6 @@ def make_env(
             route_id=carla_route_id,
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = ZeroObsOnDoneWrapper(env)
         env.unwrapped.eval_range = 100
         return env
 
