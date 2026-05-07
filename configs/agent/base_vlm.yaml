@@ -2,7 +2,6 @@
 use_lora: 0
 target_layer_idx: 2
 vlm_model_id: Qwen/Qwen3.5-0.8B
-expert_hidden_size: 8
 state_expert_hidden_size: 576
 num_state_queries: 1
 state_mode: projection
