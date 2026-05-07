@@ -122,7 +122,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         num_expert_layers = len(self.attn_layer_indices)
 
         # Shared rotary embedding from VLM
-        state_expert_hidden = state_expert_hidden_size
         # PEFT wraps the model with an extra .model level
         if self.use_lora:
             rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
@@ -135,12 +134,12 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         # State Expert: cross-attends to VLM KV cache to produce a compact state
         self.state_query_tokens = nn.Parameter(
-            torch.randn(1, num_state_queries, state_expert_hidden) * 0.02
+            torch.randn(1, num_state_queries, state_expert_hidden_size) * 0.02
         )
-        state_dim = num_state_queries * state_expert_hidden
+        state_dim = num_state_queries * state_expert_hidden_size
         self.state_expert = ActionExpert(
             num_layers=num_expert_layers,
-            expert_hidden_size=state_expert_hidden,
+            expert_hidden_size=state_expert_hidden_size,
             num_attention_heads=vlm_cfg.num_attention_heads,
             num_kv_heads=vlm_cfg.num_key_value_heads,
             head_dim=vlm_cfg.head_dim,
@@ -179,7 +178,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             predictor_block_num=predictor_block_num,
         )
         # Project state output to match FluxDiT context_in_dim
-        self.state_to_predictor_proj = nn.Linear(state_expert_hidden, hidden_image_dim)
+        self.state_to_predictor_proj = nn.Linear(state_expert_hidden_size, hidden_image_dim)
 
         self.value_range = 1.0
         if self.num_bins > 1:
