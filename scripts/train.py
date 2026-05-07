@@ -158,6 +158,7 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
         observation_space_shape=env.observation_space.shape,
         action_space_shape=env.action_space.shape,
         parse_action_text=parse_action_text,
+        task_prompt=task_prompt,
         device=torch.device("cuda"),
         compile=compile_network,
     )
