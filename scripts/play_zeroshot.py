@@ -32,23 +32,16 @@ CONTINUOUS_ACTION_SPECS = {
 }
 
 
-def make_bin_action_spec(action_dim: int, n_bins: int) -> str:
-    neutral = n_bins // 2
+def wrap_format_hint(action_spec: str) -> str:
     return (
-        f"{action_dim} integers separated by commas, each a bin index in "
-        f"[0, {n_bins - 1}] where 0 maps to -1.0, {neutral} to 0.0, and {n_bins - 1} to +1.0"
+        "Use the following structured response format. "
+        "First, describe what you see in the current image inside <perception>...</perception>. "
+        "Then, lay out your strategy step by step inside <reasoning>...</reasoning>, "
+        "justifying the action you intend to take based on the current image and the "
+        "previous reward (if shown). "
+        f"Finally, output the action inside <answer>...</answer> using the format: {action_spec}. "
+        "The text inside <answer> must contain ONLY the action — no commentary, no labels."
     )
-
-
-def wrap_format_hint(action_spec: str, use_thinking: bool) -> str:
-    if use_thinking:
-        return (
-            "Reason briefly inside <think>...</think> tags about the current image and "
-            "the previous reward (if shown), then close the tag. Immediately after the "
-            f"closing </think>, output the action: {action_spec}. The text after "
-            "</think> must contain ONLY the action — no commentary, no labels."
-        )
-    return f"Respond with EXACTLY ONE LINE: {action_spec}. Output ONLY the action and nothing else."
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,24 +63,7 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Number of past (image, response) turns to feed back as in-context history (FIFO).",
     )
-    parser.add_argument("--max_new_tokens", type=int, default=64)
-    parser.add_argument(
-        "--action_format",
-        type=str,
-        default="bin_index",
-        choices=["continuous", "bin_index"],
-        help="continuous: model outputs floats in [-1,1]; bin_index: model outputs integer bin indices in [0, n_bins).",
-    )
-    parser.add_argument("--n_bins", type=int, default=32)
-    parser.add_argument(
-        "--use_thinking",
-        action="store_true",
-        help=(
-            "Wrap reasoning in <think>...</think> and parse the action from after the "
-            "closing tag. The thinking budget is auto-derived from --max_new_tokens "
-            "by reserving enough tokens for the action and the forced </think> closure."
-        ),
-    )
+    parser.add_argument("--max_new_tokens", type=int, default=512)
 
     return parser.parse_args()
 
@@ -184,17 +160,12 @@ if __name__ == "__main__":
     if args.agent_type == "random":
         agent = RandomAgent(env.action_space)
     elif args.agent_type == "vlm":
-        if args.action_format == "continuous":
-            parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
-            assert parse_action_text is not None, (
-                f"VLM agent in continuous mode requires env.unwrapped.parse_action_text; "
-                f"not defined for {args.env_id}"
-            )
-            action_spec = CONTINUOUS_ACTION_SPECS.get(args.env_id, "")
-        else:
-            parse_action_text = None
-            action_spec = make_bin_action_spec(action_dim, args.n_bins)
-        format_hint = wrap_format_hint(action_spec, use_thinking=args.use_thinking)
+        parse_action_text = getattr(env.unwrapped, "parse_action_text", None)
+        assert parse_action_text is not None, (
+            f"VLM agent requires env.unwrapped.parse_action_text; not defined for {args.env_id}"
+        )
+        action_spec = CONTINUOUS_ACTION_SPECS[args.env_id]
+        format_hint = wrap_format_hint(action_spec)
         agent = ZeroShotVLMAgent(
             model_id=args.vlm_model_id,
             parse_action_text=parse_action_text,
@@ -202,9 +173,6 @@ if __name__ == "__main__":
             format_hint=format_hint,
             seq_len=args.seq_len,
             max_new_tokens=args.max_new_tokens,
-            action_format=args.action_format,
-            n_bins=args.n_bins,
-            use_thinking=args.use_thinking,
         )
     else:
         raise ValueError(f"Unknown agent_type: {args.agent_type}")
@@ -212,9 +180,7 @@ if __name__ == "__main__":
     print(f"Running {args.num_episodes} episodes with {args.agent_type} agent...")
     if args.agent_type == "vlm":
         print(f"  model_id={args.vlm_model_id}")
-        print(f"  action_format={args.action_format}  n_bins={args.n_bins}")
         print(f"  seq_len={args.seq_len}  max_new_tokens={args.max_new_tokens}")
-        print(f"  use_thinking={args.use_thinking}")
         print(f"  task_prompt={initial_task_prompt!r}")
 
     episode_rewards = []
@@ -279,11 +245,8 @@ if __name__ == "__main__":
         f.write(f"Agent type: {args.agent_type}\n")
         if args.agent_type == "vlm":
             f.write(f"VLM model: {args.vlm_model_id}\n")
-            f.write(f"action_format: {args.action_format}\n")
-            f.write(f"n_bins: {args.n_bins}\n")
             f.write(f"seq_len: {args.seq_len}\n")
             f.write(f"max_new_tokens: {args.max_new_tokens}\n")
-            f.write(f"use_thinking: {args.use_thinking}\n")
         f.write(f"Number of episodes: {args.num_episodes}\n")
         f.write(f"Average reward: {avg_reward:.2f} ± {std_reward:.2f}\n")
         f.write(f"Best reward: {best_reward:.2f}\n")
