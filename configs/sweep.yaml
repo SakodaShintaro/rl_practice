@@ -16,12 +16,6 @@ parameters:
     values: [0, 1]
   use_done:
     values: [0, 1]
-  state_mode:
-    values: ["expert", "projection"]
-  target_layer_idx:
-    min: 0
-    max: 12
-    distribution: int_uniform
   et_lambda:
     min: 0.0
     max: 1.0
