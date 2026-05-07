@@ -44,6 +44,13 @@ def cycle(dl):
             yield data
 
 
+def _format_hms(seconds: float) -> str:
+    seconds = int(max(seconds, 0))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}"
+
+
 class EMA:
     """Single-GPU EMA shadow over a subset of named_parameters.
 
@@ -212,6 +219,7 @@ class Trainer:
 
         self.max_grad_norm = 10.0
         self.previous_time = None
+        self.start_time: float | None = None
 
     def save(self):
         # LoRA-only save: drop frozen base weights so checkpoints stay tiny.
@@ -277,10 +285,15 @@ class Trainer:
             wandb.log(wandb_loss_dict, step=self.step)
         now = time.time()
         iter_time = (now - self.previous_time) if self.previous_time is not None else 0.0
+        elapsed = now - self.start_time if self.start_time is not None else 0.0
+        max_steps = int(self.config.max_steps)
+        remaining_steps = max(max_steps - self.step, 0)
+        eta = (elapsed / self.step) * remaining_steps if self.step > 0 else 0.0
         print(
-            f"step={self.step} loss={wandb_loss_dict['generator_loss']:.4f} "
+            f"step={self.step}/{max_steps} loss={wandb_loss_dict['generator_loss']:.4f} "
             f"grad_norm={wandb_loss_dict['generator_grad_norm']:.3f} "
-            f"iter_time={iter_time:.2f}s",
+            f"iter_time={iter_time:.2f}s "
+            f"elapsed={_format_hms(elapsed)} eta={_format_hms(eta)}",
             flush=True,
         )
 
@@ -344,6 +357,7 @@ class Trainer:
 
     def train(self):
         max_steps = self.config.max_steps
+        self.start_time = time.time()
         while self.step < max_steps:
             batch = next(self.dataloader)
             self.train_one_step(batch)
