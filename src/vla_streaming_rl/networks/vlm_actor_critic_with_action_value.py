@@ -36,7 +36,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
         parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
-        task_prompt: str,
         gamma: float,
         num_bins: int,
         seq_len: int,
