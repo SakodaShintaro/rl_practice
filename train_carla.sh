@@ -21,11 +21,11 @@ setsid ${CARLA_ROOT}/CarlaUE4.sh -RenderOffScreen &
 CARLA_PGID=$!
 trap 'kill -TERM -- -$CARLA_PGID 2>/dev/null; kill 0' EXIT
 
-route_xlm=null
-# route_xlm=${B2D_ROOT}/leaderboard/data/routes_training.xml
+route_xml=null
+# route_xml=${B2D_ROOT}/leaderboard/data/routes_training.xml
 
 uv run python scripts/train.py \
   agent=cnn_streaming \
   env=carla \
   exp_name=carla$suffix \
-  carla_route_xml=${route_xlm} \
+  env_factory.route_xml=${route_xml} \
