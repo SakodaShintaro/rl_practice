@@ -72,6 +72,12 @@ def build_network(
             detach_critic=args.detach_critic,
             detach_predictor=args.detach_predictor,
             disable_state_predictor=args.disable_state_predictor,
+            energy_sigma_min=args.energy_sigma_min,
+            energy_sigma_max=args.energy_sigma_max,
+            energy_sigma_t_max=args.energy_sigma_t_max,
+            energy_ode_steps=args.energy_ode_steps,
+            energy_ode_endpoint=args.energy_ode_endpoint,
+            energy_time_embed_dim=args.energy_time_embed_dim,
         )
     elif args.network_class == "vlm_actor_critic_with_action_value":
         network = VLMActorCriticWithActionValue(

@@ -5,7 +5,10 @@ import torch.nn.functional as F
 from hl_gauss_pytorch import HLGaussLoss
 
 from vla_streaming_rl.networks.backbone import SpatialTemporalEncoder, TemporalOnlyEncoder
-from vla_streaming_rl.networks.diffusion_utils import compute_actor_loss_with_dacer
+from vla_streaming_rl.networks.diffusion_utils import (
+    compute_actor_loss_with_dacer,
+    compute_actor_loss_with_energy_flow,
+)
 from vla_streaming_rl.networks.image_processor import ImageProcessor
 from vla_streaming_rl.networks.policy_head import BetaPolicy, CFGDiffusionPolicy, DiffusionPolicy
 from vla_streaming_rl.networks.prediction_head import StatePredictionHead
@@ -43,6 +46,12 @@ class ActorCriticWithActionValue(nn.Module):
         detach_critic: bool,
         detach_predictor: bool,
         disable_state_predictor: bool,
+        energy_sigma_min: float,
+        energy_sigma_max: float,
+        energy_sigma_t_max: float,
+        energy_ode_steps: int,
+        energy_ode_endpoint: float,
+        energy_time_embed_dim: int,
     ) -> None:
         super().__init__()
         self.gamma = gamma
@@ -114,6 +123,13 @@ class ActorCriticWithActionValue(nn.Module):
                 horizon=horizon,
                 denoising_steps=denoising_steps,
             )
+        elif self.policy_type == "energy_flow":
+            # No separate actor module: the action-value head is reused as a
+            # time-conditioned scalar energy. Action sampling and the actor
+            # loss are routed through self.value_head directly.
+            self.policy_head = None
+        else:
+            raise ValueError(f"Unknown policy_type: {self.policy_type=}")
         self.value_head = ActionValueHead(
             in_channels=self.encoder.output_dim,
             action_dim=self.action_dim,
@@ -122,6 +138,13 @@ class ActorCriticWithActionValue(nn.Module):
             block_num=critic_block_num,
             num_bins=self.num_bins,
             sparsity=sparsity,
+            use_energy_flow=(self.policy_type == "energy_flow"),
+            energy_sigma_min=energy_sigma_min,
+            energy_sigma_max=energy_sigma_max,
+            energy_sigma_t_max=energy_sigma_t_max,
+            energy_ode_steps=energy_ode_steps,
+            energy_ode_endpoint=energy_ode_endpoint,
+            energy_time_embed_dim=energy_time_embed_dim,
         )
         self.prediction_head = StatePredictionHead(
             image_processor=self.image_processor,
@@ -150,6 +173,13 @@ class ActorCriticWithActionValue(nn.Module):
     def init_state(self) -> torch.Tensor:
         return self.encoder.init_state()
 
+    def _sample_action(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Dispatch to the right action sampler based on ``policy_type``."""
+        if self.policy_type == "energy_flow":
+            hl = self.hl_gauss_loss if self.num_bins > 1 else None
+            return self.value_head.get_action(x, hl_gauss_loss=hl)
+        return self.policy_head.get_action(x)
+
     def tokenize_task_prompt(self, task_prompt: str) -> list[int]:
         return []
 
@@ -170,8 +200,8 @@ class ActorCriticWithActionValue(nn.Module):
 
         x, rnn_state = self.encoder(s_seq, obs_z_seq, a_seq, r_seq, rnn_state)  # (B, hidden_dim)
 
-        # Get action chunk from policy_head
-        action, a_logp = self.policy_head.get_action(x)  # (B, horizon, action_dim)
+        # Get action chunk from the active policy (or energy flow head)
+        action, a_logp = self._sample_action(x)  # (B, horizon, action_dim)
 
         # Get action-value from value_head
         q_dict = self.value_head(x, action)
@@ -236,6 +266,10 @@ class ActorCriticWithActionValue(nn.Module):
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
                 curr_state, action_chunk
             )
+        elif self.policy_type == "energy_flow":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_energy_flow(
+                curr_state, action_chunk
+            )
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, curr_state)
 
         total_loss = self.critic_loss_weight * critic_loss + actor_loss + seq_loss
@@ -289,6 +323,10 @@ class ActorCriticWithActionValue(nn.Module):
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_pg(prev_state)
         elif self.policy_type == "cfgrl":
             actor_loss, actor_activations, actor_info = self._compute_actor_loss_cfgrl(
+                prev_state, action_chunk
+            )
+        elif self.policy_type == "energy_flow":
+            actor_loss, actor_activations, actor_info = self._compute_actor_loss_energy_flow(
                 prev_state, action_chunk
             )
         seq_loss, seq_activations, seq_info = self._compute_sequence_loss(data, prev_state)
@@ -356,7 +394,7 @@ class ActorCriticWithActionValue(nn.Module):
         rnn_state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         state, rnn_state_out = self.encoder.forward(obs, obs_z, actions, rewards, rnn_state)
-        action, _ = self.policy_head.get_action(state)
+        action, _ = self._sample_action(state)
         q_dict = self.value_head(state, action)
         q = q_dict["output"]
         q = self.hl_gauss_loss(q).view(-1) if self.num_bins > 1 else q.view(-1)
@@ -413,6 +451,30 @@ class ActorCriticWithActionValue(nn.Module):
         }
 
         return critic_loss, activations_dict, info_dict
+
+    def _compute_actor_loss_energy_flow(self, curr_state, action_chunk):
+        """Denoising score matching loss on the energy-flow Q head.
+
+        The buffer action chunk plays the role of the expert sample (a_0); we
+        match +∇_a Q(a_t, s, t) against -ε/σ(t) in the σ²-weighted form
+            L = E ||σ(t) · ∇_a Q(a_t, s, t) + ε||²
+        where a_t = a_0 + σ(t)·ε under the geometric VE schedule. This trains
+        the action gradient of Q to be a valid score field of the data
+        distribution, jointly with the standard TD loss that grounds Q at
+        t ≈ 0.
+        """
+        if self.detach_actor:
+            curr_state = curr_state.detach()
+        loss, activations_dict, info_dict = compute_actor_loss_with_energy_flow(
+            curr_state,
+            action_chunk,
+            self.value_head,
+            self.hl_gauss_loss if self.num_bins > 1 else None,
+            self.num_bins,
+        )
+        info_dict["log_pi"] = 0.0
+        info_dict.setdefault("advantage", 0.0)
+        return loss, activations_dict, info_dict
 
     def _compute_actor_loss(self, curr_state):
         """

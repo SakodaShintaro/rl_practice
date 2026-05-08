@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 import torch
+from torch import nn
 from torch.nn import functional as F
+
+from .value_head import _vp_sigma
 
 
 def euler_denoise(
@@ -119,3 +122,71 @@ def compute_actor_loss_with_dacer(
     }
 
     return total_loss, advantage_dict, info_dict
+
+
+def compute_actor_loss_with_energy_flow(
+    state: torch.Tensor,
+    action: torch.Tensor,
+    value_head,
+    hl_gauss_loss: nn.Module | None,
+    num_bins: int,
+) -> tuple[torch.Tensor, dict, dict]:
+    """Denoising score matching loss applied to the action-value head used as
+    a scalar energy field (``E = -Q``).
+
+    Following EnergyFlow (Eq. 15 with α = 1), the score of the buffer-action
+    distribution is matched against +∇_a Q at randomly sampled noise levels.
+    With λ(t) = σ²(t), the σ²-weighted DSM objective collapses into
+
+        L = E_{t, a_0, ε} ||σ(t) · ∇_a Q(a_t, s, t) + ε||²,
+
+    where a_t = a_0 + σ(t)·ε with the geometric VE schedule
+    σ(t) = σ_min^(1 - t/T) · σ_max^(t/T). The clean buffer action ``action``
+    serves as a_0 (the role of expert demonstrations in the paper).
+
+    Args:
+        state: (B, state_dim) state embedding.
+        action: (B, horizon, action_dim) clean buffer action chunk.
+        value_head: ActionValueHead with use_energy_flow=True.
+        hl_gauss_loss: HL-Gauss readout when num_bins > 1, else None.
+        num_bins: distributional bin count of the Q head.
+
+    Returns:
+        (loss, activations_dict, info_dict)
+    """
+    assert getattr(value_head, "use_energy_flow", False), (
+        "compute_actor_loss_with_energy_flow requires value_head.use_energy_flow=True"
+    )
+    B = action.size(0)
+    device = action.device
+
+    sigma_min = value_head.energy_sigma_min
+    sigma_max = value_head.energy_sigma_max
+    sigma_t_max = value_head.energy_sigma_t_max
+    eps = 1e-4
+
+    # Diffusion timestep t ~ U(eps, T).
+    t = torch.rand(B, device=device) * (sigma_t_max - eps) + eps
+    sigma_t = _vp_sigma(t, sigma_min, sigma_max, sigma_t_max)  # (B,)
+    sigma_t_view = sigma_t.view(B, 1, 1)
+
+    # Forward perturbation: a_t = a_0 + σ(t) ε.
+    noise = torch.randn_like(action)
+    a_t = (action + sigma_t_view * noise).detach().requires_grad_(True)
+
+    # Score = ∇_a Q via autograd through the advantage stream.
+    grad = value_head.compute_score(state, a_t, t, hl_gauss_loss, create_graph=True)
+
+    # || σ(t) · ∇_a Q + ε ||² (per-element MSE).
+    diff = sigma_t_view * grad + noise
+    loss = diff.pow(2).mean()
+
+    info_dict = {
+        "actor_loss": loss.item(),
+        "dacer_loss": 0.0,
+        "energy_flow_score_norm": grad.detach().pow(2).mean().sqrt().item(),
+        "energy_flow_sigma_mean": sigma_t.mean().item(),
+    }
+    activations_dict: dict = {}
+
+    return loss, activations_dict, info_dict

@@ -2,7 +2,7 @@
 agent_type: off_policy
 encoder: spatial_temporal
 temporal_model_type: transformer
-policy_type: diffusion
+policy_type: energy_flow
 buffer_size: 20000
 learning_starts: 2000
 detach_actor: 1
@@ -12,5 +12,16 @@ disable_state_predictor: 0
 dacer_loss_weight: 0.05
 denoising_time: 0.9
 denoising_steps: 1
+# EnergyFlow knobs (used when policy_type=energy_flow). The action-value head
+# is reused as a scalar energy E = -Q(s,a,t); its action-gradient is trained
+# by denoising score matching, and probability-flow ODE rollouts on +∇_a Q
+# generate actions (Algorithm 2 of "Recovering Hidden Reward in Diffusion-
+# Based Policies", with α absorbed into Q).
+energy_sigma_min: 0.01
+energy_sigma_max: 1.0
+energy_sigma_t_max: 1.0
+energy_ode_steps: 20
+energy_ode_endpoint: 0.001
+energy_time_embed_dim: 128
 batch_size: 16
 learning_rate: 1e-5

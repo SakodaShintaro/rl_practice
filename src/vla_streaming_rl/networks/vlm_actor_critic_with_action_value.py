@@ -187,7 +187,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             denoising_steps=denoising_steps,
         )
 
-        # Critic: Q(state, action)
+        # Critic: Q(state, action). VLM path does not use energy_flow.
         self.value_head = ActionValueHead(
             in_channels=state_dim,
             action_dim=self.action_dim,
@@ -196,6 +196,13 @@ class VLMActorCriticWithActionValue(nn.Module):
             block_num=critic_block_num,
             num_bins=num_bins,
             sparsity=sparsity,
+            use_energy_flow=False,
+            energy_sigma_min=0.01,
+            energy_sigma_max=1.0,
+            energy_sigma_t_max=1.0,
+            energy_ode_steps=20,
+            energy_ode_endpoint=0.001,
+            energy_time_embed_dim=128,
         )
 
         self.prediction_head = StatePredictionHead(
