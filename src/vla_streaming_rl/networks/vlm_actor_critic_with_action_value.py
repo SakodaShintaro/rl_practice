@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 from collections.abc import Callable
+from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -161,6 +162,18 @@ class VLMActorCriticWithActionValue(nn.Module):
             self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
             self._target_seq_len, state_dim = self._compute_state_dim(initial_task_prompt)
             torch.cuda.empty_cache()
+        elif self.state_mode == "special_token":
+            # Learnable token appended at the end of the context. Its final-layer
+            # hidden state is used as the state. VLM stays as-is; gradient flows
+            # back to this embedding through the (frozen-weight) VLM forward.
+            self.state_token_embed = nn.Parameter(
+                (torch.randn(1, 1, vlm_hidden_size) * 0.02).to(
+                    device=device, dtype=torch.bfloat16
+                )
+            )
+            state_dim = vlm_hidden_size
+        else:
+            raise ValueError(f"Unknown state_mode: {self.state_mode}")
 
         # Diffusion policy head: action denoising conditioned on state
         self.policy_head = DiffusionPolicy(
@@ -193,7 +206,12 @@ class VLMActorCriticWithActionValue(nn.Module):
             predictor_block_num=predictor_block_num,
         )
         # Project state output to match FluxDiT context_in_dim
-        predictor_in_dim = state_expert_hidden if self.state_mode == "expert" else 4
+        if self.state_mode == "expert":
+            predictor_in_dim = state_expert_hidden
+        elif self.state_mode == "projection":
+            predictor_in_dim = 4
+        else:  # special_token
+            predictor_in_dim = vlm_hidden_size
         self.state_to_predictor_proj = nn.Linear(predictor_in_dim, hidden_image_dim)
 
         self.value_range = 1.0
@@ -477,16 +495,20 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.forward(**forward_kwargs)
 
     def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
-        """Run VLM forward. Returns past_key_values (and projection state for projection mode)."""
+        """Run VLM forward. Returns past_key_values (and state for non-expert modes)."""
         inputs = self._input_cache(images, task_prompts)
 
         inputs_embeds = self._build_inputs_embeds(inputs)
 
-        if self.use_lora:
+        if self.state_mode == "special_token":
+            inputs, inputs_embeds = self._append_state_token(inputs, inputs_embeds)
+
+        # special_token mode needs gradient through the (frozen-weight) VLM
+        # so the appended state-token embedding can train; other modes can use
+        # no_grad when no LoRA adapter sits inside the VLM.
+        run_with_grad = self.use_lora or self.state_mode == "special_token"
+        with nullcontext() if run_with_grad else torch.no_grad():
             outputs = self._vlm_language_forward(inputs, inputs_embeds)
-        else:
-            with torch.no_grad():
-                outputs = self._vlm_language_forward(inputs, inputs_embeds)
 
         # Store last input_id for text generation seeding
         self._last_input_ids = inputs["input_ids"]
@@ -508,7 +530,36 @@ class VLMActorCriticWithActionValue(nn.Module):
                 state = torch.cat([pad, state], dim=1)
             return state.flatten(start_dim=1), outputs.past_key_values
 
+        if self.state_mode == "special_token":
+            # Final layer, last position (the appended state token).
+            hidden_last = outputs.hidden_states[-1]
+            state = hidden_last[:, -1, :].to(torch.float32)
+            return state, outputs.past_key_values
+
         return outputs.past_key_values
+
+    def _append_state_token(
+        self, inputs: dict, inputs_embeds: torch.Tensor
+    ) -> tuple[dict, torch.Tensor]:
+        """Append the learnable state token to inputs_embeds (and extend input_ids/mask).
+
+        The placeholder id (0) is only used by ``compute_3d_position_ids`` to
+        decide if a position is an image token; image_token_id is not 0, so 0
+        is treated as ordinary text and gets a fresh sequential position.
+        """
+        B = inputs_embeds.shape[0]
+        state_embed = self.state_token_embed.expand(B, -1, -1).to(inputs_embeds.dtype)
+        new_inputs_embeds = torch.cat([inputs_embeds, state_embed], dim=1)
+
+        device = inputs["input_ids"].device
+        pad_id = torch.zeros(B, 1, dtype=inputs["input_ids"].dtype, device=device)
+        pad_mask = torch.ones(B, 1, dtype=inputs["attention_mask"].dtype, device=device)
+        new_inputs = {
+            **inputs,
+            "input_ids": torch.cat([inputs["input_ids"], pad_id], dim=1),
+            "attention_mask": torch.cat([inputs["attention_mask"], pad_mask], dim=1),
+        }
+        return new_inputs, new_inputs_embeds
 
     def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
         """Run state query tokens through StateExpert with zero adaRMS conditioning."""
@@ -766,8 +817,10 @@ class VLMActorCriticWithActionValue(nn.Module):
         B = state.shape[0]
         if self.state_mode == "expert":
             x = state.view(B, self.num_state_queries, -1)
-        else:
+        elif self.state_mode == "projection":
             x = state.view(B, self._target_seq_len, -1)
+        else:  # special_token: state is (B, vlm_hidden_size)
+            x = state.view(B, 1, -1)
         return self.state_to_predictor_proj(x)
 
     def _compute_sequence_loss(self, data, curr_state):
