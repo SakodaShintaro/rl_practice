@@ -81,6 +81,21 @@ def _parse_arena(yaml_path: str) -> tuple[float, list[dict]]:
     return pass_mark, items_out
 
 
+def _discover_arena_sets(competition_dir: Path) -> list[str]:
+    """List unique XX-YY prefixes found under competition_dir, sorted lexically.
+
+    The Animal-AI Olympics directory contains files named XX-YY-ZZ.yaml where
+    XX = category (01..10), YY = task (01..30), ZZ = variant (01..03). Each
+    XX-YY prefix is a "set" (triplet of variants).
+    """
+    prefixes: set[str] = set()
+    for p in competition_dir.glob("*.yaml"):
+        parts = p.stem.split("-")
+        if len(parts) == 3 and all(part.isdigit() for part in parts):
+            prefixes.add(f"{parts[0]}-{parts[1]}")
+    return sorted(prefixes)
+
+
 # RGB colors (matplotlib-style) for each AAI item type when drawn top-down.
 _ITEM_COLORS: dict[str, tuple[int, int, int]] = {
     "GoodGoal": (40, 200, 40),
@@ -116,7 +131,6 @@ class AnimalAIEnv(gym.Env):
         self,
         binary_path: str,
         competition_dir: str,
-        arena_sets: list[str],
         max_attempts_per_set: int,
         clean_loops_to_advance: int,
         prompt: str,
@@ -126,14 +140,14 @@ class AnimalAIEnv(gym.Env):
         base_port: int,
     ):
         super().__init__()
-        if len(arena_sets) == 0:
-            raise ValueError("arena_sets must contain at least one prefix (e.g. '01-01')")
         if max_attempts_per_set <= 0:
             raise ValueError("max_attempts_per_set must be > 0")
         if clean_loops_to_advance <= 0:
             raise ValueError("clean_loops_to_advance must be > 0")
         self.competition_dir = Path(competition_dir)
-        self.arena_sets = arena_sets
+        self.arena_sets = _discover_arena_sets(self.competition_dir)
+        if len(self.arena_sets) == 0:
+            raise ValueError(f"no XX-YY-ZZ.yaml files found under {competition_dir}")
         self.max_attempts_per_set = max_attempts_per_set
         self.clean_loops_to_advance = clean_loops_to_advance
         self.prompt = prompt
@@ -283,16 +297,22 @@ class AnimalAIEnv(gym.Env):
             cv2.circle(canvas, (apx, apy), radius, (20, 20, 20), 1)
 
         if self.arena_name:
-            cv2.putText(
-                canvas,
+            text_lines = [
                 self.arena_name,
-                (6, 18),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (20, 20, 20),
-                1,
-                cv2.LINE_AA,
-            )
+                f"attempts: {self._set_attempts}/{self.max_attempts_per_set}",
+                f"streak: {self._clean_loop_streak}/{self.clean_loops_to_advance}",
+            ]
+            for i, line in enumerate(text_lines):
+                cv2.putText(
+                    canvas,
+                    line,
+                    (6, 18 + i * 16),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (20, 20, 20),
+                    1,
+                    cv2.LINE_AA,
+                )
 
         return canvas
 
@@ -389,7 +409,6 @@ if __name__ == "__main__":
     env = AnimalAIEnv(
         binary_path=str(bin_path),
         competition_dir=str(competition),
-        arena_sets=["01-01", "01-02"],
         max_attempts_per_set=15,
         clean_loops_to_advance=2,
         prompt="Find and reach the green goal sphere; avoid red zones and yellow goals.",

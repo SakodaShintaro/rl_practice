@@ -61,7 +61,6 @@ _ANIMALAI_PROMPT = (
 
 def make_animalai_env(
     competition_dir: str,
-    arena_sets: list[str],
     max_attempts_per_set: int,
     clean_loops_to_advance: int,
 ) -> gym.Env:
@@ -77,7 +76,6 @@ def make_animalai_env(
     return AnimalAIEnv(
         binary_path=str(binary_path),
         competition_dir=competition_dir,
-        arena_sets=arena_sets,
         max_attempts_per_set=max_attempts_per_set,
         clean_loops_to_advance=clean_loops_to_advance,
         prompt=_ANIMALAI_PROMPT,

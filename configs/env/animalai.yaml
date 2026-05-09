@@ -10,8 +10,5 @@ image_save_interval: 10
 env_factory:
   _target_: vla_streaming_rl.wrappers.make_animalai_env
   competition_dir: ./external/animal-ai/configs/competition
-  arena_sets:
-    - "01-01"
-    - "01-02"
   max_attempts_per_set: 100
   clean_loops_to_advance: 10
