@@ -117,23 +117,27 @@ def concat_labeled_images(
 ) -> np.ndarray:
     """
     Create a combined image from multiple images (returns in RGB format).
-    Convert all images to uint8 and add labels.
+    Convert all images to uint8 and add labels. An all-zero `goal` is treated
+    as "no goal" and the panel (and its label) is omitted; the prediction
+    panel is then rendered alone instead of being vstacked with goal.
     """
-    # Define images and label names as arrays
-    images = [environment, observation, prediction, reward, goal]
-    labels = ["environment", "observation", "prediction", "reward", "goal"]
+    has_goal = bool(np.any(goal))
+    images = [environment, observation, prediction, reward]
+    labels = ["environment", "observation", "prediction", "reward"]
+    if has_goal:
+        images.append(goal)
+        labels.append("goal")
 
-    # Batch process uint8 conversion and label addition
     labeled_images = [
         add_text_label_on_top(convert_to_uint8(img), label) for img, label in zip(images, labels)
     ]
 
-    # concat prediction and goal
-    pred_goal_concat = cv2.vconcat([labeled_images[2], labeled_images[4]])
-    labeled_images[2] = pred_goal_concat
-    del labeled_images[4]
+    if has_goal:
+        # vstack prediction with goal so they share a column
+        pred_goal_concat = cv2.vconcat([labeled_images[2], labeled_images[4]])
+        labeled_images[2] = pred_goal_concat
+        del labeled_images[4]
 
-    # Concatenate all images
     final_image_bgr = concat_images(labeled_images)
     final_image_rgb = cv2.cvtColor(final_image_bgr, cv2.COLOR_BGR2RGB)
     return final_image_rgb
