@@ -36,18 +36,19 @@ class AnimalAIEnv(gym.Env):
     def __init__(
         self,
         binary_path: str,
-        arenas: list[dict[str, str]],
+        arena_yamls: list[str],
+        prompt: str,
         resolution: int,
         max_episode_steps: int,
         seed: int,
         base_port: int,
     ):
         super().__init__()
-        if len(arenas) == 0:
-            raise ValueError("arenas must contain at least one {yaml, prompt} entry")
-        self.arenas = arenas
+        if len(arena_yamls) == 0:
+            raise ValueError("arena_yamls must contain at least one path")
+        self.arena_yamls = arena_yamls
         self._arena_idx = 0
-        self.prompt = arenas[0]["prompt"]
+        self.prompt = prompt
 
         self.binary_path = binary_path
         self.resolution = resolution
@@ -72,7 +73,7 @@ class AnimalAIEnv(gym.Env):
             return
         self._aai = AnimalAIEnvironment(
             file_name=self.binary_path,
-            arenas_configurations=self.arenas[0]["yaml"],
+            arenas_configurations=self.arena_yamls[0],
             seed=self.seed_value,
             play=False,
             useCamera=True,
@@ -102,15 +103,14 @@ class AnimalAIEnv(gym.Env):
         super().reset(seed=seed)
         self._ensure_started()
 
-        arena = self.arenas[self._arena_idx % len(self.arenas)]
+        arena_yaml = self.arena_yamls[self._arena_idx % len(self.arena_yamls)]
         self._arena_idx += 1
-        self.prompt = arena["prompt"]
-        self._aai.reset(arenas_configurations=arena["yaml"])
+        self._aai.reset(arenas_configurations=arena_yaml)
         self.episode_step = 0
 
         decision_steps, _ = self._aai.get_steps(self._behavior_name)
         self._latest_image = self._decode_obs(decision_steps.obs[0][0])
-        return self._latest_image, {"task_prompt": self.prompt, "arena_yaml": arena["yaml"]}
+        return self._latest_image, {"task_prompt": self.prompt, "arena_yaml": arena_yaml}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         a = np.asarray(action, dtype=np.float32)
@@ -139,7 +139,7 @@ class AnimalAIEnv(gym.Env):
         info = {
             "task_prompt": self.prompt,
             "episode_step": self.episode_step,
-            "arena_idx": (self._arena_idx - 1) % len(self.arenas),
+            "arena_idx": (self._arena_idx - 1) % len(self.arena_yamls),
         }
         return self._latest_image, reward, terminated, truncated, info
 
@@ -157,13 +157,14 @@ class AnimalAIEnv(gym.Env):
 if __name__ == "__main__":
     bin_path = Path.home() / "animalai_env" / "Linux" / "animalAI.x86_64"
     competition = Path(__file__).resolve().parents[3] / "external" / "animal-ai" / "configs" / "competition"
-    arenas = [
-        {"yaml": str(competition / "01-01-01.yaml"), "prompt": "Find and reach the goal sphere."},
-        {"yaml": str(competition / "04-01-01.yaml"), "prompt": "Avoid the red zone and reach the goal."},
+    arena_yamls = [
+        str(competition / "01-01-01.yaml"),
+        str(competition / "04-01-01.yaml"),
     ]
     env = AnimalAIEnv(
         binary_path=str(bin_path),
-        arenas=arenas,
+        arena_yamls=arena_yamls,
+        prompt="Find and reach the green goal sphere; avoid red zones and yellow goals.",
         resolution=96,
         max_episode_steps=100,
         seed=0,

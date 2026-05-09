@@ -54,7 +54,12 @@ def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
     return action_array, len(matches) > 0
 
 
-def make_animalai_env(arenas: list[dict[str, str]]) -> gym.Env:
+_ANIMALAI_PROMPT = (
+    "Find and reach the green goal sphere; avoid red zones and yellow goals."
+)
+
+
+def make_animalai_env(arena_yamls: list[str]) -> gym.Env:
     """Hydra `_target_` factory for the raw AnimalAI env (no wrappers).
 
     v5 has no auto-download; place the unzipped Linux build at
@@ -66,7 +71,8 @@ def make_animalai_env(arenas: list[dict[str, str]]) -> gym.Env:
     # resolution must be divisible by 8 (Wan VAE encode/decode is stride-8).
     return AnimalAIEnv(
         binary_path=str(binary_path),
-        arenas=arenas,
+        arena_yamls=arena_yamls,
+        prompt=_ANIMALAI_PROMPT,
         resolution=96,
         max_episode_steps=500,
         seed=0,
