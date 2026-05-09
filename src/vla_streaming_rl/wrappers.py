@@ -54,7 +54,7 @@ def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
     return action_array, len(matches) > 0
 
 
-def make_animalai_env(arena_yaml: str | None, prompt: str) -> gym.Env:
+def make_animalai_env(arenas: list[dict[str, str]]) -> gym.Env:
     """Hydra `_target_` factory for the raw AnimalAI env (no wrappers).
 
     v5 has no auto-download; place the unzipped Linux build at
@@ -63,15 +63,10 @@ def make_animalai_env(arena_yaml: str | None, prompt: str) -> gym.Env:
     from vla_streaming_rl.envs.animalai_env import AnimalAIEnv
 
     binary_path = Path.home() / "animalai_env" / "Linux" / "animalAI.x86_64"
-    if arena_yaml is None:
-        import animalai.arenas
-
-        arena_yaml = str(Path(animalai.arenas.__file__).parent / "GoodGoal_Random.yml")
     # resolution must be divisible by 8 (Wan VAE encode/decode is stride-8).
     return AnimalAIEnv(
         binary_path=str(binary_path),
-        arena_yaml=arena_yaml,
-        prompt=prompt,
+        arenas=arenas,
         resolution=96,
         max_episode_steps=500,
         seed=0,

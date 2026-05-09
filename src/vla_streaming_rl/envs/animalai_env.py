@@ -36,18 +36,20 @@ class AnimalAIEnv(gym.Env):
     def __init__(
         self,
         binary_path: str,
-        arena_yaml: str,
-        prompt: str,
+        arenas: list[dict[str, str]],
         resolution: int,
         max_episode_steps: int,
         seed: int,
         base_port: int,
     ):
         super().__init__()
-        self.prompt = prompt
+        if len(arenas) == 0:
+            raise ValueError("arenas must contain at least one {yaml, prompt} entry")
+        self.arenas = arenas
+        self._arena_idx = 0
+        self.prompt = arenas[0]["prompt"]
 
         self.binary_path = binary_path
-        self.arena_yaml = arena_yaml
         self.resolution = resolution
         self.max_episode_steps = max_episode_steps
         self.seed_value = seed
@@ -70,7 +72,7 @@ class AnimalAIEnv(gym.Env):
             return
         self._aai = AnimalAIEnvironment(
             file_name=self.binary_path,
-            arenas_configurations=self.arena_yaml,
+            arenas_configurations=self.arenas[0]["yaml"],
             seed=self.seed_value,
             play=False,
             useCamera=True,
@@ -99,12 +101,16 @@ class AnimalAIEnv(gym.Env):
     ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
         self._ensure_started()
-        self._aai.reset()
+
+        arena = self.arenas[self._arena_idx % len(self.arenas)]
+        self._arena_idx += 1
+        self.prompt = arena["prompt"]
+        self._aai.reset(arenas_configurations=arena["yaml"])
         self.episode_step = 0
 
         decision_steps, _ = self._aai.get_steps(self._behavior_name)
         self._latest_image = self._decode_obs(decision_steps.obs[0][0])
-        return self._latest_image, {"task_prompt": self.prompt}
+        return self._latest_image, {"task_prompt": self.prompt, "arena_yaml": arena["yaml"]}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         a = np.asarray(action, dtype=np.float32)
@@ -130,7 +136,11 @@ class AnimalAIEnv(gym.Env):
         self.episode_step += 1
         truncated = self.episode_step >= self.max_episode_steps
 
-        info = {"task_prompt": self.prompt, "episode_step": self.episode_step}
+        info = {
+            "task_prompt": self.prompt,
+            "episode_step": self.episode_step,
+            "arena_idx": (self._arena_idx - 1) % len(self.arenas),
+        }
         return self._latest_image, reward, terminated, truncated, info
 
     def render(self) -> np.ndarray | None:
@@ -146,26 +156,28 @@ class AnimalAIEnv(gym.Env):
 
 if __name__ == "__main__":
     bin_path = Path.home() / "animalai_env" / "Linux" / "animalAI.x86_64"
-    arena_path = Path(__import__("animalai").arenas.__file__).parent / "GoodGoal_Random.yml"
+    competition = Path(__file__).resolve().parents[3] / "external" / "animal-ai" / "configs" / "competition"
+    arenas = [
+        {"yaml": str(competition / "01-01-01.yaml"), "prompt": "Find and reach the goal sphere."},
+        {"yaml": str(competition / "04-01-01.yaml"), "prompt": "Avoid the red zone and reach the goal."},
+    ]
     env = AnimalAIEnv(
         binary_path=str(bin_path),
-        arena_yaml=str(arena_path),
-        prompt="Find and reach the goal sphere placed at a random location in the arena.",
+        arenas=arenas,
         resolution=96,
         max_episode_steps=100,
         seed=0,
         base_port=5005,
     )
-    obs, info = env.reset(seed=0, options=None)
-    print(f"obs shape={obs.shape} dtype={obs.dtype} mean={obs.mean():.1f}")
-    print(f"info={info}")
-    total_reward = 0.0
-    for i in range(20):
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        if terminated or truncated:
-            print(f"step={i} terminated={terminated} truncated={truncated} reward={reward:.4f}")
-            break
-    print(f"total_reward={total_reward:.4f}")
+    for ep in range(3):
+        obs, info = env.reset(seed=ep, options=None)
+        print(f"ep={ep} arena={info['arena_yaml']} prompt={info['task_prompt']}")
+        total_reward = 0.0
+        for i in range(20):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            if terminated or truncated:
+                break
+        print(f"  total_reward={total_reward:.4f}")
     env.close()
