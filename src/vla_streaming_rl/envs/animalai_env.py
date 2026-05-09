@@ -299,25 +299,25 @@ class AnimalAIEnv(gym.Env):
             cv2.circle(canvas, (apx, apy), radius, _AGENT_COLOR, cv2.FILLED)
             cv2.circle(canvas, (apx, apy), radius, (20, 20, 20), 1)
 
+        header_height = 22
+        header = np.full((header_height, img_size, 3), 215, dtype=np.uint8)
         if self.arena_name:
-            text_lines = [
-                self.arena_name,
-                f"attempts: {self._set_attempts}/{self.max_attempts_per_set}",
-                f"streak: {self._clean_loop_streak}/{self.clean_loops_to_advance}",
-            ]
-            for i, line in enumerate(text_lines):
-                cv2.putText(
-                    canvas,
-                    line,
-                    (6, 18 + i * 16),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (20, 20, 20),
-                    1,
-                    cv2.LINE_AA,
-                )
-
-        return canvas
+            text = (
+                f"{self.arena_name}  "
+                f"att:{self._set_attempts}/{self.max_attempts_per_set}  "
+                f"str:{self._clean_loop_streak}/{self.clean_loops_to_advance}"
+            )
+            cv2.putText(
+                header,
+                text,
+                (4, 16),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (20, 20, 20),
+                1,
+                cv2.LINE_AA,
+            )
+        return np.vstack([header, canvas])
 
     def reset(
         self,
