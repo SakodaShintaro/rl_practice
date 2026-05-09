@@ -10,6 +10,7 @@ environments (CARLA, GUI games), discretising with a +/-1/3 dead-zone.
 """
 
 import random
+import re
 from pathlib import Path
 
 import gymnasium as gym
@@ -26,6 +27,19 @@ def _to_discrete(value: float) -> int:
     elif value <= -1.0 / 3.0:
         return 2
     return 0
+
+
+# Animal-AI yaml uses custom !ArenaConfig/!Item tags so yaml.safe_load doesn't
+# work without registering loaders. We only need pass_mark, so a regex is enough.
+_PASS_MARK_RE = re.compile(r"^\s*pass_mark:\s*([\d.\-]+)\s*$", re.MULTILINE)
+
+
+def _read_pass_mark(yaml_path: str) -> float:
+    text = Path(yaml_path).read_text()
+    m = _PASS_MARK_RE.search(text)
+    if m is None:
+        raise ValueError(f"pass_mark not found in {yaml_path}")
+    return float(m.group(1))
 
 
 class AnimalAIEnv(gym.Env):
@@ -67,6 +81,8 @@ class AnimalAIEnv(gym.Env):
         self._behavior_name: str | None = None
         self._latest_image: np.ndarray | None = None
         self.episode_step = 0
+        self.arena_name: str = ""
+        self.pass_mark: float = 0.0
 
     def _ensure_started(self):
         if self._aai is not None:
@@ -105,12 +121,20 @@ class AnimalAIEnv(gym.Env):
 
         arena_yaml = self.arena_yamls[self._arena_idx % len(self.arena_yamls)]
         self._arena_idx += 1
+        self.arena_name = Path(arena_yaml).stem
+        self.pass_mark = _read_pass_mark(arena_yaml)
         self._aai.reset(arenas_configurations=arena_yaml)
         self.episode_step = 0
 
         decision_steps, _ = self._aai.get_steps(self._behavior_name)
         self._latest_image = self._decode_obs(decision_steps.obs[0][0])
-        return self._latest_image, {"task_prompt": self.prompt, "arena_yaml": arena_yaml}
+        info = {
+            "task_prompt": self.prompt,
+            "arena_yaml": arena_yaml,
+            "arena_name": self.arena_name,
+            "pass_mark": self.pass_mark,
+        }
+        return self._latest_image, info
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         a = np.asarray(action, dtype=np.float32)
@@ -140,6 +164,8 @@ class AnimalAIEnv(gym.Env):
             "task_prompt": self.prompt,
             "episode_step": self.episode_step,
             "arena_idx": (self._arena_idx - 1) % len(self.arena_yamls),
+            "arena_name": self.arena_name,
+            "pass_mark": self.pass_mark,
         }
         return self._latest_image, reward, terminated, truncated, info
 
@@ -172,7 +198,10 @@ if __name__ == "__main__":
     )
     for ep in range(3):
         obs, info = env.reset(seed=ep, options=None)
-        print(f"ep={ep} arena={info['arena_yaml']} prompt={info['task_prompt']}")
+        print(
+            f"ep={ep} arena={info['arena_name']} pass_mark={info['pass_mark']} "
+            f"prompt={info['task_prompt']}"
+        )
         total_reward = 0.0
         for i in range(20):
             action = env.action_space.sample()
@@ -180,5 +209,6 @@ if __name__ == "__main__":
             total_reward += reward
             if terminated or truncated:
                 break
-        print(f"  total_reward={total_reward:.4f}")
+        passed = total_reward >= info["pass_mark"]
+        print(f"  total_reward={total_reward:.4f} success={passed}")
     env.close()
