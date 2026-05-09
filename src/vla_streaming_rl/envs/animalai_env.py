@@ -196,13 +196,17 @@ class AnimalAIEnv(gym.Env):
         return str(self.competition_dir / f"{prefix}-{variant:02d}.yaml")
 
     def _on_episode_end(self, success: bool) -> bool:
-        """Update curriculum state. Returns True if the set advanced."""
+        """Update curriculum state. Returns True if the set advanced.
+
+        `_set_attempts` is incremented per completed loop (every 3 episodes),
+        not per episode, so `max_attempts_per_set` is a loop count.
+        """
         self._loop_successes.append(success)
-        self._set_attempts += 1
         self._variant_idx += 1
 
         advanced = False
         if len(self._loop_successes) == 3:
+            self._set_attempts += 1
             if all(self._loop_successes):
                 self._clean_loop_streak += 1
                 if self._clean_loop_streak >= self.clean_loops_to_advance:
@@ -210,9 +214,8 @@ class AnimalAIEnv(gym.Env):
             else:
                 self._clean_loop_streak = 0
             self._loop_successes = []
-
-        if not advanced and self._set_attempts >= self.max_attempts_per_set:
-            advanced = True
+            if not advanced and self._set_attempts >= self.max_attempts_per_set:
+                advanced = True
 
         if advanced:
             self._set_idx += 1
