@@ -377,6 +377,11 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             if arena_name:
                 data_dict[f"success/{arena_name}"] = success
                 data_dict[f"episodic_return/{arena_name}"] = score
+            if "set_idx" in env_info:
+                data_dict["set_idx"] = env_info["set_idx"]
+                data_dict["set_attempts"] = env_info.get("set_attempts", 0)
+                data_dict["advanced_set"] = float(env_info.get("advanced_set", False))
+                data_dict["clean_loop_streak"] = env_info.get("clean_loop_streak", 0)
         if len(score_list) >= eval_range:
             data_dict["recent_average_score"] = recent_average_score
             best_recent_average_score = max(best_recent_average_score, recent_average_score)

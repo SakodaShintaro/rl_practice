@@ -115,7 +115,10 @@ class AnimalAIEnv(gym.Env):
     def __init__(
         self,
         binary_path: str,
-        arena_yamls: list[str],
+        competition_dir: str,
+        arena_sets: list[str],
+        max_attempts_per_set: int,
+        clean_loops_to_advance: int,
         prompt: str,
         resolution: int,
         max_episode_steps: int,
@@ -123,11 +126,28 @@ class AnimalAIEnv(gym.Env):
         base_port: int,
     ):
         super().__init__()
-        if len(arena_yamls) == 0:
-            raise ValueError("arena_yamls must contain at least one path")
-        self.arena_yamls = arena_yamls
-        self._arena_idx = 0
+        if len(arena_sets) == 0:
+            raise ValueError("arena_sets must contain at least one prefix (e.g. '01-01')")
+        if max_attempts_per_set <= 0:
+            raise ValueError("max_attempts_per_set must be > 0")
+        if clean_loops_to_advance <= 0:
+            raise ValueError("clean_loops_to_advance must be > 0")
+        self.competition_dir = Path(competition_dir)
+        self.arena_sets = arena_sets
+        self.max_attempts_per_set = max_attempts_per_set
+        self.clean_loops_to_advance = clean_loops_to_advance
         self.prompt = prompt
+
+        # Curriculum state. A "set" is a triplet of variants (-01, -02, -03)
+        # under one prefix. We loop through variants in order; advance once we
+        # have `clean_loops_to_advance` clean (3/3 success) loops in a row, or
+        # once `max_attempts_per_set` total episodes have run on the set.
+        self._set_idx = 0
+        self._variant_idx = 0
+        self._set_attempts = 0
+        self._loop_successes: list[bool] = []
+        self._clean_loop_streak = 0
+        self._episode_return = 0.0
 
         self.binary_path = binary_path
         self.resolution = resolution
@@ -153,12 +173,47 @@ class AnimalAIEnv(gym.Env):
         # AAI vector observation. None before the first reset.
         self._agent_xz: tuple[float, float] | None = None
 
+    def _current_set_name(self) -> str:
+        return self.arena_sets[self._set_idx % len(self.arena_sets)]
+
+    def _current_yaml_path(self) -> str:
+        prefix = self._current_set_name()
+        variant = (self._variant_idx % 3) + 1
+        return str(self.competition_dir / f"{prefix}-{variant:02d}.yaml")
+
+    def _on_episode_end(self, success: bool) -> bool:
+        """Update curriculum state. Returns True if the set advanced."""
+        self._loop_successes.append(success)
+        self._set_attempts += 1
+        self._variant_idx += 1
+
+        advanced = False
+        if len(self._loop_successes) == 3:
+            if all(self._loop_successes):
+                self._clean_loop_streak += 1
+                if self._clean_loop_streak >= self.clean_loops_to_advance:
+                    advanced = True
+            else:
+                self._clean_loop_streak = 0
+            self._loop_successes = []
+
+        if not advanced and self._set_attempts >= self.max_attempts_per_set:
+            advanced = True
+
+        if advanced:
+            self._set_idx += 1
+            self._variant_idx = 0
+            self._set_attempts = 0
+            self._loop_successes = []
+            self._clean_loop_streak = 0
+        return advanced
+
     def _ensure_started(self):
         if self._aai is not None:
             return
         self._aai = AnimalAIEnvironment(
             file_name=self.binary_path,
-            arenas_configurations=self.arena_yamls[0],
+            arenas_configurations=self._current_yaml_path(),
             seed=self.seed_value,
             play=False,
             useCamera=True,
@@ -249,12 +304,12 @@ class AnimalAIEnv(gym.Env):
         super().reset(seed=seed)
         self._ensure_started()
 
-        arena_yaml = self.arena_yamls[self._arena_idx % len(self.arena_yamls)]
-        self._arena_idx += 1
+        arena_yaml = self._current_yaml_path()
         self.arena_name = Path(arena_yaml).stem
         self.pass_mark, self._arena_items = _parse_arena(arena_yaml)
         self._aai.reset(arenas_configurations=arena_yaml)
         self.episode_step = 0
+        self._episode_return = 0.0
 
         decision_steps, _ = self._aai.get_steps(self._behavior_name)
         self._latest_image = self._decode_obs(decision_steps.obs[0][0])
@@ -264,6 +319,10 @@ class AnimalAIEnv(gym.Env):
             "arena_yaml": arena_yaml,
             "arena_name": self.arena_name,
             "pass_mark": self.pass_mark,
+            "set_idx": self._set_idx,
+            "set_name": self._current_set_name(),
+            "set_attempts": self._set_attempts,
+            "clean_loop_streak": self._clean_loop_streak,
         }
         return self._latest_image, info
 
@@ -291,15 +350,26 @@ class AnimalAIEnv(gym.Env):
             self._agent_xz = self._extract_agent_xz(decision_steps.obs, 0)
 
         self.episode_step += 1
+        self._episode_return += reward
         truncated = self.episode_step >= self.max_episode_steps
 
         info = {
             "task_prompt": self.prompt,
             "episode_step": self.episode_step,
-            "arena_idx": (self._arena_idx - 1) % len(self.arena_yamls),
+            "variant_idx": self._variant_idx % 3,
             "arena_name": self.arena_name,
             "pass_mark": self.pass_mark,
+            "set_idx": self._set_idx,
+            "set_name": self._current_set_name(),
+            "set_attempts": self._set_attempts,
+            "clean_loop_streak": self._clean_loop_streak,
         }
+        if terminated or truncated:
+            success = self._episode_return >= self.pass_mark
+            advanced = self._on_episode_end(success)
+            info["success"] = bool(success)
+            info["advanced_set"] = advanced
+            info["clean_loop_streak"] = self._clean_loop_streak
         return self._latest_image, reward, terminated, truncated, info
 
     def render(self) -> np.ndarray | None:
@@ -316,24 +386,23 @@ class AnimalAIEnv(gym.Env):
 if __name__ == "__main__":
     bin_path = Path.home() / "animalai_env" / "Linux" / "animalAI.x86_64"
     competition = Path(__file__).resolve().parents[3] / "external" / "animal-ai" / "configs" / "competition"
-    arena_yamls = [
-        str(competition / "01-01-01.yaml"),
-        str(competition / "04-01-01.yaml"),
-    ]
     env = AnimalAIEnv(
         binary_path=str(bin_path),
-        arena_yamls=arena_yamls,
+        competition_dir=str(competition),
+        arena_sets=["01-01", "01-02"],
+        max_attempts_per_set=15,
+        clean_loops_to_advance=2,
         prompt="Find and reach the green goal sphere; avoid red zones and yellow goals.",
         resolution=96,
         max_episode_steps=100,
         seed=0,
         base_port=5005,
     )
-    for ep in range(3):
+    for ep in range(8):
         obs, info = env.reset(seed=ep, options=None)
         print(
-            f"ep={ep} arena={info['arena_name']} pass_mark={info['pass_mark']} "
-            f"prompt={info['task_prompt']}"
+            f"ep={ep} set={info['set_name']} arena={info['arena_name']} "
+            f"attempts={info['set_attempts']}"
         )
         total_reward = 0.0
         for i in range(20):
@@ -342,6 +411,8 @@ if __name__ == "__main__":
             total_reward += reward
             if terminated or truncated:
                 break
-        passed = total_reward >= info["pass_mark"]
-        print(f"  total_reward={total_reward:.4f} success={passed}")
+        print(
+            f"  return={total_reward:.4f} success={info.get('success')} "
+            f"advanced={info.get('advanced_set')}"
+        )
     env.close()

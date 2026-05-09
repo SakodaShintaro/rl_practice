@@ -2,14 +2,15 @@
 env_id: AnimalAI-v0
 step_limit: 50_000
 
-# Arenas are visited in round-robin order on each env.reset(). The shared
-# task prompt for the VLM is defined in vla_streaming_rl.wrappers.
+# Curriculum: each "set" is a triplet of variants {<prefix>-01, -02, -03}. The
+# env loops through variants in order; advance to the next set once we have
+# `clean_loops_to_advance` clean (3/3 success) loops in a row, OR once
+# `max_attempts_per_set` total episodes have run on the set (whichever first).
 env_factory:
   _target_: vla_streaming_rl.wrappers.make_animalai_env
-  arena_yamls:
-    - ./external/animal-ai/configs/competition/01-01-01.yaml
-    - ./external/animal-ai/configs/competition/01-01-02.yaml
-    - ./external/animal-ai/configs/competition/01-01-03.yaml
-    - ./external/animal-ai/configs/competition/01-02-01.yaml
-    - ./external/animal-ai/configs/competition/01-02-02.yaml
-    - ./external/animal-ai/configs/competition/01-02-03.yaml
+  competition_dir: ./external/animal-ai/configs/competition
+  arena_sets:
+    - "01-01"
+    - "01-02"
+  max_attempts_per_set: 30
+  clean_loops_to_advance: 2

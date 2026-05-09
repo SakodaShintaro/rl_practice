@@ -21,6 +21,7 @@ fi
 export DISPLAY
 
 AGENT=cnn_off_policy_bs16
+# AGENT=cnn_streaming
 
 uv run python scripts/train.py \
   agent=${AGENT} \

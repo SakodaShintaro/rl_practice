@@ -59,7 +59,12 @@ _ANIMALAI_PROMPT = (
 )
 
 
-def make_animalai_env(arena_yamls: list[str]) -> gym.Env:
+def make_animalai_env(
+    competition_dir: str,
+    arena_sets: list[str],
+    max_attempts_per_set: int,
+    clean_loops_to_advance: int,
+) -> gym.Env:
     """Hydra `_target_` factory for the raw AnimalAI env (no wrappers).
 
     v5 has no auto-download; place the unzipped Linux build at
@@ -71,7 +76,10 @@ def make_animalai_env(arena_yamls: list[str]) -> gym.Env:
     # resolution must be divisible by 8 (Wan VAE encode/decode is stride-8).
     return AnimalAIEnv(
         binary_path=str(binary_path),
-        arena_yamls=arena_yamls,
+        competition_dir=competition_dir,
+        arena_sets=arena_sets,
+        max_attempts_per_set=max_attempts_per_set,
+        clean_loops_to_advance=clean_loops_to_advance,
         prompt=_ANIMALAI_PROMPT,
         resolution=96,
         max_episode_steps=500,
