@@ -1,6 +1,7 @@
 # @package _global_
 env_id: AnimalAI-v0
-step_limit: 50_000
+step_limit: 500_000
+image_save_interval: 10
 
 # Curriculum: each "set" is a triplet of variants {<prefix>-01, -02, -03}. The
 # env loops through variants in order; advance to the next set once we have
@@ -12,5 +13,5 @@ env_factory:
   arena_sets:
     - "01-01"
     - "01-02"
-  max_attempts_per_set: 30
-  clean_loops_to_advance: 2
+  max_attempts_per_set: 100
+  clean_loops_to_advance: 10
