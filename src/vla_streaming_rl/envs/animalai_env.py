@@ -10,11 +10,12 @@ environments (CARLA, GUI games), discretising with a +/-1/3 dead-zone.
 """
 
 import random
-import re
 from pathlib import Path
 
+import cv2
 import gymnasium as gym
 import numpy as np
+import yaml
 from animalai import AnimalAIEnvironment
 from gymnasium import spaces
 from mlagents_envs.base_env import ActionTuple
@@ -29,17 +30,81 @@ def _to_discrete(value: float) -> int:
     return 0
 
 
-# Animal-AI yaml uses custom !ArenaConfig/!Item tags so yaml.safe_load doesn't
-# work without registering loaders. We only need pass_mark, so a regex is enough.
-_PASS_MARK_RE = re.compile(r"^\s*pass_mark:\s*([\d.\-]+)\s*$", re.MULTILINE)
+# Animal-AI yaml uses custom !ArenaConfig/!Item/!Vector3/!RGB tags. We register
+# them as plain mappings so yaml.load can parse the full structure.
+class _AAILoader(yaml.SafeLoader):
+    pass
 
 
-def _read_pass_mark(yaml_path: str) -> float:
-    text = Path(yaml_path).read_text()
-    m = _PASS_MARK_RE.search(text)
-    if m is None:
-        raise ValueError(f"pass_mark not found in {yaml_path}")
-    return float(m.group(1))
+def _aai_tag_constructor(loader, node):
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node, deep=True)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_scalar(node)
+
+
+for _tag in ("!ArenaConfig", "!Arena", "!Item", "!Vector3", "!RGB"):
+    _AAILoader.add_constructor(_tag, _aai_tag_constructor)
+
+
+def _parse_arena(yaml_path: str) -> tuple[float, list[dict]]:
+    """Return (pass_mark, items) from an Animal-AI arena yaml.
+
+    Each item dict carries one (position, size, rotation) triple in arena
+    coordinates: {name, x, z, size_x, size_z, rotation}. yaml entries with
+    multiple positions are expanded into multiple item dicts; if `sizes` is
+    shorter than `positions` the last given size is reused (AAI's convention).
+    """
+    cfg = yaml.load(Path(yaml_path).read_text(), Loader=_AAILoader)
+    arena = cfg["arenas"][0]
+    pass_mark = float(arena.get("pass_mark", 0))
+    items_out: list[dict] = []
+    for item in arena.get("items", []) or []:
+        name = item["name"]
+        positions = item.get("positions") or []
+        sizes = item.get("sizes") or []
+        rotations = item.get("rotations") or []
+        for i, pos in enumerate(positions):
+            size = sizes[i] if i < len(sizes) else (sizes[-1] if sizes else None)
+            rot = rotations[i] if i < len(rotations) else (rotations[-1] if rotations else 0)
+            items_out.append(
+                {
+                    "name": name,
+                    "x": float(pos["x"]),
+                    "z": float(pos["z"]),
+                    "size_x": float(size["x"]) if size else 1.0,
+                    "size_z": float(size["z"]) if size else 1.0,
+                    "rotation": float(rot),
+                }
+            )
+    return pass_mark, items_out
+
+
+# RGB colors (matplotlib-style) for each AAI item type when drawn top-down.
+_ITEM_COLORS: dict[str, tuple[int, int, int]] = {
+    "GoodGoal": (40, 200, 40),
+    "GoodGoalMulti": (40, 230, 80),
+    "GoodGoalBounce": (40, 200, 120),
+    "GoodGoalMultiBounce": (40, 230, 160),
+    "BadGoal": (220, 40, 40),
+    "BadGoalBounce": (220, 100, 40),
+    "DeathZone": (140, 20, 20),
+    "HotZone": (220, 120, 40),
+    "Wall": (110, 110, 110),
+    "WallTransparent": (200, 200, 220),
+    "Ramp": (140, 100, 60),
+    "Cardbox1": (210, 160, 80),
+    "Cardbox2": (180, 130, 70),
+    "LObject": (220, 200, 50),
+    "LObject2": (200, 180, 50),
+    "UObject": (220, 220, 50),
+    "CylinderTunnel": (160, 190, 210),
+    "CylinderTunnelTransparent": (200, 220, 230),
+}
+_DEFAULT_ITEM_COLOR: tuple[int, int, int] = (180, 180, 180)
+_AGENT_COLOR: tuple[int, int, int] = (40, 80, 220)
+_ARENA_SIZE_M = 40.0  # standard Animal-AI arena is 40 m square
 
 
 class AnimalAIEnv(gym.Env):
@@ -83,6 +148,10 @@ class AnimalAIEnv(gym.Env):
         self.episode_step = 0
         self.arena_name: str = ""
         self.pass_mark: float = 0.0
+        self._arena_items: list[dict] = []
+        # (x, z) agent position in arena coords; populated each step from the
+        # AAI vector observation. None before the first reset.
+        self._agent_xz: tuple[float, float] | None = None
 
     def _ensure_started(self):
         if self._aai is not None:
@@ -111,6 +180,67 @@ class AnimalAIEnv(gym.Env):
         # AAI emits float32 in [0, 1] with shape (3, H, W).
         return (obs_chw_float.transpose(1, 2, 0) * 255.0).astype(np.uint8)
 
+    @staticmethod
+    def _extract_agent_xz(obs_list, idx: int) -> tuple[float, float]:
+        # Vector obs layout (useCamera=True, useRayCasts=False): obs[1][idx] is
+        # [health, vx, vy, vz, x, y, z]. We pull (x, z) for the top-down view.
+        vec = obs_list[1][idx]
+        return float(vec[4]), float(vec[6])
+
+    def _render_topdown(self) -> np.ndarray:
+        img_size = 256
+        scale = img_size / _ARENA_SIZE_M
+        canvas = np.full((img_size, img_size, 3), 240, dtype=np.uint8)
+        # Flip z so the +z arena axis points up in the image (Unity-editor-like).
+        def to_px(x: float, z: float) -> tuple[int, int]:
+            return int(round(x * scale)), int(round((_ARENA_SIZE_M - z) * scale))
+
+        cv2.rectangle(canvas, (0, 0), (img_size - 1, img_size - 1), (60, 60, 60), 2)
+
+        for item in self._arena_items:
+            if item["name"] == "Agent":
+                continue
+            # x or z = -1 in the yaml means Unity randomizes the position at
+            # reset; we don't know the actual location, so skip drawing.
+            if item["x"] < 0 or item["z"] < 0:
+                continue
+            cx, cy = to_px(item["x"], item["z"])
+            color = _ITEM_COLORS.get(item["name"], _DEFAULT_ITEM_COLOR)
+            # Goals are spherical in the Unity scene; draw as circles so they
+            # are visually distinct from rectangular zones/walls/boxes.
+            if "Goal" in item["name"]:
+                radius = max(int(0.5 * item["size_x"] * scale), 3)
+                cv2.circle(canvas, (cx, cy), radius, color, cv2.FILLED)
+                cv2.circle(canvas, (cx, cy), radius, (20, 20, 20), 1)
+                continue
+            sx_px = max(item["size_x"] * scale, 3.0)
+            sz_px = max(item["size_z"] * scale, 3.0)
+            rect = ((float(cx), float(cy)), (sx_px, sz_px), -item["rotation"])
+            box = np.intp(cv2.boxPoints(rect))
+            transparent = "Transparent" in item["name"]
+            thickness = 1 if transparent else cv2.FILLED
+            cv2.drawContours(canvas, [box], 0, color, thickness)
+
+        if self._agent_xz is not None:
+            apx, apy = to_px(*self._agent_xz)
+            radius = max(int(0.6 * scale), 4)
+            cv2.circle(canvas, (apx, apy), radius, _AGENT_COLOR, cv2.FILLED)
+            cv2.circle(canvas, (apx, apy), radius, (20, 20, 20), 1)
+
+        if self.arena_name:
+            cv2.putText(
+                canvas,
+                self.arena_name,
+                (6, 18),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (20, 20, 20),
+                1,
+                cv2.LINE_AA,
+            )
+
+        return canvas
+
     def reset(
         self,
         seed: int | None,
@@ -122,12 +252,13 @@ class AnimalAIEnv(gym.Env):
         arena_yaml = self.arena_yamls[self._arena_idx % len(self.arena_yamls)]
         self._arena_idx += 1
         self.arena_name = Path(arena_yaml).stem
-        self.pass_mark = _read_pass_mark(arena_yaml)
+        self.pass_mark, self._arena_items = _parse_arena(arena_yaml)
         self._aai.reset(arenas_configurations=arena_yaml)
         self.episode_step = 0
 
         decision_steps, _ = self._aai.get_steps(self._behavior_name)
         self._latest_image = self._decode_obs(decision_steps.obs[0][0])
+        self._agent_xz = self._extract_agent_xz(decision_steps.obs, 0)
         info = {
             "task_prompt": self.prompt,
             "arena_yaml": arena_yaml,
@@ -153,9 +284,11 @@ class AnimalAIEnv(gym.Env):
         if terminated:
             reward = float(terminal_steps.reward[0])
             self._latest_image = self._decode_obs(terminal_steps.obs[0][0])
+            self._agent_xz = self._extract_agent_xz(terminal_steps.obs, 0)
         else:
             reward = float(decision_steps.reward[0])
             self._latest_image = self._decode_obs(decision_steps.obs[0][0])
+            self._agent_xz = self._extract_agent_xz(decision_steps.obs, 0)
 
         self.episode_step += 1
         truncated = self.episode_step >= self.max_episode_steps
@@ -172,7 +305,7 @@ class AnimalAIEnv(gym.Env):
     def render(self) -> np.ndarray | None:
         if self.render_mode != "rgb_array":
             return None
-        return self._latest_image
+        return self._render_topdown()
 
     def close(self):
         if self._aai is not None:
