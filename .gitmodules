@@ -1,3 +1,6 @@
 [submodule "external/Bench2Drive"]
 	path = external/Bench2Drive
 	url = https://github.com/SakodaShintaro/Bench2Drive.git
+[submodule "external/animal-ai"]
+	path = external/animal-ai
+	url = https://github.com/SakodaShintaro/animal-ai.git
