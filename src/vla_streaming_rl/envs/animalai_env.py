@@ -81,19 +81,28 @@ def _parse_arena(yaml_path: str) -> tuple[float, list[dict]]:
     return pass_mark, items_out
 
 
-def _discover_arena_sets(competition_dir: Path) -> list[str]:
-    """List unique XX-YY prefixes found under competition_dir, sorted lexically.
+def _discover_arena_sets(competition_dir: Path) -> np.ndarray:
+    """Return a 3D ndarray of arena name stems, axes [level, task, variant].
 
     The Animal-AI Olympics directory contains files named XX-YY-ZZ.yaml where
-    XX = category (01..10), YY = task (01..30), ZZ = variant (01..03). Each
-    XX-YY prefix is a "set" (triplet of variants).
+    XX = level (01..10), YY = task (01..30), ZZ = variant (01..03). Filenames
+    map directly: arena_sets[level_idx, task_idx, variant_idx] == "XX-YY-ZZ".
+    Assumes the (level, task, variant) grid is dense.
     """
-    prefixes: set[str] = set()
+    by_key: dict[tuple[int, int, int], str] = {}
     for p in competition_dir.glob("*.yaml"):
         parts = p.stem.split("-")
         if len(parts) == 3 and all(part.isdigit() for part in parts):
-            prefixes.add(f"{parts[0]}-{parts[1]}")
-    return sorted(prefixes)
+            by_key[(int(parts[0]), int(parts[1]), int(parts[2]))] = p.stem
+    levels = sorted({k[0] for k in by_key})
+    tasks = sorted({k[1] for k in by_key})
+    variants = sorted({k[2] for k in by_key})
+    arr = np.empty((len(levels), len(tasks), len(variants)), dtype=object)
+    for i, lv in enumerate(levels):
+        for j, tk in enumerate(tasks):
+            for k, vr in enumerate(variants):
+                arr[i, j, k] = by_key[(lv, tk, vr)]
+    return arr
 
 
 # RGB colors (matplotlib-style) for each AAI item type when drawn top-down.
@@ -146,17 +155,18 @@ class AnimalAIEnv(gym.Env):
             raise ValueError("clean_loops_to_advance must be > 0")
         self.competition_dir = Path(competition_dir)
         self.arena_sets = _discover_arena_sets(self.competition_dir)
-        if len(self.arena_sets) == 0:
+        if self.arena_sets.size == 0:
             raise ValueError(f"no XX-YY-ZZ.yaml files found under {competition_dir}")
         self.max_attempts_per_set = max_attempts_per_set
         self.clean_loops_to_advance = clean_loops_to_advance
         self.prompt = prompt
 
-        # Curriculum state. A "set" is a triplet of variants (-01, -02, -03)
-        # under one prefix. We loop through variants in order; advance once we
-        # have `clean_loops_to_advance` clean (3/3 success) loops in a row, or
-        # once `max_attempts_per_set` total episodes have run on the set.
-        self._set_idx = 0
+        # Curriculum state. A "set" is one (level, task) pair, containing all
+        # variants along axis 2. We loop through variants in order; advance to
+        # the next task once we have `clean_loops_to_advance` clean loops in a
+        # row, or once `max_attempts_per_set` total loops have run on the set.
+        self._level_idx = 0
+        self._task_idx = 0
         self._variant_idx = 0
         self._set_attempts = 0
         self._loop_successes: list[bool] = []
@@ -187,25 +197,25 @@ class AnimalAIEnv(gym.Env):
         # AAI vector observation. None before the first reset.
         self._agent_xz: tuple[float, float] | None = None
 
-    def _current_set_name(self) -> str:
-        return self.arena_sets[self._set_idx % len(self.arena_sets)]
+    def _current_arena_stem(self) -> str:
+        return self.arena_sets[self._level_idx, self._task_idx, self._variant_idx]
 
     def _current_yaml_path(self) -> str:
-        prefix = self._current_set_name()
-        variant = (self._variant_idx % 3) + 1
-        return str(self.competition_dir / f"{prefix}-{variant:02d}.yaml")
+        return str(self.competition_dir / f"{self._current_arena_stem()}.yaml")
 
     def _on_episode_end(self, success: bool) -> bool:
         """Update curriculum state. Returns True if the set advanced.
 
-        `_set_attempts` is incremented per completed loop (every 3 episodes),
-        not per episode, so `max_attempts_per_set` is a loop count.
+        `_set_attempts` is incremented per completed loop (every n_variants
+        episodes), not per episode, so `max_attempts_per_set` is a loop count.
+        Index members are kept within their valid ranges by wrapping on update.
         """
+        n_l, n_t, n_v = self.arena_sets.shape
         self._loop_successes.append(success)
-        self._variant_idx += 1
+        self._variant_idx = (self._variant_idx + 1) % n_v
 
         advanced = False
-        if len(self._loop_successes) == 3:
+        if len(self._loop_successes) == n_v:
             self._set_attempts += 1
             if all(self._loop_successes):
                 self._clean_loop_streak += 1
@@ -218,7 +228,10 @@ class AnimalAIEnv(gym.Env):
                 advanced = True
 
         if advanced:
-            self._set_idx += 1
+            self._task_idx += 1
+            if self._task_idx >= n_t:
+                self._task_idx = 0
+                self._level_idx = (self._level_idx + 1) % n_l
             self._variant_idx = 0
             self._set_attempts = 0
             self._loop_successes = []
@@ -263,6 +276,7 @@ class AnimalAIEnv(gym.Env):
         img_size = 256
         scale = img_size / _ARENA_SIZE_M
         canvas = np.full((img_size, img_size, 3), 240, dtype=np.uint8)
+
         # Flip z so the +z arena axis points up in the image (Unity-editor-like).
         def to_px(x: float, z: float) -> tuple[int, int]:
             return int(round(x * scale)), int(round((_ARENA_SIZE_M - z) * scale))
@@ -342,8 +356,9 @@ class AnimalAIEnv(gym.Env):
             "arena_yaml": arena_yaml,
             "arena_name": self.arena_name,
             "pass_mark": self.pass_mark,
-            "set_idx": self._set_idx,
-            "set_name": self._current_set_name(),
+            "level_idx": self._level_idx,
+            "task_idx": self._task_idx,
+            "variant_idx": self._variant_idx,
             "set_attempts": self._set_attempts,
             "clean_loop_streak": self._clean_loop_streak,
         }
@@ -379,11 +394,11 @@ class AnimalAIEnv(gym.Env):
         info = {
             "task_prompt": self.prompt,
             "episode_step": self.episode_step,
-            "variant_idx": self._variant_idx % 3,
+            "level_idx": self._level_idx,
+            "task_idx": self._task_idx,
+            "variant_idx": self._variant_idx,
             "arena_name": self.arena_name,
             "pass_mark": self.pass_mark,
-            "set_idx": self._set_idx,
-            "set_name": self._current_set_name(),
             "set_attempts": self._set_attempts,
             "clean_loop_streak": self._clean_loop_streak,
         }
@@ -408,7 +423,9 @@ class AnimalAIEnv(gym.Env):
 
 if __name__ == "__main__":
     bin_path = Path.home() / "animalai_env" / "Linux" / "animalAI.x86_64"
-    competition = Path(__file__).resolve().parents[3] / "external" / "animal-ai" / "configs" / "competition"
+    competition = (
+        Path(__file__).resolve().parents[3] / "external" / "animal-ai" / "configs" / "competition"
+    )
     env = AnimalAIEnv(
         binary_path=str(bin_path),
         competition_dir=str(competition),
@@ -423,8 +440,8 @@ if __name__ == "__main__":
     for ep in range(8):
         obs, info = env.reset(seed=ep, options=None)
         print(
-            f"ep={ep} set={info['set_name']} arena={info['arena_name']} "
-            f"attempts={info['set_attempts']}"
+            f"ep={ep} level={info['level_idx']} task={info['task_idx']} "
+            f"arena={info['arena_name']} attempts={info['set_attempts']}"
         )
         total_reward = 0.0
         for i in range(20):
