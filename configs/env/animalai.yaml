@@ -9,6 +9,5 @@ image_save_interval: 10
 # `max_attempts_per_set` total episodes have run on the set (whichever first).
 env_factory:
   _target_: vla_streaming_rl.wrappers.make_animalai_env
-  competition_dir: ./external/animal-ai/configs/competition
   max_attempts_per_set: 100
   clean_loops_to_advance: 10
