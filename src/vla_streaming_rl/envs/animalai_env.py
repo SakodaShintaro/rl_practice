@@ -301,7 +301,10 @@ class AnimalAIEnv(gym.Env):
                 continue
             sx_px = max(item["size_x"] * scale, 3.0)
             sz_px = max(item["size_z"] * scale, 3.0)
-            rect = ((float(cx), float(cy)), (sx_px, sz_px), -item["rotation"])
+            # Unity Y-axis rotation is CW from above (in left-handed world);
+            # our z-flipped image preserves "north up" so we pass the raw angle
+            # to cv2 (positive cv2 angle is CW in image after the z flip).
+            rect = ((float(cx), float(cy)), (sx_px, sz_px), item["rotation"])
             box = np.intp(cv2.boxPoints(rect))
             transparent = "Transparent" in item["name"]
             thickness = 1 if transparent else cv2.FILLED
