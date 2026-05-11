@@ -158,12 +158,12 @@ class AnimalAIEnv(gym.Env):
         # Curriculum state. Pointer walks `_all_arenas` from low index. On
         # success the current yaml is added to `_cleared_arenas` and the pointer
         # advances past any yamls already in cleared. On failure the pointer
-        # stays. Each reset picks revisit mode with `revisit_prob` if any cleared.
+        # stays. Each reset alternates between progression and revisit modes
+        # whenever any arena has been cleared.
         self._next_yaml_idx = 0
         self._episode_return = 0.0
         self._cleared_arenas: set[str] = set()
         self._is_revisit = False
-        self.revisit_prob = 0.5
 
         self.binary_path = binary_path
         self.resolution = resolution
@@ -199,7 +199,10 @@ class AnimalAIEnv(gym.Env):
     def _advance_progression(self) -> None:
         """Move the progression pointer past any yamls already in cleared."""
         n = len(self._all_arenas)
-        while self._next_yaml_idx < n and self._all_arenas[self._next_yaml_idx] in self._cleared_arenas:
+        while (
+            self._next_yaml_idx < n
+            and self._all_arenas[self._next_yaml_idx] in self._cleared_arenas
+        ):
             self._next_yaml_idx += 1
 
     def _on_episode_end(self, success: bool) -> bool:
@@ -320,15 +323,20 @@ class AnimalAIEnv(gym.Env):
         super().reset(seed=seed)
         self._ensure_started()
 
-        # All progression yamls cleared -> always revisit. Otherwise coin-flip.
+        # All progression yamls cleared -> always revisit. Otherwise alternate
+        # between progression and revisit each reset.
         all_done = self._next_yaml_idx >= len(self._all_arenas)
-        if self._cleared_arenas and (all_done or self.np_random.random() < self.revisit_prob):
+        if not self._cleared_arenas:
+            self._is_revisit = False
+        elif all_done:
             self._is_revisit = True
+        else:
+            self._is_revisit = not self._is_revisit
+        if self._is_revisit:
             choices = sorted(self._cleared_arenas)
             arena_stem = choices[int(self.np_random.integers(len(choices)))]
             arena_yaml = str(self.competition_dir / f"{arena_stem}.yaml")
         else:
-            self._is_revisit = False
             arena_yaml = self._current_yaml_path()
 
         self.arena_name = Path(arena_yaml).stem
