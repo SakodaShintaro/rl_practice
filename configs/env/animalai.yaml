@@ -3,11 +3,8 @@ env_id: AnimalAI-v0
 step_limit: 500_000
 image_save_interval: 10
 
-# Curriculum: each "set" is a triplet of variants {<prefix>-01, -02, -03}. The
-# env loops through variants in order; advance to the next set once we have
-# `clean_loops_to_advance` clean (3/3 success) loops in a row, OR once
-# `max_attempts_per_set` total episodes have run on the set (whichever first).
+# Curriculum: each reset has 50% chance of trying the next uncleared yaml in
+# index order (progression) and 50% chance of picking a random already-cleared
+# yaml (revisit). A yaml is "cleared" the first time the agent succeeds on it.
 env_factory:
   _target_: vla_streaming_rl.wrappers.make_animalai_env
-  max_attempts_per_set: 100
-  clean_loops_to_advance: 10

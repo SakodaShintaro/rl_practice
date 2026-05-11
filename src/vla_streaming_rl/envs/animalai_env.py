@@ -140,8 +140,6 @@ class AnimalAIEnv(gym.Env):
         self,
         binary_path: str,
         competition_dir: str,
-        max_attempts_per_set: int,
-        clean_loops_to_advance: int,
         prompt: str,
         resolution: int,
         max_episode_steps: int,
@@ -149,29 +147,23 @@ class AnimalAIEnv(gym.Env):
         base_port: int,
     ):
         super().__init__()
-        if max_attempts_per_set <= 0:
-            raise ValueError("max_attempts_per_set must be > 0")
-        if clean_loops_to_advance <= 0:
-            raise ValueError("clean_loops_to_advance must be > 0")
         self.competition_dir = Path(competition_dir)
         self.arena_sets = _discover_arena_sets(self.competition_dir)
         if self.arena_sets.size == 0:
             raise ValueError(f"no XX-YY-ZZ.yaml files found under {competition_dir}")
-        self.max_attempts_per_set = max_attempts_per_set
-        self.clean_loops_to_advance = clean_loops_to_advance
+        # Flat sorted list of every yaml stem; progression walks this in order.
+        self._all_arenas: list[str] = sorted(self.arena_sets.flatten().tolist())
         self.prompt = prompt
 
-        # Curriculum state. A "set" is one (level, task) pair, containing all
-        # variants along axis 2. We loop through variants in order; advance to
-        # the next task once we have `clean_loops_to_advance` clean loops in a
-        # row, or once `max_attempts_per_set` total loops have run on the set.
-        self._level_idx = 0
-        self._task_idx = 0
-        self._variant_idx = 0
-        self._set_attempts = 0
-        self._loop_successes: list[bool] = []
-        self._clean_loop_streak = 0
+        # Curriculum state. Pointer walks `_all_arenas` from low index. On
+        # success the current yaml is added to `_cleared_arenas` and the pointer
+        # advances past any yamls already in cleared. On failure the pointer
+        # stays. Each reset picks revisit mode with `revisit_prob` if any cleared.
+        self._next_yaml_idx = 0
         self._episode_return = 0.0
+        self._cleared_arenas: set[str] = set()
+        self._is_revisit = False
+        self.revisit_prob = 0.5
 
         self.binary_path = binary_path
         self.resolution = resolution
@@ -197,46 +189,29 @@ class AnimalAIEnv(gym.Env):
         # AAI vector observation. None before the first reset.
         self._agent_xz: tuple[float, float] | None = None
 
-    def _current_arena_stem(self) -> str:
-        return self.arena_sets[self._level_idx, self._task_idx, self._variant_idx]
+    def _current_progression_stem(self) -> str:
+        idx = min(self._next_yaml_idx, len(self._all_arenas) - 1)
+        return self._all_arenas[idx]
 
     def _current_yaml_path(self) -> str:
-        return str(self.competition_dir / f"{self._current_arena_stem()}.yaml")
+        return str(self.competition_dir / f"{self._current_progression_stem()}.yaml")
+
+    def _advance_progression(self) -> None:
+        """Move the progression pointer past any yamls already in cleared."""
+        n = len(self._all_arenas)
+        while self._next_yaml_idx < n and self._all_arenas[self._next_yaml_idx] in self._cleared_arenas:
+            self._next_yaml_idx += 1
 
     def _on_episode_end(self, success: bool) -> bool:
-        """Update curriculum state. Returns True if the set advanced.
-
-        `_set_attempts` is incremented per completed loop (every n_variants
-        episodes), not per episode, so `max_attempts_per_set` is a loop count.
-        Index members are kept within their valid ranges by wrapping on update.
+        """Mark the just-finished progression arena cleared on success. Returns
+        True if the progression pointer advanced.
         """
-        n_l, n_t, n_v = self.arena_sets.shape
-        self._loop_successes.append(success)
-        self._variant_idx = (self._variant_idx + 1) % n_v
-
-        advanced = False
-        if len(self._loop_successes) == n_v:
-            self._set_attempts += 1
-            if all(self._loop_successes):
-                self._clean_loop_streak += 1
-                if self._clean_loop_streak >= self.clean_loops_to_advance:
-                    advanced = True
-            else:
-                self._clean_loop_streak = 0
-            self._loop_successes = []
-            if not advanced and self._set_attempts >= self.max_attempts_per_set:
-                advanced = True
-
-        if advanced:
-            self._task_idx += 1
-            if self._task_idx >= n_t:
-                self._task_idx = 0
-                self._level_idx = (self._level_idx + 1) % n_l
-            self._variant_idx = 0
-            self._set_attempts = 0
-            self._loop_successes = []
-            self._clean_loop_streak = 0
-        return advanced
+        if not success:
+            return False
+        before = self._next_yaml_idx
+        self._cleared_arenas.add(self.arena_name)
+        self._advance_progression()
+        return self._next_yaml_idx != before
 
     def _ensure_started(self):
         if self._aai is not None:
@@ -319,10 +294,11 @@ class AnimalAIEnv(gym.Env):
         header_height = 22
         header = np.full((header_height, img_size, 3), 215, dtype=np.uint8)
         if self.arena_name:
+            tag = " R" if self._is_revisit else ""
             text = (
                 f"{self.arena_name}  "
-                f"att:{self._set_attempts}/{self.max_attempts_per_set}  "
-                f"str:{self._clean_loop_streak}/{self.clean_loops_to_advance}"
+                f"cleared:{len(self._cleared_arenas)}/{len(self._all_arenas)}"
+                f"{tag}"
             )
             cv2.putText(
                 header,
@@ -344,7 +320,17 @@ class AnimalAIEnv(gym.Env):
         super().reset(seed=seed)
         self._ensure_started()
 
-        arena_yaml = self._current_yaml_path()
+        # All progression yamls cleared -> always revisit. Otherwise coin-flip.
+        all_done = self._next_yaml_idx >= len(self._all_arenas)
+        if self._cleared_arenas and (all_done or self.np_random.random() < self.revisit_prob):
+            self._is_revisit = True
+            choices = sorted(self._cleared_arenas)
+            arena_stem = choices[int(self.np_random.integers(len(choices)))]
+            arena_yaml = str(self.competition_dir / f"{arena_stem}.yaml")
+        else:
+            self._is_revisit = False
+            arena_yaml = self._current_yaml_path()
+
         self.arena_name = Path(arena_yaml).stem
         self.pass_mark, self._arena_items = _parse_arena(arena_yaml)
         self._aai.reset(arenas_configurations=arena_yaml)
@@ -359,11 +345,8 @@ class AnimalAIEnv(gym.Env):
             "arena_yaml": arena_yaml,
             "arena_name": self.arena_name,
             "pass_mark": self.pass_mark,
-            "level_idx": self._level_idx,
-            "task_idx": self._task_idx,
-            "variant_idx": self._variant_idx,
-            "set_attempts": self._set_attempts,
-            "clean_loop_streak": self._clean_loop_streak,
+            "cleared_count": len(self._cleared_arenas),
+            "is_revisit": self._is_revisit,
         }
         return self._latest_image, info
 
@@ -397,20 +380,20 @@ class AnimalAIEnv(gym.Env):
         info = {
             "task_prompt": self.prompt,
             "episode_step": self.episode_step,
-            "level_idx": self._level_idx,
-            "task_idx": self._task_idx,
-            "variant_idx": self._variant_idx,
             "arena_name": self.arena_name,
             "pass_mark": self.pass_mark,
-            "set_attempts": self._set_attempts,
-            "clean_loop_streak": self._clean_loop_streak,
+            "cleared_count": len(self._cleared_arenas),
+            "is_revisit": self._is_revisit,
         }
         if terminated or truncated:
             success = self._episode_return >= self.pass_mark
-            advanced = self._on_episode_end(success)
+            if self._is_revisit:
+                advanced = False
+            else:
+                advanced = self._on_episode_end(success)
             info["success"] = bool(success)
-            info["advanced_set"] = advanced
-            info["clean_loop_streak"] = self._clean_loop_streak
+            info["advanced"] = advanced
+            info["cleared_count"] = len(self._cleared_arenas)
         return self._latest_image, reward, terminated, truncated, info
 
     def render(self) -> np.ndarray | None:
@@ -432,8 +415,6 @@ if __name__ == "__main__":
     env = AnimalAIEnv(
         binary_path=str(bin_path),
         competition_dir=str(competition),
-        max_attempts_per_set=15,
-        clean_loops_to_advance=2,
         prompt="Find and reach the green goal sphere; avoid red zones and yellow goals.",
         resolution=96,
         max_episode_steps=100,
@@ -443,8 +424,8 @@ if __name__ == "__main__":
     for ep in range(8):
         obs, info = env.reset(seed=ep, options=None)
         print(
-            f"ep={ep} level={info['level_idx']} task={info['task_idx']} "
-            f"arena={info['arena_name']} attempts={info['set_attempts']}"
+            f"ep={ep} arena={info['arena_name']} "
+            f"revisit={info['is_revisit']} cleared={info['cleared_count']}"
         )
         total_reward = 0.0
         for i in range(20):
@@ -455,6 +436,6 @@ if __name__ == "__main__":
                 break
         print(
             f"  return={total_reward:.4f} success={info.get('success')} "
-            f"advanced={info.get('advanced_set')}"
+            f"advanced={info.get('advanced')}"
         )
     env.close()

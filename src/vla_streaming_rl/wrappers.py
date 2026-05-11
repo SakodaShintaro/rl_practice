@@ -57,10 +57,7 @@ def _car_racing_parse_action(action_text: str) -> tuple[np.ndarray, bool]:
 _ANIMALAI_PROMPT = "Find and reach the green goal sphere; avoid red zones and yellow goals."
 
 
-def make_animalai_env(
-    max_attempts_per_set: int,
-    clean_loops_to_advance: int,
-) -> gym.Env:
+def make_animalai_env() -> gym.Env:
     """Hydra `_target_` factory for the raw AnimalAI env (no wrappers).
 
     v5 has no auto-download; place the unzipped Linux build at
@@ -74,8 +71,6 @@ def make_animalai_env(
     return AnimalAIEnv(
         binary_path=str(binary_path),
         competition_dir=competition_dir,
-        max_attempts_per_set=max_attempts_per_set,
-        clean_loops_to_advance=clean_loops_to_advance,
         prompt=_ANIMALAI_PROMPT,
         resolution=96,
         max_episode_steps=500,
