@@ -1,12 +1,10 @@
 # @package _global_
 env_id: AnimalAI-v0
-step_limit: 50_000
+step_limit: 500_000
+image_save_interval: 10
 
+# Curriculum: each reset has 50% chance of trying the next uncleared yaml in
+# index order (progression) and 50% chance of picking a random already-cleared
+# yaml (revisit). A yaml is "cleared" the first time the agent succeeds on it.
 env_factory:
   _target_: vla_streaming_rl.wrappers.make_animalai_env
-  # Path to a custom arena YAML. null falls back to GoodGoal_Random.yml bundled
-  # inside the animalai package.
-  arena_yaml: null
-  # Task description for the VLM agent. Must match the actual arena contents.
-  # Default text describes GoodGoal_Random.yml (single goal sphere, no obstacles).
-  prompt: Find and reach the goal sphere placed at a random location in the arena.

@@ -6,8 +6,8 @@ cd $(dirname $0)
 
 # AGENT=cnn_off_policy_bs16
 # AGENT=base_on_policy
-AGENT=vlm_off_policy_bs16
-# AGENT=vlm_streaming
+# AGENT=vlm_off_policy_bs16
+AGENT=vlm_streaming
 
 uv run python scripts/train.py \
   agent=${AGENT} \

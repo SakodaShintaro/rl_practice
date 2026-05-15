@@ -368,6 +368,19 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             "SPS": global_step / elapsed_time_sec,
             "elapsed_time_hour": elapsed_time_hour,
         }
+        # for animalai_env
+        if "pass_mark" in env_info:
+            success = float(score >= env_info["pass_mark"])
+            data_dict["success"] = success
+            data_dict["pass_mark"] = env_info["pass_mark"]
+            arena_name = env_info.get("arena_name", "")
+            if arena_name:
+                data_dict[f"success/{arena_name}"] = success
+                data_dict[f"episodic_return/{arena_name}"] = score
+            if "cleared_count" in env_info:
+                data_dict["cleared_count"] = env_info["cleared_count"]
+                data_dict["is_revisit"] = float(env_info.get("is_revisit", False))
+                data_dict["advanced"] = float(env_info.get("advanced", False))
         if len(score_list) >= eval_range:
             data_dict["recent_average_score"] = recent_average_score
             best_recent_average_score = max(best_recent_average_score, recent_average_score)
