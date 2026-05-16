@@ -1,6 +1,5 @@
 # @package _global_
 use_lora: 0
-target_layer_idx: 2
 vlm_model_id: Qwen/Qwen3.5-0.8B
 state_expert_hidden_size: 576
 num_state_queries: 1

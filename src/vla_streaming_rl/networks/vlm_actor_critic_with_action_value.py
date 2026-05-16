@@ -55,7 +55,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         detach_predictor: bool,
         use_lora: bool,
         vlm_model_id: str,
-        target_layer_idx: int,
         max_new_tokens: int,
         max_prompt_tokens: int,
         pad_token_id: int,
@@ -115,7 +114,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.num_layers = num_layers
         self.vlm_num_kv_heads = vlm_cfg.num_key_value_heads
         self.vlm_head_dim = vlm_cfg.head_dim
-        self.target_layer_idx = target_layer_idx
+        # Input-independent learnable logits over all (embedding + per-layer) hidden
+        # states; softmax-weighted sum forms the representation used downstream.
+        self.layer_logits = nn.Parameter(torch.zeros(num_layers + 1, device=device))
         initial_task_prompt = task_prompt if text_action_mode != "none" else ""
         self.parse_action_text = parse_action_text
         self.max_new_tokens = max_new_tokens
@@ -411,6 +412,18 @@ class VLMActorCriticWithActionValue(nn.Module):
     # Internal methods #
     ####################
 
+    def _weighted_hidden(self, hidden_states) -> torch.Tensor:
+        """Softmax-weighted sum over all VLM hidden layers (incl. embedding output).
+
+        Hidden values are detached (the VLM is frozen); gradient flows only into
+        ``self.layer_logits`` through the softmax weights.
+        """
+        stacked = torch.stack(
+            [h.to(torch.float32).detach() for h in hidden_states], dim=0
+        )
+        weights = F.softmax(self.layer_logits, dim=0)
+        return (weights.view(-1, 1, 1, 1) * stacked).sum(dim=0)
+
     @torch.no_grad()
     def _compute_state_dim(self, task_prompt: str) -> tuple[int, int]:
         """Compute target sequence length and state dimension via dummy forward pass."""
@@ -426,7 +439,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
         output = self._vlm_language_forward(inputs, inputs_embeds)
-        hidden = output["hidden_states"][self.target_layer_idx]
+        hidden = self._weighted_hidden(output["hidden_states"])
         target_seq_len = hidden.shape[1]
         state_dim = target_seq_len * self.state_out_proj.out_features
         return target_seq_len, state_dim
@@ -530,8 +543,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self._last_input_ids = inputs["input_ids"]
 
         if self.state_mode == "projection":
-            all_hidden_states = outputs.hidden_states
-            hidden = all_hidden_states[self.target_layer_idx].to(torch.float32).detach()
+            hidden = self._weighted_hidden(outputs.hidden_states)
             state = self.state_out_proj(hidden)
             seq_len = state.shape[1]
             if seq_len > self._target_seq_len:

@@ -96,7 +96,6 @@ def build_network(
             detach_predictor=args.detach_predictor,
             use_lora=args.use_lora,
             vlm_model_id=args.vlm_model_id,
-            target_layer_idx=args.target_layer_idx,
             max_new_tokens=args.max_new_tokens,
             max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=args.pad_token_id,
