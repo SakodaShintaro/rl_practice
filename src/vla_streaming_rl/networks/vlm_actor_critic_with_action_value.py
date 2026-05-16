@@ -69,8 +69,11 @@ class VLMActorCriticWithActionValue(nn.Module):
         predictor_hidden_dim: int,
         predictor_block_num: int,
         sparsity: float,
+        image_mode: str,
     ) -> None:
         super().__init__()
+        if image_mode not in ("mem", "sequence"):
+            raise ValueError(f"Unknown image_mode: {image_mode}")
         self.gamma = gamma
         self.num_bins = num_bins
         self.seq_len = seq_len
@@ -81,6 +84,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.dacer_loss_weight = dacer_loss_weight
         self.text_q_margin = text_q_margin
         self.text_action_mode = text_action_mode
+        self.image_mode = image_mode
 
         self.predictor_step_num = predictor_step_num
         self.disable_state_predictor = disable_state_predictor
@@ -237,6 +241,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             observation_shape=observation_space_shape,
             seq_len=seq_len,
             device=torch.device(device),
+            image_mode=self.image_mode,
         )
 
     def init_state(self) -> torch.Tensor:
@@ -417,6 +422,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             dummy_images,
             [task_prompt],
             self.is_qwen35,
+            self.image_mode,
         )
         inputs_embeds = self._build_inputs_embeds(inputs)
         output = self._vlm_language_forward(inputs, inputs_embeds)
@@ -438,11 +444,17 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.model
 
     def _build_inputs_embeds(self, inputs: dict) -> torch.Tensor:
-        """Build inputs_embeds by running video encoder on all frames and injecting last-frame embeddings.
+        """Build inputs_embeds and scatter image embeddings into <image_pad> positions.
 
-        1. Embed input_ids to get inputs_embeds (with <image_pad> as placeholder)
-        2. Run all frames through ViT → extract last frame embeddings
-        3. masked_scatter last-frame embeddings into <image_pad> positions
+        Two image paths share the same scatter step but differ in what gets scattered:
+
+        - mem mode: only the last frame appears in the LLM context. ``VideoEncoder``
+          processes all frames jointly (with causal temporal attention) and returns
+          merged tokens for the last frame only.
+        - sequence mode: every frame appears in the LLM context in temporal order.
+          The VLM's stock vision encoder processes each frame independently and
+          returns merged tokens for all frames, concatenated in the same order as
+          the <image_pad> placeholders.
         """
         vlm_inner = self._get_vlm_model_inner()
         inputs_embeds = vlm_inner.get_input_embeddings()(inputs["input_ids"])
@@ -450,20 +462,24 @@ class VLMActorCriticWithActionValue(nn.Module):
         batch_size = inputs["input_ids"].shape[0]
         seq_len = inputs["seq_len"]
 
-        # Run video encoder: all frames through ViT, keep last frame
-        last_frame_embeds = self.video_encoder(
-            self._get_visual(),
-            inputs["all_pixel_values"],
-            inputs["all_image_grid_thw"],
-            batch_size,
-            seq_len,
-        )
-        last_frame_embeds = last_frame_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        if self.image_mode == "sequence":
+            visual = self._get_visual()
+            pixel_values = inputs["all_pixel_values"].type(visual.dtype)
+            vision_output = visual(pixel_values, grid_thw=inputs["all_image_grid_thw"])
+            image_embeds = vision_output.pooler_output
+        else:
+            image_embeds = self.video_encoder(
+                self._get_visual(),
+                inputs["all_pixel_values"],
+                inputs["all_image_grid_thw"],
+                batch_size,
+                seq_len,
+            )
+        image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
 
-        # masked_scatter into <image_pad> positions
         image_token_id = vlm_inner.config.image_token_id
         image_mask = (inputs["input_ids"] == image_token_id).unsqueeze(-1).expand_as(inputs_embeds)
-        inputs_embeds = inputs_embeds.masked_scatter(image_mask, last_frame_embeds)
+        inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
         return inputs_embeds
 

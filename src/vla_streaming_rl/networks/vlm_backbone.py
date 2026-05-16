@@ -87,18 +87,23 @@ def prepare_vlm_inputs(
     images: torch.Tensor,
     task_prompts: list[str],
     is_qwen35: bool,
+    image_mode: str,
 ) -> dict[str, torch.Tensor]:
     """Build VLM messages and prepare model inputs.
 
-    Only the last frame is placed as <image> in the prompt (64 LLM tokens).
-    All frames' pixel_values are returned under "all_pixel_values" / "all_image_grid_thw"
-    so a video encoder can process them externally and inject only the last-frame embedding.
+    With image_mode="mem", only the last frame is placed as <image> in the prompt and
+    a separate video encoder is expected to consume the full frame stack externally
+    (via "all_pixel_values") and inject the last-frame embedding back at the
+    <image_pad> positions. With image_mode="sequence", every frame is placed as its
+    own <image> in the prompt and is encoded independently by the VLM's vision
+    encoder.
 
     Args:
         processor: AutoProcessor instance
         images: (B, T, C, H, W) tensor
         task_prompts: List of task prompt strings, one per batch element
         is_qwen35: Whether the model is Qwen3.5
+        image_mode: "mem" or "sequence"
 
     Returns:
         Dictionary of model inputs. Extra keys:
@@ -109,27 +114,33 @@ def prepare_vlm_inputs(
     device = images.device
     batch_size, seq_len = images.shape[:2]
 
-    # --- Build prompt with only the LAST frame as <image> ---
+    # --- Build prompt: last frame only (mem) or all T frames (sequence) ---
     messages = []
     for b in range(batch_size):
         content: list[dict] = []
         prompt = task_prompts[b]
         if prompt:
             content.append({"type": "text", "text": prompt})
-        # Last frame as image
-        last_img = images[b, seq_len - 1].to(torch.float32)
-        last_img_np = (last_img.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-        content.append({"type": "image", "image": Image.fromarray(last_img_np)})
+        if image_mode == "mem":
+            frame_indices = [seq_len - 1]
+        elif image_mode == "sequence":
+            frame_indices = list(range(seq_len))
+        else:
+            raise ValueError(f"Unknown image_mode: {image_mode}")
+        for t in frame_indices:
+            img = images[b, t].to(torch.float32)
+            img_np = (img.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            content.append({"type": "image", "image": Image.fromarray(img_np)})
         messages.append([{"role": "user", "content": content}])
 
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     if is_qwen35:
-        last_proc_images, _ = process_vision_info(messages)
+        prompt_proc_images, _ = process_vision_info(messages)
     else:
-        last_proc_images, _ = process_vision_info(messages, image_patch_size=16)
+        prompt_proc_images, _ = process_vision_info(messages, image_patch_size=16)
 
-    inputs = processor(text=text, images=last_proc_images, return_tensors="pt", padding=True)
+    inputs = processor(text=text, images=prompt_proc_images, return_tensors="pt", padding=True)
     inputs.pop("token_type_ids", None)
 
     # --- Process ALL frames to get pixel_values for video encoder ---
