@@ -38,17 +38,24 @@ class VLMInputCache:
         observation_shape: Sequence[int],
         seq_len: int,
         device: torch.device,
+        image_mode: str,
     ) -> None:
         if len(observation_shape) != 3:
             raise ValueError(
                 f"observation_shape must be (C, H, W); got {tuple(observation_shape)}"
             )
+        if image_mode not in ("mem", "sequence"):
+            raise ValueError(f"Unknown image_mode: {image_mode}")
         self.tokenizer = processor.tokenizer
         self.image_processor = processor.image_processor
         self.image_token = processor.image_token  # e.g. '<|image_pad|>'
         self.observation_shape = tuple(observation_shape)
         self.seq_len = seq_len
         self.device = device
+        self.image_mode = image_mode
+        # mem: only the last frame appears in the LLM prompt (1 image).
+        # sequence: every frame appears in order (T images).
+        self.num_prompt_images = 1 if image_mode == "mem" else seq_len
 
         # --- Image grid cache: feed a dummy through image_processor once to
         #     pin down image_grid_thw. With fixed observation dims this is
@@ -61,6 +68,8 @@ class VLMInputCache:
         single_grid = img_ref["image_grid_thw"].to(device)  # (1, 3)
         self.cached_single_grid = single_grid
         self.cached_all_image_grid_thw = single_grid.repeat(seq_len, 1)
+        # Prompt-image grid: 1 row for mem, T rows for sequence (per batch element).
+        self.cached_prompt_image_grid_thw = single_grid.repeat(self.num_prompt_images, 1)
         merge_length = self.image_processor.merge_size ** 2
         self.num_image_tokens = int(single_grid[0].prod().item() // merge_length)
 
@@ -70,26 +79,22 @@ class VLMInputCache:
         #     the sentinel and tokenize, which is far cheaper than
         #     ``processor.__call__``.
         dummy_pil = Image.new("RGB", (W, H))  # apply_chat_template just needs structure
-        messages = [
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _PROMPT_SENTINEL},
-                        {"type": "image", "image": dummy_pil},
-                    ],
-                }
-            ]
-        ]
+        content = [{"type": "text", "text": _PROMPT_SENTINEL}]
+        # mem: 1 image in the prompt; sequence: T images, fed in temporal order.
+        for _ in range(self.num_prompt_images):
+            content.append({"type": "image", "image": dummy_pil})
+        messages = [[{"role": "user", "content": content}]]
         templated = processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
         if isinstance(templated, list):
             templated = templated[0]
-        # Pre-expand the image placeholder. Single image per message, fixed
-        # grid -> single replace covers it.
+        # Pre-expand each image placeholder in-place. ``str.replace`` (no count)
+        # does not recurse on substitutions, so each <image_pad> token becomes
+        # exactly ``num_image_tokens`` copies regardless of how many images
+        # appear in the template.
         self.template_text: str = templated.replace(
-            self.image_token, self.image_token * self.num_image_tokens, 1
+            self.image_token, self.image_token * self.num_image_tokens
         )
 
     def __call__(self, images: torch.Tensor, task_prompts: list[str]) -> dict:
@@ -129,10 +134,17 @@ class VLMInputCache:
         else:
             all_image_grid_thw = self.cached_single_grid.expand(B * T, -1)
 
+        # image_grid_thw lists every image actually present in the LLM prompt:
+        # 1 per batch element for mem, T per batch element for sequence.
+        if self.num_prompt_images == 1:
+            prompt_image_grid_thw = self.cached_single_grid.expand(B, -1)
+        else:
+            prompt_image_grid_thw = self.cached_prompt_image_grid_thw.repeat(B, 1)
+
         return {
             "input_ids": text_inputs["input_ids"].to(device),
             "attention_mask": text_inputs["attention_mask"].to(device),
-            "image_grid_thw": self.cached_single_grid.expand(B, -1),
+            "image_grid_thw": prompt_image_grid_thw,
             "all_pixel_values": all_pixel_values,
             "all_image_grid_thw": all_image_grid_thw,
             "seq_len": T,

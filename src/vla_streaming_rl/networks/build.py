@@ -116,6 +116,7 @@ def build_network(
             predictor_hidden_dim=args.predictor_hidden_dim,
             predictor_block_num=args.predictor_block_num,
             sparsity=args.sparsity,
+            image_mode=args.image_mode,
         )
     else:
         raise ValueError(f"Unknown network class: {args.network_class}")
