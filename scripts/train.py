@@ -145,6 +145,8 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     # start the game
     global_step = 0
     score_list = []
+    score_sum_all = 0.0
+    episode_count = 0
     best_score = -float("inf")
     best_recent_average_score = -float("inf")
     obs, reset_info = env.reset(seed=seed)
@@ -158,7 +160,6 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
         observation_space_shape=env.observation_space.shape,
         action_space_shape=env.action_space.shape,
         parse_action_text=parse_action_text,
-        task_prompt=task_prompt,
         device=torch.device("cuda"),
         compile=compile_network,
     )
@@ -355,6 +356,9 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
         score_list.append(score)
         score_list = score_list[-eval_range:]
         recent_average_score = np.mean(score_list)
+        score_sum_all += float(score)
+        episode_count += 1
+        total_average_score = score_sum_all / episode_count
 
         if args.normalizing_by_return:
             agent.reward_processor.update(score)
@@ -367,6 +371,7 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             "episodic_length": env_info["episode"]["l"],
             "SPS": global_step / elapsed_time_sec,
             "elapsed_time_hour": elapsed_time_hour,
+            "total_average_score": total_average_score,
         }
         # for animalai_env
         if "pass_mark" in env_info:
