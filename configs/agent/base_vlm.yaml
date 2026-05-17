@@ -2,6 +2,7 @@
 use_lora: 0
 vlm_model_id: Qwen/Qwen3.5-0.8B
 num_state_queries: 219
+state_out_dim: 4
 text_action_mode: none
 use_prompt: 1
 use_feedback: 0

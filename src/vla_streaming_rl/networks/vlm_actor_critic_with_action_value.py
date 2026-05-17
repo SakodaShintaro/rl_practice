@@ -58,6 +58,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         max_prompt_tokens: int,
         pad_token_id: int,
         num_state_queries: int,
+        state_out_dim: int,
         actor_hidden_dim: int,
         actor_block_num: int,
         critic_hidden_dim: int,
@@ -131,7 +132,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.num_state_queries = num_state_queries
         self.video_encoder = VideoEncoder()
 
-        state_out_dim = 4
         self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
         # AdaptiveAvgPool1d fixes the token count to num_state_queries, so
         # state_dim is determined purely by config.
