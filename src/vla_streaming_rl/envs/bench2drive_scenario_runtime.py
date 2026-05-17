@@ -19,7 +19,17 @@ from srunner.scenariomanager.timer import GameTime
 
 
 class Bench2DriveRuntime:
-    """Owns the per-episode ``RouteScenario`` lifecycle for one env."""
+    """Owns the per-episode ``RouteScenario`` lifecycle for one env.
+
+    Two scheduling modes:
+    - ``"random"`` (legacy): pick a random config from the XML on every
+      ``reset``. All configs must share one town because the env loads the
+      world once at construction.
+    - ``"sequential"``: walk the configs in XML order from
+      ``start_index``. The town can vary between configs; the env is
+      expected to peek ``peek_next_town()`` before each reset and reload the
+      world if needed (this is the Bench2Drive220 driver mode).
+    """
 
     # build_scenarios runs in a background thread (mirrors eval's
     # build_scenarios_loop) so that a single scenario class init blocking on
@@ -33,6 +43,8 @@ class Bench2DriveRuntime:
         traffic_manager_port: int,
         route_xml: str,
         route_id: str | int | None,
+        sequence_mode: str,
+        start_index: int,
     ):
         # RouteScenario glob's srunner/scenarios/*.py via this env var to
         # discover scenario classes named in the XML — without it, no
@@ -42,6 +54,10 @@ class Bench2DriveRuntime:
                 "SCENARIO_RUNNER_ROOT must be set to .../Bench2Drive/scenario_runner "
                 "so RouteScenario can discover scenario classes"
             )
+        if sequence_mode not in ("random", "sequential"):
+            raise ValueError(f"sequence_mode must be 'random' or 'sequential', got {sequence_mode!r}")
+        if sequence_mode == "sequential" and route_id is not None:
+            raise ValueError("sequence_mode='sequential' iterates the full XML; route_id must be None")
 
         self.client = client
         self.traffic_manager_port = traffic_manager_port
@@ -51,22 +67,68 @@ class Bench2DriveRuntime:
         if not self.configs:
             raise ValueError(f"no routes parsed from {route_xml} (subset={subset!r})")
 
+        self.sequence_mode = sequence_mode
         towns = {c.town for c in self.configs}
-        if len(towns) > 1:
+        if sequence_mode == "random" and len(towns) > 1:
             raise ValueError(
-                f"route XML mixes towns {sorted(towns)} — training env requires one town"
+                f"sequence_mode='random' route XML mixes towns {sorted(towns)} — "
+                "use sequence_mode='sequential' for cross-town iteration"
             )
-        self.town: str = next(iter(towns))
+
+        if not 0 <= start_index < len(self.configs):
+            raise ValueError(
+                f"start_index={start_index} out of range [0, {len(self.configs)})"
+            )
+        self._cursor = start_index
+
+        # Per-episode metadata, filled by reset(). Town is read off the
+        # current config so the env can decide whether to reload the world.
+        self.current_index: int | None = None
+        self.current_route_id: str | None = None
+        self.current_town: str | None = None
 
         self.route_scenario: RouteScenario | None = None
         self._build_thread: threading.Thread | None = None
         self._build_stop = threading.Event()
 
+    @property
+    def total_scenarios(self) -> int:
+        return len(self.configs)
+
+    @property
+    def is_exhausted(self) -> bool:
+        """True only in sequential mode once every config has been dispensed."""
+        return self.sequence_mode == "sequential" and self._cursor >= len(self.configs)
+
+    def peek_next_town(self) -> str:
+        """Town of the config that the next ``reset()`` will pick.
+
+        The env calls this *before* ``reset()`` so it can ``load_world`` only
+        when the next scenario lives on a different town than the currently
+        loaded one — avoiding a ~30 s reload between Town12 episodes.
+        """
+        if self.sequence_mode == "sequential":
+            if self.is_exhausted:
+                raise RuntimeError("sequential runtime exhausted; no next town")
+            return self.configs[self._cursor].town
+        # Random mode: every config shares a town (enforced in __init__).
+        return self.configs[0].town
+
     def reset(
         self, world: carla.World
     ) -> tuple[carla.Vehicle, list[carla.Location]]:
         """Build a fresh ``RouteScenario`` for ``world`` and return ``(ego, route_locations)``."""
-        config = self.configs[np.random.randint(len(self.configs))]
+        if self.sequence_mode == "sequential":
+            if self.is_exhausted:
+                raise RuntimeError("sequential runtime exhausted; cannot reset")
+            index = self._cursor
+            self._cursor += 1
+        else:
+            index = int(np.random.randint(len(self.configs)))
+        config = self.configs[index]
+        self.current_index = index
+        self.current_route_id = str(config.name).replace("RouteScenario_", "")
+        self.current_town = config.town
 
         # set_world rebuilds the GlobalRoutePlanner from OpenDRIVE which
         # takes ~30 s on Town12. cleanup() keeps _world/_map/_grp around so

@@ -2,6 +2,7 @@
 import copy
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import carla
 import gymnasium as gym
@@ -17,6 +18,7 @@ from vla_streaming_rl.envs.carla_obs import (
     make_action_space,
     make_obs_space,
 )
+from vla_streaming_rl.envs.eval_writer import Bench2DriveEvalWriter
 from vla_streaming_rl.envs.vehicle_graph import overlay_vehicle_graphs
 
 # Comfort thresholds (from Alpamayo comfort_reward.py)
@@ -146,31 +148,46 @@ class CARLALeaderboardEnv(gym.Env):
         self,
         route_xml: str | None,
         route_id: str | None,
+        sequence_mode: str,
+        start_index: int,
+        eval_output_dir: str | None,
     ):
         """Create the env.
 
         Args:
             route_xml: Path to a Bench2Drive route XML, or ``None`` to
-                sample a random 200 m route in Town01 each episode. If a
-                path is given, the town is read from the XML (all routes
-                must share one town).
+                sample a random 200 m route in Town01 each episode.
             route_id: Specific route id to pin to (only meaningful with
-                ``route_xml`` set). ``None`` means "pick a random route
-                from the XML each episode".
+                ``route_xml`` set and ``sequence_mode='random'``). ``None``
+                means "pick a random route from the XML each episode".
+            sequence_mode: ``"random"`` (legacy: pick a random route each
+                reset; requires single-town XML) or ``"sequential"`` (walk
+                the XML in order starting at ``start_index``; towns may
+                differ between routes and the env will reload the world on
+                town change).
+            start_index: Starting cursor for ``sequence_mode='sequential'``
+                (0-indexed into the XML). Ignored otherwise.
+            eval_output_dir: If set, the env writes Bench2Drive-eval-
+                compatible artifacts (``eval_res/{idx:03d}_res.json``,
+                ``eval_viz/{save_name}/metric_info.json``) under this
+                directory after every episode — same files
+                simlingo/scripts/eval_220routes.sh produces, so the
+                downstream tools (merge_route_json.py,
+                efficiency_smoothness_benchmark.py) work unmodified. Only
+                used when a Bench2DriveRuntime is attached. The matching
+                ``weather.xml`` is auto-derived from ``route_xml``'s
+                parent directory (Bench2Drive's standard layout).
         """
         super().__init__()
         self.prompt = "Drive a car along a route in CARLA. Follow the planned route, obey traffic rules, and avoid collisions."
 
         # If a Bench2Drive route XML is given, the env runs the eval-equivalent
         # RouteScenario (ego spawn, BackgroundActivity NPC traffic, scripted
-        # scenarios, parked vehicles) via Bench2DriveRuntime. All routes in
-        # the file must share a town — switching towns mid-training would
-        # force a ~30 s world reload on every reset.
+        # scenarios, parked vehicles) via Bench2DriveRuntime.
         self._route_xml = route_xml
         self._route_id = route_id
         self._tm_port = 8000
         self.runtime: Bench2DriveRuntime | None = None
-        town_name = "Town12"
 
         # Observation / action contracts come from carla_obs (shared with the
         # Bench2Drive eval agent so training and eval stay bit-aligned).
@@ -188,29 +205,43 @@ class CARLALeaderboardEnv(gym.Env):
         self.client.set_timeout(300.0)
 
         # Build the runtime first (parses the XML eagerly) so we can read the
-        # required town off it before deciding which world to load.
+        # initial town off the upcoming config before deciding which world
+        # to load. Sequential mode tolerates mixed-town XMLs (e.g. the
+        # bench2drive220 driver); the env reloads the world on town change.
         if route_xml is not None:
             self.runtime = Bench2DriveRuntime(
                 client=self.client,
                 traffic_manager_port=self._tm_port,
                 route_xml=route_xml,
                 route_id=route_id,
+                sequence_mode=sequence_mode,
+                start_index=start_index,
             )
-            town_name = self.runtime.town
+            initial_town = self.runtime.peek_next_town()
+        else:
+            initial_town = "Town12"
+
+        # Eval-artifact writer. Only attaches when running against a
+        # bench2drive XML; random-route mode has no comparable "scenario"
+        # concept and no StatisticsManager would apply. weather.xml lives
+        # next to the route XML in every Bench2Drive layout we ship.
+        self.eval_writer: Bench2DriveEvalWriter | None = None
+        if eval_output_dir is not None and self.runtime is not None:
+
+            weather_xml = Path(route_xml).parent / "weather.xml"
+            if not weather_xml.exists():
+                raise FileNotFoundError(
+                    f"weather_xml not found at {weather_xml} (expected next to route_xml)"
+                )
+            self.eval_writer = Bench2DriveEvalWriter(
+                output_root=eval_output_dir,
+                weather_xml=weather_xml,
+            )
 
         # reset_settings=False keeps the sync settings we apply right after.
-        self.world = self.client.load_world(town_name, reset_settings=False)
-
-        settings = self.world.get_settings()
-        settings.synchronous_mode = True
-        settings.fixed_delta_seconds = DT
-        # Large Map streaming + actor activation distances are reset by
-        # load_world; mirror eval (leaderboard_evaluator._load_and_wait_for_world).
-        # No-op for small towns.
-        settings.tile_stream_distance = 650
-        settings.actor_active_distance = 650
-        self.world.apply_settings(settings)
-        self.world.reset_all_traffic_lights()
+        self.world = self.client.load_world(initial_town, reset_settings=False)
+        self.current_town: str = initial_town
+        self._apply_world_settings()
 
         # Traffic Manager also needs to be in sync mode; otherwise world.tick
         # can deadlock on maps with background traffic.
@@ -218,7 +249,8 @@ class CARLALeaderboardEnv(gym.Env):
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_hybrid_physics_mode(True)
 
-        # Map and spawn points
+        # Map and spawn points (refreshed when the world is reloaded for a
+        # different town during sequential iteration).
         self.map = self.world.get_map()
         self.spawn_points = self.map.get_spawn_points()
 
@@ -266,6 +298,48 @@ class CARLALeaderboardEnv(gym.Env):
         self.history_length = 200
         self.physics_history: list[VehiclePhysics] = []
 
+    def _apply_world_settings(self) -> None:
+        """Apply the sync-mode + large-map streaming settings to ``self.world``.
+
+        Called once at construction and again after every ``load_world``
+        (sequential mode crosses towns and needs to re-apply these).
+        """
+        settings = self.world.get_settings()
+        settings.synchronous_mode = True
+        settings.fixed_delta_seconds = DT
+        # Large Map streaming + actor activation distances are reset by
+        # load_world; mirror eval (leaderboard_evaluator._load_and_wait_for_world).
+        # No-op for small towns.
+        settings.tile_stream_distance = 650
+        settings.actor_active_distance = 650
+        self.world.apply_settings(settings)
+        self.world.reset_all_traffic_lights()
+
+    def _switch_town_if_needed(self) -> None:
+        """If the runtime's next scenario lives on a different town, reload it.
+
+        Town12/13 reloads take ~30 s, so bench2drive220 mixes single-town
+        runs with abrupt town flips — only reload when the town actually
+        differs from what's currently in the world.
+        """
+        if self.runtime is None:
+            return
+        next_town = self.runtime.peek_next_town()
+        if next_town == self.current_town:
+            return
+
+        # The previous scenario's actors/sensors have already been torn down
+        # by the caller (cleanup + sensor.destroy loop). Drop the world here
+        # so load_world doesn't have stale lambdas firing on the new world.
+        self.world = self.client.load_world(next_town, reset_settings=False)
+        self.current_town = next_town
+        self._apply_world_settings()
+        # TM is keyed by port and survives world swaps, but must be told the
+        # new world is synchronous before the first tick.
+        self.traffic_manager.set_synchronous_mode(True)
+        self.map = self.world.get_map()
+        self.spawn_points = self.map.get_spawn_points()
+
     def reset(
         self,
         seed: int | None,
@@ -290,9 +364,23 @@ class CARLALeaderboardEnv(gym.Env):
 
         if self.runtime is not None:
             # The runtime owns the ego (RouteScenario spawns it) plus all NPCs
-            # and parked vehicles. Tear them down and let it spawn a fresh set.
+            # and parked vehicles. Tear them down before any potential
+            # load_world so the previous-world actor handles don't leak.
             self.runtime.cleanup()
+            # Now safe to switch towns (sequential mode walks the XML in
+            # order and may cross towns between consecutive resets).
+            self._switch_town_if_needed()
             self.vehicle, route_locations = self.runtime.reset(self.world)
+            # Open a fresh Bench2Drive eval record now that the scenario
+            # is built. Doing it here (not in begin_episode-on-step-1)
+            # means StatisticsManager.set_scenario sees the live
+            # RouteScenario before the criteria sensors start firing.
+            if self.eval_writer is not None:
+                self.eval_writer.begin_episode(
+                    route_scenario=self.runtime.route_scenario,
+                    config=self.runtime.configs[self.runtime.current_index],
+                    scenario_index=self.runtime.current_index,
+                )
         else:
             if self.vehicle is not None:
                 self.vehicle.destroy()
@@ -390,7 +478,26 @@ class CARLALeaderboardEnv(gym.Env):
 
         self._update_spectator()
 
-        return self.current_image.copy(), {"task_prompt": self.prompt}
+        return self.current_image.copy(), self._build_scenario_info({"task_prompt": self.prompt})
+
+    # ``final_eval_summary`` is populated by ``close()`` (auto-merge of the
+    # 220-route sweep). Trainer reads it after env.close() for wandb
+    # summary; ``None`` when no eval writer is attached.
+    final_eval_summary: dict[str, float] | None = None
+
+    def _build_scenario_info(self, base: dict[str, any]) -> dict[str, any]:
+        """Merge bench2drive scenario metadata into an info dict.
+
+        Only populated when a runtime is attached; for random-route mode
+        these keys are absent (trainer side guards with ``in info``).
+        """
+        if self.runtime is None:
+            return base
+        base["scenario_index"] = self.runtime.current_index
+        base["route_id"] = self.runtime.current_route_id
+        base["town"] = self.runtime.current_town
+        base["scenarios_total"] = self.runtime.total_scenarios
+        return base
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, any]]:
         # Apply action: action[0]=steer, action[1]=gas_or_brake (same as CarRacing)
@@ -409,6 +516,12 @@ class CARLALeaderboardEnv(gym.Env):
         # ScenarioManager._tick_scenario ordering).
         if self.runtime is not None:
             self.runtime.tick(self.world)
+
+        # Capture ego physics for metric_info.json. Done after both
+        # world.tick + scenario tick so the recorded acceleration/yaw
+        # rate already reflect this step's control.
+        if self.eval_writer is not None:
+            self.eval_writer.record_step(self.vehicle)
 
         self._update_spectator()
 
@@ -477,7 +590,7 @@ class CARLALeaderboardEnv(gym.Env):
         if len(self.physics_history) > self.history_length:
             self.physics_history = self.physics_history[-self.history_length :]
 
-        info = {
+        info = self._build_scenario_info({
             "task_prompt": self.prompt,
             "route_completion": self.route_tracker.route_completion,
             "driving_score": self._latest_driving_score,
@@ -493,7 +606,14 @@ class CARLALeaderboardEnv(gym.Env):
             "lon_jerk": self.vehicle_physics.lon_jerk,
             "angular_velocity": self.vehicle_physics.angular_velocity,
             "angular_acceleration": self.vehicle_physics.angular_acceleration,
-        }
+        })
+
+        # Flush per-route Bench2Drive eval artifacts at the episode
+        # boundary while the RouteScenario (and its criteria) are still
+        # alive — next reset would tear them down. Summary keys land on
+        # the final step's info dict as ``eval_summary``.
+        if (terminated or truncated) and self.eval_writer is not None:
+            info["eval_summary"] = self.eval_writer.end_episode()
 
         return obs, reward, terminated, truncated, info
 
@@ -530,6 +650,13 @@ class CARLALeaderboardEnv(gym.Env):
             settings.synchronous_mode = False
             self.world.apply_settings(settings)
             self.traffic_manager.set_synchronous_mode(False)
+
+        # Auto-merge the 220-route eval sweep on close so the trainer
+        # gets the final Driving Score / Success Rate / Efficiency /
+        # Comfort summary via ``final_eval_summary`` without having to
+        # know about the Bench2Drive eval mechanics.
+        if self.eval_writer is not None:
+            self.final_eval_summary = self.eval_writer.finalize_all()
 
     def _sample_random_route(self) -> tuple[list[carla.Location], carla.Transform]:
         """Sample a random ~200 m route in the current map.

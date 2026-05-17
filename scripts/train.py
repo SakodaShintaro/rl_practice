@@ -132,7 +132,7 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     log_episode_writer = None
 
     # env setup
-    env = make_env(args.env_id, args.env_factory)
+    env = make_env(args.env_id, args.env_factory, result_dir=result_dir)
     env.unwrapped.max_step_count = args.max_step_count
     env.action_space.seed(seed)
 
@@ -149,8 +149,9 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
     episode_count = 0
     best_score = -float("inf")
     best_recent_average_score = -float("inf")
-    obs, reset_info = env.reset(seed=seed)
-    task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
+    # Don't reset the env here — the first iteration of the episode loop
+    # does that with seed=seed (was: double-reset wasted route 0 in the
+    # bench2drive sequential cursor and confused the eval writer).
     step_limit = args.step_limit
     checkpoint_interval = max(1, step_limit // 10)
 
@@ -246,8 +247,16 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
 
     episode_id = 0
     while True:
-        # initialize episode
-        obs, reset_info = env.reset()
+        # Stop when the env has dispensed every scenario in a fixed playlist
+        # (e.g. Bench2Drive220 sequential mode). For envs without a finite
+        # playlist this is always False.
+        runtime = getattr(env.unwrapped, "runtime", None)
+        if runtime is not None and getattr(runtime, "is_exhausted", False):
+            break
+
+        # initialize episode (seed only the first call so the gym RNG is
+        # set once; subsequent resets keep advancing it).
+        obs, reset_info = env.reset(seed=seed) if episode_id == 0 else env.reset()
         task_prompt = reset_info["task_prompt"] if args.use_prompt else ""
 
         # initial action
@@ -373,6 +382,18 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             "elapsed_time_hour": elapsed_time_hour,
             "total_average_score": total_average_score,
         }
+        # Bench2Drive sequential-mode bookkeeping: surface which scenario
+        # just finished so a wandb sweep across the 220 routes is plottable.
+        if "scenario_index" in env_info:
+            data_dict["scenario_index"] = env_info["scenario_index"]
+            data_dict["scenarios_done"] = int(env_info["scenario_index"]) + 1
+            data_dict["scenarios_total"] = env_info["scenarios_total"]
+            data_dict[f"per_scenario/route_{env_info['route_id']}/score"] = score
+        # The env auto-flushes its Bench2Drive eval artifacts on the
+        # terminating step and exposes the summary scores here.
+        for k, v in env_info.get("eval_summary", {}).items():
+            if isinstance(v, (int, float)):
+                data_dict[f"eval/{k}"] = v
         # for animalai_env
         if "pass_mark" in env_info:
             success = float(score >= env_info["pass_mark"])
@@ -449,6 +470,16 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
         episode_id += 1
 
     env.close()
+    # env.close() auto-merges the Bench2Drive eval sweep and stashes the
+    # Driving Score / Success Rate / Efficiency / Comfort summary on the
+    # env. Push it into wandb.summary so the run is self-describing.
+    final_eval_summary = getattr(env.unwrapped, "final_eval_summary", None)
+    if final_eval_summary is not None:
+        wandb.summary.update({f"final/{k}": v for k, v in final_eval_summary.items()})
+        print("=== Bench2Drive220 final ===")
+        for k, v in final_eval_summary.items():
+            print(f"  {k}: {v}")
+
     if log_episode_file is not None:
         log_episode_file.close()
     wandb.finish()

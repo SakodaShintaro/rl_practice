@@ -79,14 +79,37 @@ def make_animalai_env() -> gym.Env:
     )
 
 
-def make_carla_env(route_xml: str | None, route_id: str | None) -> gym.Env:
-    """Hydra `_target_` factory for the raw CARLA env (no wrappers)."""
+def make_carla_env(
+    route_xml: str | None,
+    route_id: str | None,
+    sequence_mode: str,
+    start_index: int,
+    eval_output_dir: str | None,
+) -> gym.Env:
+    """Hydra `_target_` factory for the raw CARLA env (no wrappers).
+
+    ``eval_output_dir`` is injected by ``make_env`` (not the user-facing
+    config) and points at the Hydra run dir / "eval". weather.xml is
+    auto-located next to ``route_xml``.
+    """
     from vla_streaming_rl.envs.carla_leaderboard_env import CARLALeaderboardEnv
 
-    return CARLALeaderboardEnv(route_xml=route_xml, route_id=route_id)
+    return CARLALeaderboardEnv(
+        route_xml=route_xml,
+        route_id=route_id,
+        sequence_mode=sequence_mode,
+        start_index=start_index,
+        eval_output_dir=eval_output_dir,
+    )
 
 
-def make_env(env_id: str, env_factory) -> gym.Env:
+def make_env(env_id: str, env_factory, result_dir=None) -> gym.Env:
+    """Build the training env.
+
+    ``result_dir`` (when set) is the Hydra run dir; for the CARLA env it
+    is used to derive ``eval_output_dir = result_dir / "eval"`` for the
+    Bench2Drive eval artifacts.
+    """
     if env_id == "BabyAI-GoToLocal-v0":
         env = gym.make(env_id, render_mode="rgb_array", highlight=False)
         env = minigrid.wrappers.RGBImgObsWrapper(env, tile_size=32)
@@ -130,7 +153,12 @@ def make_env(env_id: str, env_factory) -> gym.Env:
         return env
 
     elif env_id == "CARLA-Leaderboard-v0":
-        env = hydra.utils.instantiate(env_factory)
+        # eval_output_dir is injected here (not via the user-facing
+        # env_factory config) so the user does not have to remember a
+        # path that is always result_dir/eval. Random-route mode passes
+        # None through unchanged → no eval writer.
+        eval_output_dir = str(result_dir / "eval") if result_dir is not None else None
+        env = hydra.utils.instantiate(env_factory, eval_output_dir=eval_output_dir)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env.unwrapped.eval_range = 100
         return env
