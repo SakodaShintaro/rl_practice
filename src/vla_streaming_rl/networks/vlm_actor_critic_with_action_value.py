@@ -8,7 +8,6 @@ from hl_gauss_pytorch import HLGaussLoss
 from torch import nn
 from torch.nn import functional as F
 
-from .action_expert import ActionExpert
 from .diffusion_utils import compute_actor_loss_with_dacer
 from .image_processor import ImageProcessor
 from .policy_head import DiffusionPolicy
@@ -24,11 +23,12 @@ class VLMActorCriticWithActionValue(nn.Module):
     """VLM backbone + DiffusionPolicy + Action Value critic.
 
     Architecture:
-    - VLM (Qwen3-VL, frozen): processes images + text, provides intermediate representations
-    - State Expert (action_expert-style): cross-attends to VLM and extracts state to compact tokens
-    - DiffusionPolicy: denoises actions conditioned on extracted state
-    - Critic: Q(state, action) with dueling architecture
-    - Stop-gradient: VLM hidden states are detached before State Expert uses them
+    - VLM (Qwen3.5/Qwen-VL, frozen unless LoRA): processes images + text.
+    - State extractor: softmax-weighted sum across every VLM hidden state
+      (embedding + each transformer layer output) -> per-token Linear projection
+      -> AdaptiveAvgPool1d to ``num_state_queries`` tokens.
+    - DiffusionPolicy: denoises actions conditioned on extracted state.
+    - Critic: Q(state, action) with dueling architecture.
     """
 
     def __init__(
@@ -57,8 +57,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         max_new_tokens: int,
         max_prompt_tokens: int,
         pad_token_id: int,
-        state_expert_hidden_size: int,
-        state_mode: str,
         num_state_queries: int,
         actor_hidden_dim: int,
         actor_block_num: int,
@@ -121,7 +119,7 @@ class VLMActorCriticWithActionValue(nn.Module):
         self.max_prompt_tokens = max_prompt_tokens
         self.pad_token_id = pad_token_id
 
-        # Determine which VLM layers have KV cache for cross-attention
+        # Index attention layers for ``_extract_kv`` (text generation).
         if self.is_qwen35:
             layer_types = vlm_cfg.layer_types
             self.attn_layer_indices = [
@@ -129,53 +127,15 @@ class VLMActorCriticWithActionValue(nn.Module):
             ]
         else:
             self.attn_layer_indices = list(range(num_layers))
-        num_expert_layers = len(self.attn_layer_indices)
 
-        # Shared rotary embedding from VLM
-        state_expert_hidden = state_expert_hidden_size
-        # PEFT wraps the model with an extra .model level
-        if self.use_lora:
-            rotary_emb = self.vlm_model.model.model.language_model.rotary_emb
-        else:
-            rotary_emb = self.vlm_model.model.language_model.rotary_emb
-
-        # State computation mode
-        self.state_mode = state_mode
         self.num_state_queries = num_state_queries
-
         self.video_encoder = VideoEncoder()
 
-        if self.state_mode == "expert":
-            self.state_query_tokens = nn.Parameter(
-                torch.randn(1, num_state_queries, state_expert_hidden) * 0.02
-            )
-            state_dim = num_state_queries * state_expert_hidden
-            # State Expert: cross-attends to VLM KV cache to produce a compact state
-            self.state_expert = ActionExpert(
-                num_layers=num_expert_layers,
-                expert_hidden_size=state_expert_hidden,
-                num_attention_heads=vlm_cfg.num_attention_heads,
-                num_kv_heads=vlm_cfg.num_key_value_heads,
-                head_dim=vlm_cfg.head_dim,
-                rms_norm_eps=vlm_cfg.rms_norm_eps,
-                rotary_emb=rotary_emb,
-            )
-        elif self.state_mode == "projection":
-            state_out_dim = 4
-            self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
-            # Adaptive avg pool fixes the token count to num_state_queries, so
-            # state_dim is determined purely by config (no dummy forward needed).
-            state_dim = num_state_queries * state_out_dim
-        elif self.state_mode == "special_token":
-            # Learnable token appended at the end of the context. Its final-layer
-            # hidden state is used as the state. VLM stays as-is; gradient flows
-            # back to this embedding through the (frozen-weight) VLM forward.
-            self.state_token_embed = nn.Parameter(
-                (torch.randn(1, 1, vlm_hidden_size) * 0.02).to(device=device, dtype=torch.bfloat16)
-            )
-            state_dim = vlm_hidden_size
-        else:
-            raise ValueError(f"Unknown state_mode: {self.state_mode}")
+        state_out_dim = 4
+        self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
+        # AdaptiveAvgPool1d fixes the token count to num_state_queries, so
+        # state_dim is determined purely by config.
+        state_dim = num_state_queries * state_out_dim
 
         # Diffusion policy head: action denoising conditioned on state
         self.policy_head = DiffusionPolicy(
@@ -208,13 +168,7 @@ class VLMActorCriticWithActionValue(nn.Module):
             predictor_block_num=predictor_block_num,
         )
         # Project state output to match FluxDiT context_in_dim
-        if self.state_mode == "expert":
-            predictor_in_dim = state_expert_hidden
-        elif self.state_mode == "projection":
-            predictor_in_dim = 4
-        else:  # special_token
-            predictor_in_dim = vlm_hidden_size
-        self.state_to_predictor_proj = nn.Linear(predictor_in_dim, hidden_image_dim)
+        self.state_to_predictor_proj = nn.Linear(state_out_dim, hidden_image_dim)
 
         self.value_range = 1.0
         if self.num_bins > 1:
@@ -499,91 +453,38 @@ class VLMActorCriticWithActionValue(nn.Module):
         return self.vlm_model.forward(**forward_kwargs)
 
     def _vlm_forward(self, images: torch.Tensor, task_prompts: list[str]):
-        """Run VLM forward. Returns past_key_values (and state for non-expert modes)."""
+        """Run VLM forward and return (state, past_key_values)."""
         inputs = self._input_cache(images, task_prompts)
-
         inputs_embeds = self._build_inputs_embeds(inputs)
 
-        if self.state_mode == "special_token":
-            inputs, inputs_embeds = self._append_state_token(inputs, inputs_embeds)
-
-        # special_token mode needs gradient through the (frozen-weight) VLM
-        # so the appended state-token embedding can train; other modes can use
-        # no_grad when no LoRA adapter sits inside the VLM.
-        run_with_grad = self.use_lora or self.state_mode == "special_token"
-        with nullcontext() if run_with_grad else torch.no_grad():
+        # When the VLM weights themselves are frozen we can save a lot of memory
+        # by skipping autograd through them.
+        with nullcontext() if self.use_lora else torch.no_grad():
             outputs = self._vlm_language_forward(inputs, inputs_embeds)
 
         # Store last input_id for text generation seeding
         self._last_input_ids = inputs["input_ids"]
 
-        if self.state_mode == "projection":
-            hidden = self._weighted_hidden(outputs.hidden_states)
-            state = self.state_out_proj(hidden)  # (B, T, state_out_dim)
-            # AdaptiveAvgPool1d folds the variable T into a fixed num_state_queries
-            # so the downstream policy/critic sees a constant state dim.
-            state = F.adaptive_avg_pool1d(state.transpose(1, 2), self.num_state_queries).transpose(
-                1, 2
-            )  # (B, num_state_queries, state_out_dim)
-            return state.flatten(start_dim=1), outputs.past_key_values
-
-        if self.state_mode == "special_token":
-            # Final layer, last position (the appended state token).
-            hidden_last = outputs.hidden_states[-1]
-            state = hidden_last[:, -1, :].to(torch.float32)
-            return state, outputs.past_key_values
-
-        return outputs.past_key_values
-
-    def _append_state_token(
-        self, inputs: dict, inputs_embeds: torch.Tensor
-    ) -> tuple[dict, torch.Tensor]:
-        """Append the learnable state token to inputs_embeds (and extend input_ids/mask).
-
-        The placeholder id (0) is only used by ``compute_3d_position_ids`` to
-        decide if a position is an image token; image_token_id is not 0, so 0
-        is treated as ordinary text and gets a fresh sequential position.
-        """
-        B = inputs_embeds.shape[0]
-        state_embed = self.state_token_embed.expand(B, -1, -1).to(inputs_embeds.dtype)
-        new_inputs_embeds = torch.cat([inputs_embeds, state_embed], dim=1)
-
-        device = inputs["input_ids"].device
-        pad_id = torch.zeros(B, 1, dtype=inputs["input_ids"].dtype, device=device)
-        pad_mask = torch.ones(B, 1, dtype=inputs["attention_mask"].dtype, device=device)
-        new_inputs = {
-            **inputs,
-            "input_ids": torch.cat([inputs["input_ids"], pad_id], dim=1),
-            "attention_mask": torch.cat([inputs["attention_mask"], pad_mask], dim=1),
-        }
-        return new_inputs, new_inputs_embeds
-
-    def _compute_state_from_kv(self, vlm_past_kv) -> torch.Tensor:
-        """Run state query tokens through StateExpert with zero adaRMS conditioning."""
-        vlm_kv_list, vlm_seq_len = self._extract_kv(vlm_past_kv)
-        B = vlm_kv_list[0][0].shape[0]
-        query = self.state_query_tokens.expand(B, -1, -1)
-        state_expert_hidden = self.state_query_tokens.shape[-1]
-        adarms_cond = torch.zeros(B, state_expert_hidden, device=self.device)
-        state_seq = self.state_expert(query, vlm_kv_list, vlm_seq_len, adarms_cond)
-        return state_seq.flatten(start_dim=1)
+        hidden = self._weighted_hidden(outputs.hidden_states)
+        state = self.state_out_proj(hidden)  # (B, T, state_out_dim)
+        # AdaptiveAvgPool1d folds the variable T into a fixed num_state_queries
+        # so the downstream policy/critic sees a constant state dim.
+        state = F.adaptive_avg_pool1d(state.transpose(1, 2), self.num_state_queries).transpose(
+            1, 2
+        )  # (B, num_state_queries, state_out_dim)
+        return state.flatten(start_dim=1), outputs.past_key_values
 
     def _forward_state(
         self, obs: torch.Tensor, task_prompts: list[str]
     ) -> tuple[torch.Tensor, object]:
         """Run VLM forward and compute state. Returns (state, vlm_past_kv)."""
-        if self.state_mode == "expert":
-            vlm_past_kv = self._vlm_forward(obs, task_prompts)
-            state = self._compute_state_from_kv(vlm_past_kv)
-            return state, vlm_past_kv
-        state, vlm_past_kv = self._vlm_forward(obs, task_prompts)
-        return state, vlm_past_kv
+        return self._vlm_forward(obs, task_prompts)
 
     def _extract_kv(self, vlm_past_kv) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], int]:
-        """Extract (K, V) pairs for the attention layers used by ActionExpert.
+        """Extract (K, V) pairs for the VLM attention layers (used by text generation).
 
         Returns:
-            vlm_kv_list: list of (K, V) tuples, one per expert layer
+            vlm_kv_list: list of (K, V) tuples, one per attention layer
             vlm_seq_len: sequence length of the VLM KV cache
         """
         kv_list = []
@@ -812,10 +713,7 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _state_for_predictor(self, state: torch.Tensor) -> torch.Tensor:
         """Reshape and project state for StatePredictionHead context."""
         B = state.shape[0]
-        if self.state_mode in ("expert", "projection"):
-            x = state.view(B, self.num_state_queries, -1)
-        else:  # special_token: state is (B, vlm_hidden_size)
-            x = state.view(B, 1, -1)
+        x = state.view(B, self.num_state_queries, -1)
         return self.state_to_predictor_proj(x)
 
     def _compute_sequence_loss(self, data, curr_state):

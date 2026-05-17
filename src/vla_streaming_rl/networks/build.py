@@ -97,8 +97,6 @@ def build_network(
             max_new_tokens=args.max_new_tokens,
             max_prompt_tokens=args.max_prompt_tokens,
             pad_token_id=args.pad_token_id,
-            state_expert_hidden_size=args.state_expert_hidden_size,
-            state_mode=args.state_mode,
             num_state_queries=args.num_state_queries,
             actor_hidden_dim=args.actor_hidden_dim,
             actor_block_num=args.actor_block_num,
