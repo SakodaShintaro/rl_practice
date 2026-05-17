@@ -18,7 +18,6 @@ def build_network(
     observation_space_shape: tuple[int, ...],
     action_space_shape: tuple[int, ...],
     parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
-    task_prompt: str,
     device: torch.device,
     compile: bool,
 ) -> nn.Module:
@@ -78,7 +77,6 @@ def build_network(
             observation_space_shape=observation_space_shape,
             action_space_shape=action_space_shape,
             parse_action_text=parse_action_text,
-            task_prompt=task_prompt,
             gamma=args.gamma,
             num_bins=args.num_bins,
             seq_len=args.seq_len,

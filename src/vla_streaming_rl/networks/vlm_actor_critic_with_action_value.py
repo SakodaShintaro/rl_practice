@@ -16,7 +16,7 @@ from .prediction_head import StatePredictionHead
 from .reward_processor import RewardProcessor
 from .value_head import ActionValueHead, maybe_update_hl_gauss_range
 from .video_encoder import VideoEncoder
-from .vlm_backbone import is_qwen35, load_model, prepare_vlm_inputs
+from .vlm_backbone import is_qwen35, load_model
 from .vlm_input_cache import VLMInputCache
 
 
@@ -37,7 +37,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         observation_space_shape: tuple[int],
         action_space_shape: tuple[int],
         parse_action_text: Callable[[str], tuple[np.ndarray, bool]] | None,
-        task_prompt: str,
         gamma: float,
         num_bins: int,
         seq_len: int,
@@ -117,7 +116,6 @@ class VLMActorCriticWithActionValue(nn.Module):
         # Input-independent learnable logits over all (embedding + per-layer) hidden
         # states; softmax-weighted sum forms the representation used downstream.
         self.layer_logits = nn.Parameter(torch.zeros(num_layers + 1, device=device))
-        initial_task_prompt = task_prompt if text_action_mode != "none" else ""
         self.parse_action_text = parse_action_text
         self.max_new_tokens = max_new_tokens
         self.max_prompt_tokens = max_prompt_tokens
@@ -165,16 +163,15 @@ class VLMActorCriticWithActionValue(nn.Module):
         elif self.state_mode == "projection":
             state_out_dim = 4
             self.state_out_proj = nn.Linear(vlm_hidden_size, state_out_dim).to(device)
-            self._target_seq_len, state_dim = self._compute_state_dim(initial_task_prompt)
-            torch.cuda.empty_cache()
+            # Adaptive avg pool fixes the token count to num_state_queries, so
+            # state_dim is determined purely by config (no dummy forward needed).
+            state_dim = num_state_queries * state_out_dim
         elif self.state_mode == "special_token":
             # Learnable token appended at the end of the context. Its final-layer
             # hidden state is used as the state. VLM stays as-is; gradient flows
             # back to this embedding through the (frozen-weight) VLM forward.
             self.state_token_embed = nn.Parameter(
-                (torch.randn(1, 1, vlm_hidden_size) * 0.02).to(
-                    device=device, dtype=torch.bfloat16
-                )
+                (torch.randn(1, 1, vlm_hidden_size) * 0.02).to(device=device, dtype=torch.bfloat16)
             )
             state_dim = vlm_hidden_size
         else:
@@ -418,31 +415,9 @@ class VLMActorCriticWithActionValue(nn.Module):
         Hidden values are detached (the VLM is frozen); gradient flows only into
         ``self.layer_logits`` through the softmax weights.
         """
-        stacked = torch.stack(
-            [h.to(torch.float32).detach() for h in hidden_states], dim=0
-        )
+        stacked = torch.stack([h.to(torch.float32).detach() for h in hidden_states], dim=0)
         weights = F.softmax(self.layer_logits, dim=0)
         return (weights.view(-1, 1, 1, 1) * stacked).sum(dim=0)
-
-    @torch.no_grad()
-    def _compute_state_dim(self, task_prompt: str) -> tuple[int, int]:
-        """Compute target sequence length and state dimension via dummy forward pass."""
-        dummy_images = torch.zeros(
-            1, self.seq_len, *self.observation_space_shape, device=self.device
-        )
-        inputs = prepare_vlm_inputs(
-            self.processor,
-            dummy_images,
-            [task_prompt],
-            self.is_qwen35,
-            self.image_mode,
-        )
-        inputs_embeds = self._build_inputs_embeds(inputs)
-        output = self._vlm_language_forward(inputs, inputs_embeds)
-        hidden = self._weighted_hidden(output["hidden_states"])
-        target_seq_len = hidden.shape[1]
-        state_dim = target_seq_len * self.state_out_proj.out_features
-        return target_seq_len, state_dim
 
     def _get_visual(self) -> nn.Module:
         """Get the visual encoder from the VLM model (handles PEFT wrapping)."""
@@ -544,18 +519,12 @@ class VLMActorCriticWithActionValue(nn.Module):
 
         if self.state_mode == "projection":
             hidden = self._weighted_hidden(outputs.hidden_states)
-            state = self.state_out_proj(hidden)
-            seq_len = state.shape[1]
-            if seq_len > self._target_seq_len:
-                state = state[:, seq_len - self._target_seq_len :, :]
-            elif seq_len < self._target_seq_len:
-                pad = torch.zeros(
-                    state.shape[0],
-                    self._target_seq_len - seq_len,
-                    state.shape[2],
-                    device=state.device,
-                )
-                state = torch.cat([pad, state], dim=1)
+            state = self.state_out_proj(hidden)  # (B, T, state_out_dim)
+            # AdaptiveAvgPool1d folds the variable T into a fixed num_state_queries
+            # so the downstream policy/critic sees a constant state dim.
+            state = F.adaptive_avg_pool1d(state.transpose(1, 2), self.num_state_queries).transpose(
+                1, 2
+            )  # (B, num_state_queries, state_out_dim)
             return state.flatten(start_dim=1), outputs.past_key_values
 
         if self.state_mode == "special_token":
@@ -843,10 +812,8 @@ class VLMActorCriticWithActionValue(nn.Module):
     def _state_for_predictor(self, state: torch.Tensor) -> torch.Tensor:
         """Reshape and project state for StatePredictionHead context."""
         B = state.shape[0]
-        if self.state_mode == "expert":
+        if self.state_mode in ("expert", "projection"):
             x = state.view(B, self.num_state_queries, -1)
-        elif self.state_mode == "projection":
-            x = state.view(B, self._target_seq_len, -1)
         else:  # special_token: state is (B, vlm_hidden_size)
             x = state.view(B, 1, -1)
         return self.state_to_predictor_proj(x)

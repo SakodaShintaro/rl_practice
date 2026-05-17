@@ -2,7 +2,7 @@
 use_lora: 0
 vlm_model_id: Qwen/Qwen3.5-0.8B
 state_expert_hidden_size: 576
-num_state_queries: 1
+num_state_queries: 219
 state_mode: projection
 text_action_mode: none
 use_prompt: 1
