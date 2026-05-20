@@ -7,6 +7,7 @@ scenarios, ``BackgroundBehavior`` traffic, parked vehicles) inside a
 manager — this runtime exposes a small ``reset``/``tick``/``cleanup``
 surface that the env can drive directly so NPC behavior matches eval.
 """
+
 import os
 import threading
 
@@ -25,10 +26,21 @@ class Bench2DriveRuntime:
     - ``"random"`` (legacy): pick a random config from the XML on every
       ``reset``. All configs must share one town because the env loads the
       world once at construction.
-    - ``"sequential"``: walk the configs in XML order from
-      ``start_index``. The town can vary between configs; the env is
-      expected to peek ``peek_next_town()`` before each reset and reload the
-      world if needed (this is the Bench2Drive220 driver mode).
+    - ``"sequential"``: walk the configs in **town-grouped** order from
+      ``start_index``. Town grouping (sort by ``(town, name)`` at
+      construction) minimizes ``load_world`` invocations — Town12 / 13
+      reloads take ~30 s each, so scattering town flips throughout the
+      sweep wastes wall-clock time. Bench2Drive eval aggregation is
+      set-wise (``eval_writer.finalize_all`` globs ``*_res.json`` and
+      sorts by ``route_id``), so reordering does not affect the final
+      Driving Score / Success Rate / Efficiency / Comfort numbers. The
+      env still calls ``peek_next_town`` before every reset and reloads
+      the world only when the next config's town actually differs.
+
+    ``loop`` (sequential only) wraps the cursor back to 0 after the last
+    config so training can continue indefinitely. Without ``loop`` the
+    sequential mode raises ``RuntimeError`` once exhausted (the
+    Bench2Drive220 driver / fixed-eval-sweep usage).
     """
 
     # build_scenarios runs in a background thread (mirrors eval's
@@ -45,6 +57,7 @@ class Bench2DriveRuntime:
         route_id: str | int | None,
         sequence_mode: str,
         start_index: int,
+        loop: bool,
     ):
         # RouteScenario glob's srunner/scenarios/*.py via this env var to
         # discover scenario classes named in the XML — without it, no
@@ -55,9 +68,15 @@ class Bench2DriveRuntime:
                 "so RouteScenario can discover scenario classes"
             )
         if sequence_mode not in ("random", "sequential"):
-            raise ValueError(f"sequence_mode must be 'random' or 'sequential', got {sequence_mode!r}")
+            raise ValueError(
+                f"sequence_mode must be 'random' or 'sequential', got {sequence_mode!r}"
+            )
         if sequence_mode == "sequential" and route_id is not None:
-            raise ValueError("sequence_mode='sequential' iterates the full XML; route_id must be None")
+            raise ValueError(
+                "sequence_mode='sequential' iterates the full XML; route_id must be None"
+            )
+        if loop and sequence_mode != "sequential":
+            raise ValueError("loop=True is only meaningful with sequence_mode='sequential'")
 
         self.client = client
         self.traffic_manager_port = traffic_manager_port
@@ -68,6 +87,13 @@ class Bench2DriveRuntime:
             raise ValueError(f"no routes parsed from {route_xml} (subset={subset!r})")
 
         self.sequence_mode = sequence_mode
+        self.loop = loop
+        # Town-group the configs so cross-town reloads (~30 s on Town12/13)
+        # only happen at block boundaries. start_index is interpreted
+        # against this sorted order — see class docstring.
+        if sequence_mode == "sequential":
+            self.configs.sort(key=lambda c: (c.town, str(c.name)))
+
         towns = {c.town for c in self.configs}
         if sequence_mode == "random" and len(towns) > 1:
             raise ValueError(
@@ -76,9 +102,7 @@ class Bench2DriveRuntime:
             )
 
         if not 0 <= start_index < len(self.configs):
-            raise ValueError(
-                f"start_index={start_index} out of range [0, {len(self.configs)})"
-            )
+            raise ValueError(f"start_index={start_index} out of range [0, {len(self.configs)})")
         self._cursor = start_index
 
         # Per-episode metadata, filled by reset(). Town is read off the
@@ -97,7 +121,9 @@ class Bench2DriveRuntime:
 
     @property
     def is_exhausted(self) -> bool:
-        """True only in sequential mode once every config has been dispensed."""
+        """True only in non-looping sequential mode once every config has been dispensed."""
+        if self.loop:
+            return False
         return self.sequence_mode == "sequential" and self._cursor >= len(self.configs)
 
     def peek_next_town(self) -> str:
@@ -110,18 +136,16 @@ class Bench2DriveRuntime:
         if self.sequence_mode == "sequential":
             if self.is_exhausted:
                 raise RuntimeError("sequential runtime exhausted; no next town")
-            return self.configs[self._cursor].town
+            return self.configs[self._cursor % len(self.configs)].town
         # Random mode: every config shares a town (enforced in __init__).
         return self.configs[0].town
 
-    def reset(
-        self, world: carla.World
-    ) -> tuple[carla.Vehicle, list[carla.Location]]:
+    def reset(self, world: carla.World) -> tuple[carla.Vehicle, list[carla.Location]]:
         """Build a fresh ``RouteScenario`` for ``world`` and return ``(ego, route_locations)``."""
         if self.sequence_mode == "sequential":
             if self.is_exhausted:
                 raise RuntimeError("sequential runtime exhausted; cannot reset")
-            index = self._cursor
+            index = self._cursor % len(self.configs)
             self._cursor += 1
         else:
             index = int(np.random.randint(len(self.configs)))
@@ -155,9 +179,7 @@ class Bench2DriveRuntime:
         # 300 s CARLA RPC timeout (e.g. AccidentTwoWays on Town12) would
         # otherwise stall env.step for the full timeout.
         self._build_stop.clear()
-        self._build_thread = threading.Thread(
-            target=self._build_loop, args=(ego,), daemon=True
-        )
+        self._build_thread = threading.Thread(target=self._build_loop, args=(ego,), daemon=True)
         self._build_thread.start()
 
         route_locations = [t.location for (t, _) in self.route_scenario.route]

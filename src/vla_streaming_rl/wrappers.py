@@ -84,6 +84,7 @@ def make_carla_env(
     route_id: str | None,
     sequence_mode: str,
     start_index: int,
+    loop: bool,
     eval_output_dir: str | None,
 ) -> gym.Env:
     """Hydra `_target_` factory for the raw CARLA env (no wrappers).
@@ -99,6 +100,7 @@ def make_carla_env(
         route_id=route_id,
         sequence_mode=sequence_mode,
         start_index=start_index,
+        loop=loop,
         eval_output_dir=eval_output_dir,
     )
 

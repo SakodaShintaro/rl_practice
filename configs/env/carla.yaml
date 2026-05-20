@@ -11,11 +11,16 @@ env_factory:
   #   Only valid with sequence_mode='random'. null means "pick a random
   #   route from the XML each episode".
   # - sequence_mode: 'random' (legacy: random pick each reset, single-town
-  #   XML only) or 'sequential' (walk routes in XML order starting at
-  #   start_index; towns may differ between routes and the env reloads the
-  #   world on town change). 'sequential' is the bench2drive220 driver.
-  # - start_index: 0-indexed cursor for sequential mode. Use this to
-  #   resume from a specific position (e.g. after a crash).
+  #   XML only) or 'sequential' (walk routes in **town-grouped** order
+  #   starting at start_index; town flips only at block boundaries to
+  #   minimize ~30 s Town12/13 reloads). 'sequential' is the bench2drive220
+  #   driver.
+  # - start_index: 0-indexed cursor for sequential mode (indexes into the
+  #   town-sorted config list, not raw XML order). Use this to resume
+  #   from a specific position (e.g. after a crash).
+  # - loop: when true (sequential only), wraps the cursor back to 0
+  #   after the last config so training continues indefinitely. Leave
+  #   false for the Bench2Drive220 fixed-sweep usage.
   #
   # The Bench2Drive eval artifacts (eval_res/, eval_viz/) are written
   # automatically under the Hydra run dir whenever route_xml is set —
@@ -24,3 +29,4 @@ env_factory:
   route_id: null
   sequence_mode: random
   start_index: 0
+  loop: true

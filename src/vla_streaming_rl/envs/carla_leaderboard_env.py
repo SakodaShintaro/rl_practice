@@ -150,6 +150,7 @@ class CARLALeaderboardEnv(gym.Env):
         route_id: str | None,
         sequence_mode: str,
         start_index: int,
+        loop: bool,
         eval_output_dir: str | None,
     ):
         """Create the env.
@@ -162,11 +163,16 @@ class CARLALeaderboardEnv(gym.Env):
                 means "pick a random route from the XML each episode".
             sequence_mode: ``"random"`` (legacy: pick a random route each
                 reset; requires single-town XML) or ``"sequential"`` (walk
-                the XML in order starting at ``start_index``; towns may
-                differ between routes and the env will reload the world on
-                town change).
+                the XML in **town-grouped** order starting at
+                ``start_index``; town flips happen only at block
+                boundaries, minimizing ``load_world`` overhead).
             start_index: Starting cursor for ``sequence_mode='sequential'``
-                (0-indexed into the XML). Ignored otherwise.
+                (0-indexed into the town-sorted config list). Ignored
+                otherwise.
+            loop: When ``True`` and ``sequence_mode='sequential'``, wrap
+                the cursor back to 0 after the last config so training
+                runs forever. When ``False``, sequential mode raises once
+                exhausted (the Bench2Drive220 fixed-sweep usage).
             eval_output_dir: If set, the env writes Bench2Drive-eval-
                 compatible artifacts (``eval_res/{idx:03d}_res.json``,
                 ``eval_viz/{save_name}/metric_info.json``) under this
@@ -216,6 +222,7 @@ class CARLALeaderboardEnv(gym.Env):
                 route_id=route_id,
                 sequence_mode=sequence_mode,
                 start_index=start_index,
+                loop=loop,
             )
             initial_town = self.runtime.peek_next_town()
         else:
