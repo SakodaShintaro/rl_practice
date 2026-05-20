@@ -239,6 +239,22 @@ def main(args: DictConfig, exp_name: str, seed: int, result_dir: Path) -> None:
             pad_token_id=args.pad_token_id,
             goal_predictor=goal_predictor,
         )
+    elif args.agent_type == "simlingo":
+        from vla_streaming_rl.agents.simlingo import SimLingoAgent
+
+        # ``simlingo.checkpoint`` defaults to null in agent/simlingo.yaml
+        # so the agent falls back to a HF snapshot_download. Wrapping
+        # None in Path() would crash — let SimLingoAgent see None.
+        agent = SimLingoAgent(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            env=env,
+            checkpoint_path=(
+                Path(args.simlingo.checkpoint) if args.simlingo.checkpoint else None
+            ),
+            scratch_dir=(result_dir / "simlingo_scratch") if result_dir is not None
+                        else Path("/tmp/simlingo_scratch"),
+        )
     else:
         raise ValueError(f"Unknown agent type: {args.agent_type}")
 
