@@ -227,7 +227,6 @@ class CARLALeaderboardEnv(gym.Env):
         # next to the route XML in every Bench2Drive layout we ship.
         self.eval_writer: Bench2DriveEvalWriter | None = None
         if eval_output_dir is not None and self.runtime is not None:
-
             weather_xml = Path(route_xml).parent / "weather.xml"
             if not weather_xml.exists():
                 raise FileNotFoundError(
@@ -260,11 +259,20 @@ class CARLALeaderboardEnv(gym.Env):
         self.third_person_camera = None
         self.collision_sensor = None
         self.lane_invasion_sensor = None
+        self.gnss_sensor = None
+        self.imu_sensor = None
 
         # Sensor data
         self.current_image = None
         self.third_person_image = None
         self.lane_invasion_history = []
+        # Latest raw sensor readings exposed via info["sensors"] for VLA agents
+        # that need leaderboard-compatible GNSS / IMU / camera frames. Tuple
+        # shape mirrors the Bench2Drive AutonomousAgent sensors() contract:
+        # (frame_idx, payload). None until the first post-reset tick fills them.
+        self._last_camera: tuple[int, np.ndarray] | None = None
+        self._last_gnss: tuple[int, np.ndarray] | None = None
+        self._last_imu: tuple[int, np.ndarray] | None = None
 
         # Route tracker (initialized in reset)
         self.route_tracker: RouteTracker | None = None
@@ -357,6 +365,8 @@ class CARLALeaderboardEnv(gym.Env):
             self.third_person_camera,
             self.collision_sensor,
             self.lane_invasion_sensor,
+            self.gnss_sensor,
+            self.imu_sensor,
         ):
             if sensor is not None:
                 sensor.stop()
@@ -448,6 +458,19 @@ class CARLALeaderboardEnv(gym.Env):
         )
         self.lane_invasion_sensor.listen(lambda event: self._on_lane_invasion(event))
 
+        # GNSS / IMU — exposed via info["sensors"] for VLA agents that need
+        # leaderboard-compatible pose / inertial readings. Default attributes
+        # match Bench2Drive's AutonomousAgent sensor specs.
+        gnss_bp = blueprint_library.find("sensor.other.gnss")
+        self.gnss_sensor = self.world.spawn_actor(
+            gnss_bp, carla.Transform(), attach_to=self.vehicle
+        )
+        self.gnss_sensor.listen(lambda data: self._on_gnss(data))
+
+        imu_bp = blueprint_library.find("sensor.other.imu")
+        self.imu_sensor = self.world.spawn_actor(imu_bp, carla.Transform(), attach_to=self.vehicle)
+        self.imu_sensor.listen(lambda data: self._on_imu(data))
+
         # Initialization
         self.episode_step = 0
         self.lane_invasion_history = []
@@ -458,14 +481,22 @@ class CARLALeaderboardEnv(gym.Env):
         self._latest_driving_score = 0.0
         self._latest_off_route_pct = 0.0
         self.current_image = None
+        self._last_camera = None
+        self._last_gnss = None
+        self._last_imu = None
         self.negative_reward_count = 0
         self.vehicle_physics = VehiclePhysics.create()
         self.physics_history = []
 
-        # Get the first frame
+        # Wait until camera, GNSS and IMU have all delivered at least one
+        # frame so info["sensors"] handed back from reset is fully populated.
         while True:
             self.world.tick()
-            if self.current_image is not None:
+            if (
+                self.current_image is not None
+                and self._last_gnss is not None
+                and self._last_imu is not None
+            ):
                 break
             time.sleep(0.1)
 
@@ -478,7 +509,9 @@ class CARLALeaderboardEnv(gym.Env):
 
         self._update_spectator()
 
-        return self.current_image.copy(), self._build_scenario_info({"task_prompt": self.prompt})
+        return self.current_image.copy(), self._build_scenario_info(
+            {"task_prompt": self.prompt, "sensors": self._build_sensors_dict()}
+        )
 
     # ``final_eval_summary`` is populated by ``close()`` (auto-merge of the
     # 220-route sweep). Trainer reads it after env.close() for wandb
@@ -590,23 +623,26 @@ class CARLALeaderboardEnv(gym.Env):
         if len(self.physics_history) > self.history_length:
             self.physics_history = self.physics_history[-self.history_length :]
 
-        info = self._build_scenario_info({
-            "task_prompt": self.prompt,
-            "route_completion": self.route_tracker.route_completion,
-            "driving_score": self._latest_driving_score,
-            "score_route": self._latest_score_route,
-            "score_penalty": self._latest_score_penalty,
-            "infractions": self.infractions.copy(),
-            "velocity": self.vehicle_physics.velocity,
-            "velocity_kph": self.vehicle_physics.velocity_kph,
-            "acceleration": self.vehicle_physics.acceleration,
-            "lon_acceleration": self.vehicle_physics.lon_acceleration,
-            "lat_acceleration": self.vehicle_physics.lat_acceleration,
-            "jerk": self.vehicle_physics.jerk,
-            "lon_jerk": self.vehicle_physics.lon_jerk,
-            "angular_velocity": self.vehicle_physics.angular_velocity,
-            "angular_acceleration": self.vehicle_physics.angular_acceleration,
-        })
+        info = self._build_scenario_info(
+            {
+                "task_prompt": self.prompt,
+                "sensors": self._build_sensors_dict(),
+                "route_completion": self.route_tracker.route_completion,
+                "driving_score": self._latest_driving_score,
+                "score_route": self._latest_score_route,
+                "score_penalty": self._latest_score_penalty,
+                "infractions": self.infractions.copy(),
+                "velocity": self.vehicle_physics.velocity,
+                "velocity_kph": self.vehicle_physics.velocity_kph,
+                "acceleration": self.vehicle_physics.acceleration,
+                "lon_acceleration": self.vehicle_physics.lon_acceleration,
+                "lat_acceleration": self.vehicle_physics.lat_acceleration,
+                "jerk": self.vehicle_physics.jerk,
+                "lon_jerk": self.vehicle_physics.lon_jerk,
+                "angular_velocity": self.vehicle_physics.angular_velocity,
+                "angular_acceleration": self.vehicle_physics.angular_acceleration,
+            }
+        )
 
         # Flush per-route Bench2Drive eval artifacts at the episode
         # boundary while the RouteScenario (and its criteria) are still
@@ -634,6 +670,8 @@ class CARLALeaderboardEnv(gym.Env):
             self.third_person_camera,
             self.collision_sensor,
             self.lane_invasion_sensor,
+            self.gnss_sensor,
+            self.imu_sensor,
         ):
             if sensor is not None:
                 sensor.stop()
@@ -808,11 +846,49 @@ class CARLALeaderboardEnv(gym.Env):
         self.world.get_spectator().set_transform(spectator_transform)
 
     def _process_image(self, image):
-        array = np.frombuffer(image.raw_data, dtype=np.uint8)
-        array = array.reshape((image.height, image.width, 4))
-        array = array[:, :, [2, 1, 0]]
-        array = array.transpose(2, 0, 1).astype(np.float32) / 255.0
-        self.current_image = array
+        array = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(
+            (image.height, image.width, 4)
+        )
+        # Keep BGR HWC uint8 alongside the RGB CHW float32 obs so VLA agents
+        # that expect the leaderboard sensor format can read it from
+        # info["sensors"]["rgb"] without a second decode pass.
+        bgr = array[:, :, :3].copy()
+        self._last_camera = (image.frame, bgr)
+        self.current_image = bgr[:, :, ::-1].transpose(2, 0, 1).astype(np.float32) / 255.0
+
+    def _on_gnss(self, data):
+        self._last_gnss = (
+            data.frame,
+            np.array([data.latitude, data.longitude, data.altitude], dtype=np.float64),
+        )
+
+    def _on_imu(self, data):
+        acc = data.accelerometer
+        gyr = data.gyroscope
+        self._last_imu = (
+            data.frame,
+            np.array(
+                [acc.x, acc.y, acc.z, gyr.x, gyr.y, gyr.z, float(data.compass)],
+                dtype=np.float32,
+            ),
+        )
+
+    def _build_sensors_dict(self) -> dict[str, tuple[int, object]]:
+        """Latest sensor snapshot in Bench2Drive AutonomousAgent format.
+
+        Speed comes from ``vehicle.get_velocity()`` rather than a dedicated
+        sensor; we tag it with the camera frame so all four entries share a
+        consistent monotonic index for VLA agents that want to skip stale
+        readings.
+        """
+        vel = self.vehicle.get_velocity()
+        speed_mps = float(np.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z))
+        return {
+            "rgb": self._last_camera,
+            "gps": self._last_gnss,
+            "imu": self._last_imu,
+            "speed": (self._last_camera[0], {"speed": speed_mps}),
+        }
 
     def _process_third_person_image(self, image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
